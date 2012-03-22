@@ -2,6 +2,7 @@
 mkdir -p kernel/usr/initramfs
 rm -rf kernel/usr/initramfs/*
 cp -R ../initramfs_galaxys2_ics/* kernel/usr/initramfs
+chmod -R g-w kernel/usr/initramfs/*
 rm $(find kernel/usr/initramfs -name EMPTY_DIRECTORY -print)
 rm -rf $(find kernel/usr/initramfs -name .git -print)
 make dd_i777_defconfig
