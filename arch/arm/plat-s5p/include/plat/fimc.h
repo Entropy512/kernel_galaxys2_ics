@@ -51,8 +51,8 @@ enum fimc_cam_index {
 	CAMERA_PAR_B	= 1,
 	CAMERA_CSI_C	= 2,
 	CAMERA_CSI_D	= 3,
-	CAMERA_WB 	= 4,
-	CAMERA_WB_B 	= 5,
+	CAMERA_WB	= 4,
+	CAMERA_WB_B	= 5,
 	CAMERA_PATTERN	= 6,
 };
 
@@ -81,6 +81,7 @@ struct s3c_platform_camera {
 
 	const char			srclk_name[16];	/* source of mclk name */
 	const char			clk_name[16];	/* mclk name */
+	const char*			(*get_clk_name)(void);	/* mclk name */
 	u32				clk_rate;	/* mclk ratio */
 	struct clk			*clk;		/* mclk */
 	int				line_length;	/* max length */

@@ -67,12 +67,7 @@ static struct dsim_lcd_config dsim_lcd_info = {
 
 	.parameter[DSI_VIRTUAL_CH_ID]	= (unsigned int) DSIM_VIRTUAL_CH_0,
 	.parameter[DSI_FORMAT]		= (unsigned int) DSIM_24BPP_888,
-#if defined(CONFIG_CPU_EXYNOS4210)
 	.parameter[DSI_VIDEO_MODE_SEL]	= (unsigned int) DSIM_BURST_SYNC_EVENT,
-#else	/* should be fixed */
-	.parameter[DSI_VIDEO_MODE_SEL]	= (unsigned int) DSIM_BURST,
-#endif
-
 	.mipi_ddi_pd		= (void *) &mipi_ddi_pd,
 };
 

@@ -18,8 +18,6 @@
 #ifndef __PLAT_S3C_SDHCI_H
 #define __PLAT_S3C_SDHCI_H __FILE__
 
-#define MAX_VMMC_NAME 20
-
 /* ignore mmc suspend/resume for BCM WIFI */
 #define S3C_SDHCI_PM_IGNORE_SUSPEND_RESUME	(1 << 30)
 struct platform_device;
@@ -76,8 +74,7 @@ struct s3c_sdhci_platdata {
 
 	char		**clocks;	/* set of clock sources */
 
-	char 		vmmc_name[MAX_VMMC_NAME]; /* name for regulator */
-
+	char		*vmmc_name; /* name for regulator */
 	int		ext_cd_gpio;
 	bool		ext_cd_gpio_invert;
 	unsigned int	pm_flags;

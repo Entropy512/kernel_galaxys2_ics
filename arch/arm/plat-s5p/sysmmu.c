@@ -8,6 +8,10 @@
  * published by the Free Software Foundation.
  */
 
+#ifdef CONFIG_S5P_SYSTEM_MMU_DEBUG
+#define DEBUG
+#endif
+
 #include <linux/io.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
@@ -60,6 +64,7 @@ struct sysmmu_drvdata {
 	int activations;
 	rwlock_t lock;
 	s5p_sysmmu_fault_handler_t fault_handler;
+	unsigned long version;
 };
 
 static LIST_HEAD(sysmmu_list);
@@ -92,28 +97,41 @@ static struct sysmmu_drvdata *get_sysmmu_data_rollback(struct device *owner,
 	return NULL;
 }
 
-static bool set_sysmmu_active(struct sysmmu_drvdata *mmudata)
+static int set_sysmmu_active(struct sysmmu_drvdata *mmudata)
 {
-	/* return true if the System MMU was not active previously
-	   and it needs to be initialized */
+#ifndef CONFIG_S5P_SYSTEM_MMU_REFCOUNT
+	if (WARN_ON(mmudata->activations == 1))
+		return -EBUSY;
+#endif
 	mmudata->activations++;
-	return mmudata->activations == 1;
-}
 
-static bool set_sysmmu_inactive(struct sysmmu_drvdata *mmudata)
-{
-	/* return true if the System MMU is needed to be disabled */
-	mmudata->activations--;
-
-	WARN_ON(mmudata->activations < 0);
-
-	return mmudata->activations == 0;
+	return 0;
 }
 
 static bool is_sysmmu_active(struct sysmmu_drvdata *mmudata)
 {
 	return mmudata->activations != 0;
 }
+
+static bool set_sysmmu_inactive(struct sysmmu_drvdata *mmudata)
+{
+	/* return true if the System MMU is needed to be disabled */
+	if (WARN_ON(!is_sysmmu_active(mmudata)))
+		return false;
+
+	mmudata->activations--;
+
+	return !is_sysmmu_active(mmudata);
+}
+
+#ifdef CONFIG_S5P_SYSTEM_MMU_REFCOUNT
+static bool need_sysmmu_initialize(struct sysmmu_drvdata *mmudata)
+{
+	return mmudata->activations == 1;
+}
+#else
+#define need_sysmmu_initialize is_sysmmu_active
+#endif
 
 static void sysmmu_block(void __iomem *sfrbase)
 {
@@ -143,6 +161,39 @@ static void __sysmmu_set_ptbase(void __iomem *sfrbase,
 	__raw_writel(pgd, sfrbase + S5P_PT_BASE_ADDR);
 
 	__sysmmu_tlb_invalidate(sfrbase);
+}
+
+static void __sysmmu_set_prefbuf(void __iomem *sfrbase, unsigned long base,
+							unsigned long size)
+{
+	unsigned long end = base + size - 1;
+
+	BUG_ON(end <= base);
+
+	__raw_writel(base, sfrbase + S5P_PB0_SADDR);
+	__raw_writel(end,  sfrbase + S5P_PB0_EADDR);
+	__raw_writel(base, sfrbase + S5P_PB1_SADDR);
+	__raw_writel(end,  sfrbase + S5P_PB1_EADDR);
+}
+
+void s5p_sysmmu_set_prefbuf(struct device *owner, unsigned long base,
+							unsigned long size)
+{
+	struct sysmmu_drvdata *data = NULL;
+	unsigned long flags;
+
+	while ((data = get_sysmmu_data(owner, data))) {
+		if (WARN_ON(data->version != 3))
+			continue;
+
+		read_lock_irqsave(&data->lock, flags);
+		if (is_sysmmu_active(data)) {
+			sysmmu_block(data->sfrbase);
+			__sysmmu_set_prefbuf(data->sfrbase, base, size);
+			sysmmu_unblock(data->sfrbase);
+		}
+		read_unlock_irqrestore(&data->lock, flags);
+	}
 }
 
 static void __set_fault_handler(struct sysmmu_drvdata *mmudata,
@@ -226,19 +277,21 @@ static irqreturn_t s5p_sysmmu_irq(int irq, void *dev_id)
 		base = __raw_readl(mmudata->sfrbase + S5P_PT_BASE_ADDR);
 		addr = __raw_readl(mmudata->sfrbase + fault_reg_offset[itype]);
 
-		dev_warn(mmudata->dev, "System MMU fault occurred by %s\n",
-						dev_name(mmudata->owner));
+		dev_warn(mmudata->dev, "System MMU %s occurred by %s\n",
+			sysmmu_fault_name[itype], dev_name(mmudata->owner));
 
-		if (mmudata->fault_handler(itype, base, addr) != 0) {
-
-			__raw_writel(1 << itype,
-					mmudata->sfrbase + S5P_INT_CLEAR);
+		if ((mmudata->version == 3) && ((itype == SYSMMU_AR_MULTIHIT) ||
+					(itype == SYSMMU_AW_MULTIHIT))) {
+			__sysmmu_tlb_invalidate(mmudata->sfrbase);
+		} else if (mmudata->fault_handler(itype, base, addr) != 0) {
 			dev_dbg(mmudata->dev,
 				"%s is resolved. Retrying translation.\n",
 				sysmmu_fault_name[itype]);
 		} else {
 			base = 0;
 		}
+
+		__raw_writel(1 << itype, mmudata->sfrbase + S5P_INT_CLEAR);
 	}
 
 	sysmmu_unblock(mmudata->sfrbase);
@@ -285,13 +338,17 @@ static bool __sysmmu_disable(struct sysmmu_drvdata *data)
 
 	if (set_sysmmu_inactive(data)) {
 		__raw_writel(CTRL_DISABLE, data->sfrbase + S5P_MMU_CTRL);
+		if (data->clk)
 		clk_disable(data->clk);
 		disabled = true;
 	}
 
 	write_unlock_irqrestore(&data->lock, flags);
 
-	pm_runtime_put_sync(data->dev);
+#ifndef CONFIG_S5P_SYSTEM_MMU_REFCOUNT
+	if (disabled)
+#endif
+		pm_runtime_put_sync(data->dev);
 
 	return disabled;
 }
@@ -312,12 +369,22 @@ int s5p_sysmmu_enable(struct device *owner, unsigned long pgd)
 
 		write_lock_irqsave(&mmudata->lock, flags);
 
-		if (set_sysmmu_active(mmudata)) {
-
+		ret = set_sysmmu_active(mmudata);
+		if (!ret && need_sysmmu_initialize(mmudata)) {
+			if (mmudata->clk)
 			clk_enable(mmudata->clk);
 
 			__sysmmu_set_ptbase(mmudata->sfrbase, pgd);
 
+			mmudata->version = readl(
+					mmudata->sfrbase + S5P_MMU_VERSION);
+			mmudata->version >>= 28;
+
+			if (mmudata->version == 3) {
+				__raw_writel((1 << 12) | (2 << 28),
+						mmudata->sfrbase + S5P_MMU_CFG);
+				__sysmmu_set_prefbuf(mmudata->sfrbase, 0, 0);
+			}
 			__raw_writel(CTRL_ENABLE,
 					mmudata->sfrbase + S5P_MMU_CTRL);
 
@@ -327,6 +394,9 @@ int s5p_sysmmu_enable(struct device *owner, unsigned long pgd)
 		}
 
 		write_unlock_irqrestore(&mmudata->lock, flags);
+
+		if (ret) /* already enabled and no refcount */
+			pm_runtime_put_sync(mmudata->dev);
 	}
 
 	if (ret < 0) {
@@ -442,9 +512,9 @@ static int s5p_sysmmu_probe(struct platform_device *pdev)
 
 	data->clk = clk_get(dev, "sysmmu");
 	if (IS_ERR(data->clk)) {
-		dev_err(dev, "Failed to get clock descriptor.\n");
-		ret = PTR_ERR(data->clk);
-		goto err_clk;
+		dev_dbg(dev, "Clock descriptor not found:"
+				" Skipping clock gating...\n");
+		data->clk = NULL;
 	}
 
 	data->dev = dev;
@@ -467,8 +537,6 @@ static int s5p_sysmmu_probe(struct platform_device *pdev)
 					to_platform_device(data->owner)->name,
 					to_platform_device(data->owner)->id);
 	return 0;
-err_clk:
-	free_irq(irq, data);
 err_irq:
 	iounmap(sfr);
 err_ioremap:
@@ -492,4 +560,4 @@ static int __init s5p_sysmmu_init(void)
 {
 	return platform_driver_register(&s5p_sysmmu_driver);
 }
-arch_initcall(s5p_sysmmu_init);
+subsys_initcall(s5p_sysmmu_init);

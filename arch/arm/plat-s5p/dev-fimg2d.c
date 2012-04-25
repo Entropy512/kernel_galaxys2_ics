@@ -21,7 +21,6 @@
 #define S5P_PA_FIMG2D_OFFSET	0x02000000
 #define S5P_PA_FIMG2D_3X	(S5P_PA_FIMG2D+S5P_PA_FIMG2D_OFFSET)
 
-#ifdef CONFIG_VIDEO_FIMG2D
 static struct resource s5p_fimg2d_resource[] = {
 	[0] = {
 		.start	= S5P_PA_FIMG2D,
@@ -68,4 +67,3 @@ void __init s5p_fimg2d_set_platdata(struct fimg2d_platdata *pd)
 	else
 		s5p_device_fimg2d.dev.platform_data = npd;
 }
-#endif

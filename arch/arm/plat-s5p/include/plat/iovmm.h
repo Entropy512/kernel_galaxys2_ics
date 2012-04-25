@@ -20,17 +20,19 @@ void iovmm_deactivate(struct device *dev);
 /* iovmm_map() - Maps a list of physical memory chunks
  * @dev: the owner of the IO address space where the mapping is created
  * @sg: list of physical memory chunks to map
+ * @offset: length in bytes where the mapping starts
+ * @size: how much memory to map in bytes. @offset + @size must not exceed
+ *        total size of @sg
  *
- * This functio returns mapped IO address in the address space of @dev.
- * The size of IO memory allocated is exactly same to the sum of sizes
- * of each physical memory chunks described in @sg.
+ * This function returns mapped IO address in the address space of @dev.
  * Returns 0 if mapping fails.
  *
  * The caller of this function must ensure that iovmm_cleanup() is not called
  * while this function is called.
  *
  */
-dma_addr_t iovmm_map(struct device *dev, struct scatterlist *sg);
+dma_addr_t iovmm_map(struct device *dev, struct scatterlist *sg, off_t offset,
+								size_t size);
 
 /* iovmm_map() - unmaps the given IO address
  * @dev: the owner of the IO address space where @iova belongs
