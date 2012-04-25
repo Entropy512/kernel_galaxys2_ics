@@ -1,7 +1,7 @@
 /*
  * max77693-muic.c - MUIC driver for the Maxim 77693
  *
- *  Copyright (C) 2010 Samsung Electronics
+ *  Copyright (C) 2012 Samsung Electronics
  *  <sukdong.kim@samsung.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -121,6 +121,12 @@ static int if_muic_info;
 static int switch_sel;
 static int if_pmic_rev;
 
+/* func : get_if_pmic_inifo
+ * switch_sel value get from bootloader comand line
+ * switch_sel data consist 8 bits (xxxxzzzz)
+ * first 4bits(zzzz) mean path infomation.
+ * next 4bits(xxxx) mean if pmic version info
+ */
 static int get_if_pmic_inifo(char *str)
 {
 	get_option(&str, &if_muic_info);
@@ -138,7 +144,6 @@ int get_switch_sel(void)
 {
 	return switch_sel;
 }
-
 
 static int max77693_muic_get_comp2_comn1_pass2
 	(struct max77693_muic_info *info)
@@ -209,7 +214,8 @@ static int max77693_muic_set_comp2_comn1_pass2
 			info->muic_data->sw_path = UART_PATH_LTE;
 			val = MAX77693_MUIC_CTRL1_BIN_5_101;
 			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_UART_SEL, GPIO_LEVEL_LOW);
+				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+					GPIO_LEVEL_LOW);
 				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_LOW\n"
 								, __func__);
 			} else {
@@ -295,10 +301,12 @@ static int max77693_muic_get_uart_path_pass2
 			return -EINVAL;
 		}
 #endif
+#ifndef CONFIG_LTE_VIA_SWITCH
 		if (info->is_default_uart_path_cp)
 			return UART_PATH_AP;
 		else
 			return UART_PATH_CP;
+#endif
 	} else {
 		return -EINVAL;
 	}
@@ -785,7 +793,7 @@ static int max77693_muic_set_usb_path(struct max77693_muic_info *info, int path)
 	struct max77693_muic_data *mdata = info->muic_data;
 	int ret;
 	int gpio_val;
-	u8 cntl1_val, cntl1_msk, cntl2_val;
+	u8 cntl1_val, cntl1_msk;
 	int val;
 	dev_info(info->dev, "func:%s path:%d\n", __func__, path);
 	if (mdata->set_safeout) {
@@ -1137,7 +1145,8 @@ static void max77693_muic_handle_jig_uart(struct max77693_muic_info *info,
 			val = MAX77693_MUIC_CTRL1_BIN_5_101;
 			/*TODO must modify H/W rev.5*/
 			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_UART_SEL, GPIO_LEVEL_LOW);
+				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+					GPIO_LEVEL_LOW);
 				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_LOW\n"
 								, __func__);
 			} else
@@ -1304,6 +1313,7 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 				mdata->usb_cb(USB_OTGHOST_ATTACHED);
 
 			msleep(40);
+
 			max77693_muic_set_usb_path(info, AP_USB_MODE);
 		} else if (chgtyp == CHGTYP_USB ||
 			   chgtyp == CHGTYP_DOWNSTREAM_PORT ||
@@ -1354,9 +1364,7 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 			if (adc == ADC_CEA936ATYPE1_CHG
 			    || adc == ADC_CEA936ATYPE2_CHG)
 				break;
-			if (mdata->is_mhl_attached
-			    && mdata->is_mhl_attached() &&
-			    info->cable_type == CABLE_TYPE_MHL_MUIC) {
+			if (info->cable_type == CABLE_TYPE_MHL_MUIC) {
 				dev_info(info->dev, "%s: MHL(charging)\n",
 					 __func__);
 				info->cable_type = CABLE_TYPE_MHL_VB_MUIC;
@@ -1421,11 +1429,6 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	if (mdata->jig_uart_cb)
 		mdata->jig_uart_cb(UART_PATH_AP);
 #endif
-	if (mdata->is_mhl_attached && mdata->is_mhl_attached()
-	    && info->cable_type == CABLE_TYPE_MHL_MUIC) {
-		dev_info(info->dev, "%s: MHL attached. Do Nothing\n", __func__);
-		return 0;
-	}
 
 	switch (info->cable_type) {
 	case CABLE_TYPE_OTG_MUIC:
@@ -1510,6 +1513,10 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 		}
 		dev_info(info->dev, "%s: MHL\n", __func__);
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
+
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_DETACHED);
+
 		break;
 	case CABLE_TYPE_MHL_VB_MUIC:
 		if (irq == info->irq_adc || irq == info->irq_chgtype) {
@@ -1521,10 +1528,8 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
 		max77693_muic_set_charging_type(info, false);
 
-		if (mdata->is_mhl_attached && mdata->is_mhl_attached()) {
-			if (mdata->mhl_cb && info->is_mhl_ready)
-				mdata->mhl_cb(MAX77693_MUIC_DETACHED);
-		}
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_DETACHED);
 		break;
 	case CABLE_TYPE_UNKNOWN_MUIC:
 		dev_info(info->dev, "%s: UNKNOWN\n", __func__);
@@ -1838,9 +1843,14 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	int ret;
 	pr_info("func:%s\n", __func__);
 	info = kzalloc(sizeof(struct max77693_muic_info), GFP_KERNEL);
+	if (!info) {
+		dev_err(&pdev->dev, "%s: failed to allocate info\n", __func__);
+		ret = -ENOMEM;
+		goto err_return;
+	}
 	input = input_allocate_device();
-	if (!info || !input) {
-		dev_err(&pdev->dev, "%s: failed to allocate state\n", __func__);
+	if (!input) {
+		dev_err(&pdev->dev, "%s: failed to allocate input\n", __func__);
 		ret = -ENOMEM;
 		goto err_kfree;
 	}
@@ -1921,24 +1931,21 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	} else if (max77693->pmic_rev >= MAX77693_REV_PASS2) {
 		/*PASS2 */
 		int switch_sel = get_switch_sel();
-		if (switch_sel & 0x1)
+		if (switch_sel & MAX77693_SWITCH_SEL_1st_BIT_USB)
 			info->muic_data->sw_path = AP_USB_MODE;
 		else
 			info->muic_data->sw_path = CP_USB_MODE;
-		if (switch_sel & 0x2)
+		if (switch_sel & MAX77693_SWITCH_SEL_2nd_BIT_UART)
 			info->muic_data->uart_path = UART_PATH_AP;
 		else {
 			info->muic_data->uart_path = UART_PATH_CP;
 #ifdef CONFIG_LTE_VIA_SWITCH
-			if (switch_sel & 0x3)
-				info->muic_data->uart_path = UART_PATH_CP;
-			else
+			if (switch_sel & MAX77693_SWITCH_SEL_3rd_BIT_LTE_UART)
 				info->muic_data->uart_path = UART_PATH_LTE;
 #endif
 		}
 		pr_info("%s: switch_sel: %d\n", __func__, switch_sel);
 	}
-
 	/* create sysfs group */
 	ret = sysfs_create_group(&switch_dev->kobj, &max77693_muic_group);
 	dev_set_drvdata(switch_dev, info);
@@ -1989,9 +1996,10 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	mutex_destroy(&info->mutex);
  err_input:
 	platform_set_drvdata(pdev, NULL);
- err_kfree:
 	input_free_device(input);
+ err_kfree:
 	kfree(info);
+ err_return:
 	return ret;
 }
 

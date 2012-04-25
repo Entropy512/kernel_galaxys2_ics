@@ -222,14 +222,15 @@ static int accel_do_calibrate(bool do_calib)
 			sum[2] += data.z;
 		}
 
-		cal_data.x = sum[0] / CALIBRATION_DATA_AMOUNT;
-		cal_data.y = sum[1] / CALIBRATION_DATA_AMOUNT;
-		cal_data.z = sum[2] / CALIBRATION_DATA_AMOUNT;
 
 		if (is_lis3dh) {
 			cal_data.x = IDEAL_X - cal_data.x;
 			cal_data.y = IDEAL_Y - cal_data.y;
 			cal_data.z = IDEAL_Z - cal_data.z;
+		} else {
+			cal_data.x = sum[0] / CALIBRATION_DATA_AMOUNT;
+			cal_data.y = sum[1] / CALIBRATION_DATA_AMOUNT;
+			cal_data.z = sum[2] / CALIBRATION_DATA_AMOUNT;
 		}
 	} else {
 		cal_data.x = 0;
@@ -1921,6 +1922,13 @@ int mpu3050_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 			dev_info(&this_client->adapter->dev,
 				 "%s: +%s\n", MPU_NAME, mldl_cfg->accel->name);
 			accel_adapter = i2c_get_adapter(pdata->accel.adapt_num);
+
+			if (!accel_adapter) {
+				pr_info("%s : accel_adapter i2c get fail",
+					__func__);
+				goto out_accel_failed;
+			}
+
 			if (pdata->accel.irq > 0) {
 				dev_info(&this_client->adapter->dev,
 					 "Installing Accel irq using %d\n",
@@ -1940,6 +1948,13 @@ int mpu3050_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 			dev_info(&this_client->adapter->dev,
 				 "%s: +%s\n", MPU_NAME, mldl_cfg->accel->name);
 			accel_adapter = i2c_get_adapter(pdata->accel.adapt_num);
+
+			if (!accel_adapter) {
+				pr_info("%s : accel_adapter i2c get fail",
+					__func__);
+				goto out_accel_failed;
+			}
+
 			if (pdata->accel.irq > 0) {
 				dev_info(&this_client->adapter->dev,
 					 "Installing Accel irq using %d\n",
@@ -1966,6 +1981,13 @@ int mpu3050_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 				 mldl_cfg->compass->name);
 			compass_adapter =
 			    i2c_get_adapter(pdata->compass.adapt_num);
+
+			if (!compass_adapter) {
+				pr_info("%s : compass_adapter i2c get fail",
+					__func__);
+				goto out_compass_failed;
+			}
+
 			if (pdata->compass.irq > 0) {
 				dev_info(&this_client->adapter->dev,
 					 "Installing Compass irq using %d\n",
@@ -1991,6 +2013,12 @@ int mpu3050_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 				 mldl_cfg->pressure->name);
 			pressure_adapter =
 			    i2c_get_adapter(pdata->pressure.adapt_num);
+
+			if (!pressure_adapter) {
+				pr_info("%s : pressure_adapter i2c get fail",
+					__func__);
+				goto out_pressure_failed;
+			}
 
 			if (pdata->pressure.irq > 0) {
 				dev_info(&this_client->adapter->dev,
@@ -2068,12 +2096,15 @@ out_whoami_failed:
 	if (pdata && pdata->pressure.get_slave_descr && pdata->pressure.irq)
 		slaveirq_exit(&pdata->pressure);
 out_pressureirq_failed:
+out_pressure_failed:
 	if (pdata && pdata->compass.get_slave_descr && pdata->compass.irq)
 		slaveirq_exit(&pdata->compass);
 out_compassirq_failed:
+out_compass_failed:
 	if (pdata && pdata->accel.get_slave_descr && pdata->accel.irq)
 		slaveirq_exit(&pdata->accel);
 out_accelirq_failed:
+out_accel_failed:
 	kfree(mpu);
 out_alloc_data_failed:
 out_check_functionality_failed:

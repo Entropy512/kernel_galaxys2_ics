@@ -431,16 +431,45 @@ static int stmpe811_adc_i2c_remove(struct i2c_client *client)
 	return 0;
 }
 
+static int stmpe811_adc_suspend(struct device *dev)
+{
+
+	return 0;
+}
+
+static int stmpe811_adc_resume(struct device *dev)
+{
+	s3c_gpio_cfgpin(GPIO_ADC_SCL_18V, S3C_GPIO_OUTPUT);
+	s3c_gpio_setpull(GPIO_ADC_SCL_18V, S3C_GPIO_PULL_UP);
+	gpio_set_value(GPIO_ADC_SCL_18V, 1);
+
+	s3c_gpio_cfgpin(GPIO_ADC_SDA_18V, S3C_GPIO_OUTPUT);
+	s3c_gpio_setpull(GPIO_ADC_SDA_18V, S3C_GPIO_PULL_UP);
+	gpio_set_value(GPIO_ADC_SDA_18V, 1);
+
+	pr_info("%s: SCL(%d), SDA(%d)\n", __func__,
+		gpio_get_value(GPIO_ADC_SCL_18V),
+		gpio_get_value(GPIO_ADC_SCL_18V));
+
+	return 0;
+}
+
 static const struct i2c_device_id stmpe811_adc_device_id[] = {
 	{"stmpe811-adc", 0},
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, stmpe811_adc_device_id);
 
+static const struct dev_pm_ops stmpe811_adc_pm_ops = {
+	.suspend = stmpe811_adc_suspend,
+	.resume = stmpe811_adc_resume,
+};
+
 static struct i2c_driver stmpe811_adc_i2c_driver = {
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= "stmpe811-adc",
+		.pm = &stmpe811_adc_pm_ops,
 	},
 	.probe		= stmpe811_adc_i2c_probe,
 	.remove		= stmpe811_adc_i2c_remove,

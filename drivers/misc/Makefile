@@ -62,3 +62,7 @@ obj-$(CONFIG_SEC_DEV_JACK)	+= sec_jack.o
 obj-$(CONFIG_MUIC_MAX8997)	+= max8997-muic.o
 obj-$(CONFIG_PN544)		+= pn544.o
 obj-$(CONFIG_STMPE811_ADC)	+= stmpe811-adc.o
+obj-$(CONFIG_FM34_WE395)	+= fm34_we395.o
+
+obj-$(CONFIG_SLP_PROCESS_MON)	+= slp_process_monitor.o
+obj-$(CONFIG_SLP_LOWMEM_NOTIFY)	+= slp_lowmem_notify.o

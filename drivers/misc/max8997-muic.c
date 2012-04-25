@@ -1093,8 +1093,14 @@ static int max8997_muic_handle_attach(struct max8997_muic_info *info,
 		switch (chgtyp) {
 		case CHGTYP_USB:
 			if (adc == ADC_CEA936ATYPE1_CHG
-					|| adc == ADC_CEA936ATYPE2_CHG)
+					|| adc == ADC_CEA936ATYPE2_CHG) {
+				info->cable_type = CABLE_TYPE_USB;
+				ret = max8997_muic_set_charging_type(info,
+						false);
+				if (ret)
+					info->cable_type = CABLE_TYPE_NONE;
 				break;
+			}
 			if (mdata->is_mhl_attached
 					&& mdata->is_mhl_attached() &&
 					info->cable_type == CABLE_TYPE_MHL) {
@@ -1498,6 +1504,20 @@ out:
 }
 extern struct device *switch_dev;
 
+static struct platform_device *max8997_muic_pdevice;
+
+cable_type_t max8997_muic_get_attached_device(void)
+{
+	struct max8997_muic_info *info = 
+		platform_get_drvdata(max8997_muic_pdevice);
+	
+	if (info)
+		return info->cable_type;		
+
+	return CABLE_TYPE_NONE;
+}
+EXPORT_SYMBOL(max8997_muic_get_attached_device);
+
 static int __devinit max8997_muic_probe(struct platform_device *pdev)
 {
 	struct max8997_dev *max8997 = dev_get_drvdata(pdev->dev.parent);
@@ -1596,8 +1616,10 @@ static int __devinit max8997_muic_probe(struct platform_device *pdev)
 
 	mutex_init(&info->mutex);
 
+#ifndef CONFIG_MACH_U1_KOR_LGT
 	/* Set ADC debounce time: 25ms */
 	max8997_muic_set_adcdbset(info, 2);
+#endif
 
 	ret = max8997_muic_irq_init(info);
 	if (ret < 0) {
@@ -1610,10 +1632,12 @@ static int __devinit max8997_muic_probe(struct platform_device *pdev)
 	schedule_delayed_work(&info->init_work, msecs_to_jiffies(3000));
 
 	INIT_DELAYED_WORK(&info->usb_work, max8997_muic_usb_detect);
-	schedule_delayed_work(&info->usb_work, msecs_to_jiffies(17000));
+	schedule_delayed_work(&info->usb_work, msecs_to_jiffies(14000));
 
 	INIT_DELAYED_WORK(&info->mhl_work, max8997_muic_mhl_detect);
 	schedule_delayed_work(&info->mhl_work, msecs_to_jiffies(25000));
+
+    	max8997_muic_pdevice = pdev;
 
 	return 0;
 
