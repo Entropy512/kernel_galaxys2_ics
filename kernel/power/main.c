@@ -17,17 +17,9 @@
 #define CONFIG_DVFS_LIMIT
 #endif
 
-#if defined(CONFIG_CPU_EXYNOS4210)
-#define CONFIG_GPU_LOCK
-#endif
-
 #ifdef CONFIG_DVFS_LIMIT
 #include <linux/cpufreq.h>
 #include <mach/cpufreq.h>
-#endif
-
-#ifdef CONFIG_GPU_LOCK
-#include <mach/gpufreq.h>
 #endif
 
 #include "power.h"
@@ -468,6 +460,10 @@ static ssize_t cpufreq_min_limit_show(struct kobject *kobj,
 	return sprintf(buf, "%d\n", cpufreq_min_limit_val);
 }
 
+#if defined(CONFIG_TARGET_LOCALE_KOR) && defined(CONFIG_STAND_ALONE_POLICY) // test -0221
+extern void unlock_cpu1_up(void);
+extern void lock_cpu1_up(void);
+#endif
 static ssize_t cpufreq_min_limit_store(struct kobject *kobj,
 					struct kobj_attribute *attr,
 					const char *buf, size_t n)
@@ -487,6 +483,9 @@ static ssize_t cpufreq_min_limit_store(struct kobject *kobj,
 	if (val == -1) { /* Unlock request */
 		if (cpufreq_min_limit_val != -1) {
 			exynos_cpufreq_lock_free(DVFS_LOCK_ID_USER);
+#if defined(CONFIG_TARGET_LOCALE_KOR) && defined(CONFIG_STAND_ALONE_POLICY) // test -0221
+			unlock_cpu1_up();
+#endif
 			cpufreq_min_limit_val = -1;
 		} else /* Already unlocked */
 			printk(KERN_ERR "%s: Unlock request is ignored\n",
@@ -499,6 +498,12 @@ static ssize_t cpufreq_min_limit_store(struct kobject *kobj,
 				exynos_cpufreq_lock_free(DVFS_LOCK_ID_USER);
 			lock_ret = exynos_cpufreq_lock(
 					DVFS_LOCK_ID_USER, cpufreq_level);
+#if defined(CONFIG_TARGET_LOCALE_KOR) && defined(CONFIG_STAND_ALONE_POLICY) // test -0221
+			//if (cpufreq_level == 1) // 1200000
+			//if (cpufreq_level == 2) // 1000000
+			if (val == 1200000)
+				lock_cpu1_up();
+#endif
 			/* ret of exynos_cpufreq_lock is meaningless.
 			   0 is fail? success? */
 			cpufreq_min_limit_val = val;
@@ -522,57 +527,6 @@ power_attr(cpufreq_max_limit);
 power_attr(cpufreq_min_limit);
 #endif /* CONFIG_DVFS_LIMIT */
 
-#ifdef CONFIG_GPU_LOCK
-static int gpu_lock_val;
-DEFINE_MUTEX(gpu_lock_mutex);
-
-static ssize_t gpu_lock_show(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					char *buf)
-{
-	return sprintf(buf, "%d\n", gpu_lock_val);
-}
-
-static ssize_t gpu_lock_store(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					const char *buf, size_t n)
-{
-	int val;
-	ssize_t ret = -EINVAL;
-
-	mutex_lock(&gpu_lock_mutex);
-
-	if (sscanf(buf, "%d", &val) != 1) {
-		pr_info("%s: Invalid mali lock format\n", __func__);
-		goto out;
-	}
-
-	if (val == 0) {
-		if (gpu_lock_val != 0) {
-			exynos_gpufreq_unlock();
-			gpu_lock_val = 0;
-		} else {
-			pr_info("%s: Unlock request is ignored\n", __func__);
-		}
-	} else if (val == 1) {
-		if (gpu_lock_val == 0) {
-			exynos_gpufreq_lock();
-			gpu_lock_val = val;
-		} else {
-			pr_info("%s: Lock request is ignored\n", __func__);
-		}
-	} else {
-		pr_info("%s: Lock request is invalid\n", __func__);
-	}
-
-	ret = n;
-out:
-	mutex_unlock(&gpu_lock_mutex);
-	return ret;
-}
-power_attr(gpu_lock);
-#endif
-
 static struct attribute * g[] = {
 	&state_attr.attr,
 #ifdef CONFIG_PM_TRACE
@@ -594,9 +548,6 @@ static struct attribute * g[] = {
 	&cpufreq_table_attr.attr,
 	&cpufreq_max_limit_attr.attr,
 	&cpufreq_min_limit_attr.attr,
-#endif
-#ifdef CONFIG_GPU_LOCK
-	&gpu_lock_attr.attr,
 #endif
 	NULL,
 };
