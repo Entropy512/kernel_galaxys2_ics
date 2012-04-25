@@ -164,6 +164,18 @@ config TOUCHSCREEN_ATMEL_MXT540E
           To compile this driver as a module, choose M here: the
           module will be called atmel_mxt540e_ts.
 
+config TOUCHSCREEN_ATMEL_MXT224
+	tristate "ATMEL MXT224 I2C Touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have the AT42QT602240/ATMXT224 I2C touchscreen
+	  connected to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called mxt224.
+
 config TOUCHSCREEN_BITSY
 	tristate "Compaq iPAQ H3600 (Bitsy) touchscreen"
 	depends on SA1100_BITSY
@@ -865,6 +877,22 @@ config TOUCHSCREEN_MXT768E
 	default n
 	help
 	  Say Y here to enable mXT768E I2C touchscreen support
+
+config TOUCHSCREEN_SYNAPTICS_S7301
+	tristate "SYNAPTICS S7301 Touchscreen Interface"
+	depends on I2C
+	help
+		Say Y here if you want support for SYNAPTICS S7301
+		touchscreen controllers.
+
+		To compile this driver as a module, choose M here: the
+		module will be called melfas_ts.
+
+config SEC_TOUCHSCREEN_DVFS_LOCK
+	tristate "SEC AP dvfs control"
+	depends on CPU_FREQ
+	help
+		Say Y here if you want support for lock the cpu frequency.
 
 source "drivers/input/touchscreen/wacom/Kconfig"
 

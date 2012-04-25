@@ -30,7 +30,7 @@
 #include "wacom_i2c_coord_tables.h"
 #endif
 
-/* #define WACOM_UMS_UPDATE */
+#define WACOM_UMS_UPDATE
 #define WACOM_FW_PATH "/sdcard/firmware/wacom_firm.bin"
 
 unsigned char screen_rotate;
@@ -693,6 +693,12 @@ static int wacom_i2c_probe(struct i2c_client *client,
 	struct input_dev *input;
 	int ret = 0;
 
+	if (pdata == NULL) {
+		printk(KERN_ERR "%s: no pdata\n", __func__);
+		ret = -ENODEV;
+		goto err_i2c_fail;
+	}
+
 	/*Check I2C functionality */
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		printk(KERN_ERR "[E-PEN] No I2C functionality found\n");
@@ -835,6 +841,15 @@ static int wacom_i2c_probe(struct i2c_client *client,
 	/* firmware info */
 	printk(KERN_NOTICE "[E-PEN] wacom fw ver : 0x%x, new fw ver : 0x%x\n",
 	       wac_i2c->wac_feature->fw_version, Firmware_version_of_file);
+#endif
+
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	INIT_DELAYED_WORK(&wac_i2c->dvfs_work, free_dvfs_lock);
+	if (exynos_cpufreq_get_level(800000, &wac_i2c->cpufreq_level))
+		printk(KERN_ERR "[E-PEN] exynos_cpufreq_get_level Error\n");
+#ifdef SEC_BUS_LOCK
+	wac_i2c->bus_dev = dev_get("exynos-busfreq");
+#endif
 #endif
 
 	return 0;

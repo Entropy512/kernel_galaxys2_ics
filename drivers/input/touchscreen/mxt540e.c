@@ -186,7 +186,7 @@ int touch_is_pressed;
 EXPORT_SYMBOL(touch_is_pressed);
 
 struct device *sec_touchscreen;
-static u8 firmware_latest = 0x12;
+static u8 firmware_latest = 0x13;
 static u8 build_latest = 0xAA;
 
 struct device *mxt540e_noise_test;
@@ -298,6 +298,7 @@ static int init_write_config(struct mxt540e_data *data, u8 type, const u8 * cfg)
 	u16 address = 0;
 	u16 size = 0;
 	u8 *temp;
+	int instance_num;
 
 	ret = get_object_info(data, type, &size, &address);
 
@@ -305,11 +306,14 @@ static int init_write_config(struct mxt540e_data *data, u8 type, const u8 * cfg)
 		return 0;
 
 	ret = write_mem(data, address, size, cfg);
-	if (check_instance(data, type)) {
-		printk(KERN_DEBUG "[TSP] exist instance1 object (%d)\n", type);
-		temp = kmalloc(size * sizeof(u8), GFP_KERNEL);
-		memset(temp, 0, size);
-		ret |= write_mem(data, address + size, size, temp);
+	instance_num = check_instance(data, type);
+	if (instance_num > 0) {
+		printk(KERN_DEBUG "[TSP] exist instance%d objects (%d)\n",
+			instance_num, type);
+		temp = kmalloc(size * instance_num * sizeof(u8), GFP_KERNEL);
+		memset(temp, 0, size * instance_num);
+		ret |= write_mem(data, address + size,
+			size * instance_num, temp);
 		if (ret < 0)
 			printk(KERN_ERR "[TSP] %s, %d Error!!\n", __func__,
 				__LINE__);
@@ -478,7 +482,7 @@ static void mxt540e_ta_probe(int ta_status)
 	} else {
 		get_object_info(data, TOUCH_MULTITOUCHSCREEN_T9, &size,
 				&obj_address);
-		value = 176;
+		value = 192;
 		error |= write_mem(data, obj_address + 6, 1, &value);
 		value = 50;
 		error |= write_mem(data, obj_address + 7, 1, &value);

@@ -42,32 +42,36 @@
 
 /* block wacom coordinate print */
 /* extern int sec_debug_level(void); */
-#ifdef SEC_DVFS_LOCK
-#define SEC_DVFS_LOCK_TIMEOUT 3
-static struct delayed_work dvfs_dwork;
-static void free_dvfs_lock(struct work_struct *work)
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+void free_dvfs_lock(struct work_struct *work)
 {
-	exynos_cpufreq_lock_free(DVFS_LOCK_ID_PEN);
-}
-static void set_dvfs_lock(bool on)
-{
-	static bool enable;
+	struct wacom_i2c *wac_i2c =
+		container_of(work, struct wacom_i2c, dvfs_work.work);
 
+	exynos_cpufreq_lock_free(DVFS_LOCK_ID_PEN);
+	wac_i2c->dvfs_lock_status = false;
+#ifdef SEC_BUS_LOCK
+	dev_unlock(wac_i2c->bus_dev, &wac_i2c->client->dev);
+#endif
+}
+
+static void set_dvfs_lock(struct wacom_i2c *wac_i2c, bool on)
+{
 	if (on) {
-		cancel_delayed_work(&dvfs_dwork);
-		if (!enable) {
-			unsigned int cpufreq_level;
-			if (!exynos_cpufreq_get_level(800000, &cpufreq_level)) {
-				exynos_cpufreq_lock(DVFS_LOCK_ID_PEN,
-					cpufreq_level);
-				enable = true;
-			}
+		cancel_delayed_work(&wac_i2c->dvfs_work);
+#ifdef SEC_BUS_LOCK
+		dev_lock(wac_i2c->bus_dev,
+			&wac_i2c->client->dev, 267160);
+#endif
+		if (!wac_i2c->dvfs_lock_status) {
+			exynos_cpufreq_lock(DVFS_LOCK_ID_PEN,
+				wac_i2c->cpufreq_level);
+			wac_i2c->dvfs_lock_status = true;
 		}
 	} else {
-		if (enable)
-			schedule_delayed_work(&dvfs_dwork,
+		if (wac_i2c->dvfs_lock_status)
+			schedule_delayed_work(&wac_i2c->dvfs_work,
 				SEC_DVFS_LOCK_TIMEOUT * HZ);
-		enable = false;
 	}
 }
 #endif
@@ -91,8 +95,8 @@ void forced_release(struct wacom_i2c *wac_i2c)
 	wac_i2c->pen_pressed = 0;
 	wac_i2c->side_pressed = 0;
 
-#ifdef SEC_DVFS_LOCK
-	set_dvfs_lock(false);
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	set_dvfs_lock(wac_i2c, false);
 #endif
 
 }
@@ -171,10 +175,6 @@ int wacom_i2c_query(struct wacom_i2c *wac_i2c)
 	u8 data[9];
 	int i = 0;
 	int query_limit = 10;
-
-#ifdef SEC_DVFS_LOCK
-	INIT_DELAYED_WORK(&dvfs_dwork, free_dvfs_lock);
-#endif
 
 	buf = COM_QUERY;
 
@@ -466,8 +466,8 @@ int wacom_i2c_coord(struct wacom_i2c *wac_i2c)
 				input_sync(wac_i2c->input_dev);
 
 				if (prox && !wac_i2c->pen_pressed) {
-#ifdef SEC_DVFS_LOCK
-					set_dvfs_lock(true);
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+					set_dvfs_lock(wac_i2c, true);
 #endif
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
 					printk(KERN_DEBUG
@@ -478,8 +478,8 @@ int wacom_i2c_coord(struct wacom_i2c *wac_i2c)
 #endif
 
 				} else if (!prox && wac_i2c->pen_pressed) {
-#ifdef SEC_DVFS_LOCK
-					set_dvfs_lock(false);
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+					set_dvfs_lock(wac_i2c, false);
 #endif
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
 					printk(KERN_DEBUG
@@ -538,8 +538,8 @@ int wacom_i2c_coord(struct wacom_i2c *wac_i2c)
 			wac_i2c->pen_pressed = 0;
 			wac_i2c->side_pressed = 0;
 
-#ifdef SEC_DVFS_LOCK
-			set_dvfs_lock(false);
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+			set_dvfs_lock(wac_i2c, false);
 #endif
 		}
 	} else {
