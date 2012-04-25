@@ -1036,6 +1036,11 @@ config ARM_TIMER_SP804
 
 source arch/arm/mm/Kconfig
 
+config ARM_PLD_SIZE
+	int
+	default 64 if ARCH_EXYNOS5
+	default 32
+
 config IWMMXT
 	bool "Enable iWMMXt support"
 	depends on CPU_XSCALE || CPU_XSC3 || CPU_MOHAWK || CPU_PJ4
