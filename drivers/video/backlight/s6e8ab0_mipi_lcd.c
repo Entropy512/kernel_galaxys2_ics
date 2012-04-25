@@ -51,36 +51,6 @@ void s6e8ab0_mipi_lcd_off(struct mipi_dsim_device *dsim)
 	mdelay(1);
 }
 
-static int s6e8ab0_mipi_lcd_bl_update_status(struct backlight_device *bd)
-{
-	return 0;
-}
-
-static const struct backlight_ops s6e8ab0_mipi_lcd_bl_ops = {
-	.update_status = s6e8ab0_mipi_lcd_bl_update_status,
-};
-
-static int s6e8ab0_mipi_lcd_probe(struct mipi_dsim_device *dsim)
-{
-	struct mipi_dsim_device *dsim_drv;
-	struct backlight_device *bd = NULL;
-	struct backlight_properties props;
-
-	dsim_drv = kzalloc(sizeof(struct mipi_dsim_device), GFP_KERNEL);
-	if (!dsim_drv)
-		return -ENOMEM;
-
-	dsim_drv = (struct mipi_dsim_device *) dsim;
-
-	props.max_brightness = 1;
-	props.type = BACKLIGHT_PLATFORM;
-
-	bd = backlight_device_register("pwm-backlight",
-		dsim_drv->dev, dsim_drv, &s6e8ab0_mipi_lcd_bl_ops, &props);
-
-	return 0;
-}
-
 static int s6e8ab0_mipi_lcd_suspend(struct mipi_dsim_device *dsim)
 {
 	s6e8ab0_mipi_lcd_off(dsim);
@@ -101,7 +71,6 @@ static int s6e8ab0_mipi_lcd_resume(struct mipi_dsim_device *dsim)
 }
 
 struct mipi_dsim_lcd_driver s6e8ab0_mipi_lcd_driver = {
-	.probe = s6e8ab0_mipi_lcd_probe,
 	.suspend =  s6e8ab0_mipi_lcd_suspend,
 	.displayon = s6e8ab0_mipi_lcd_displayon,
 	.resume = s6e8ab0_mipi_lcd_resume,

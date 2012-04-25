@@ -39,6 +39,10 @@
 #define CMA_REGION_VIDEO	"fimd"
 #endif
 
+#ifdef CONFIG_BUSFREQ_OPP
+#include <mach/dev.h>
+#endif
+
 struct s3c_platform_fb *to_fb_plat(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -131,9 +135,34 @@ int fb_is_primary_device(struct fb_info *fb)
 }
 #endif
 
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)\
+	|| defined(CONFIG_CPU_EXYNOS4210)
+int window_on_off_status(struct s3cfb_global *fbdev)
+{
+	struct s3c_platform_fb *pdata = to_fb_plat(fbdev->dev);
+	struct s3cfb_window *win;
+	int i;
+	int ret = 0;
+
+	for (i = 0; i < pdata->nr_wins; i++) {
+		win = fbdev->fb[i]->par;
+		if (win->enabled)
+			ret |= (1 << i);
+	}
+
+	return ret;
+}
+#endif
+
 int s3cfb_enable_window(struct s3cfb_global *fbdev, int id)
 {
 	struct s3cfb_window *win = fbdev->fb[id]->par;
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+#ifdef CONFIG_BUSFREQ_OPP
+	if (id != CONFIG_FB_S5P_DEFAULT_WINDOW)
+		dev_lock(fbdev->bus_dev, fbdev->dev, 133133);
+#endif
+#endif
 
 	if (!win->enabled)
 		atomic_inc(&fbdev->enabled_win);
@@ -150,6 +179,11 @@ int s3cfb_enable_window(struct s3cfb_global *fbdev, int id)
 int s3cfb_disable_window(struct s3cfb_global *fbdev, int id)
 {
 	struct s3cfb_window *win = fbdev->fb[id]->par;
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+#ifdef CONFIG_BUSFREQ_OPP
+	int win_status;
+#endif
+#endif
 
 	if (win->enabled)
 		atomic_dec(&fbdev->enabled_win);
@@ -159,6 +193,13 @@ int s3cfb_disable_window(struct s3cfb_global *fbdev, int id)
 		return -EFAULT;
 	} else {
 		win->enabled = 0;
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+#ifdef CONFIG_BUSFREQ_OPP
+		win_status = window_on_off_status(fbdev);
+		if ((win_status & ~(1 << CONFIG_FB_S5P_DEFAULT_WINDOW)) == 0)
+			dev_unlock(fbdev->bus_dev, fbdev->dev);
+#endif
+#endif
 		return 0;
 	}
 }
@@ -776,6 +817,10 @@ int s3cfb_blank(int blank_mode, struct fb_info *fb)
 	struct s3c_platform_fb *pdata = to_fb_plat(fbdev->dev);
 	int enabled_win = 0;
 	int i;
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)\
+	|| defined(CONFIG_CPU_EXYNOS4210)
+	int win_status;
+#endif
 
 	dev_dbg(fbdev->dev, "change blank mode\n");
 
@@ -836,7 +881,13 @@ int s3cfb_blank(int blank_mode, struct fb_info *fb)
 			if (fbdev->lcd->init_ldi)
 				fbdev->lcd->init_ldi();
 		}
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)\
+	|| defined(CONFIG_CPU_EXYNOS4210)
+		win_status = window_on_off_status(fbdev);
+		if (win_status == 0)
+#else
 		if (win->id != pdata->default_win)
+#endif
 			return NOT_DEFAULT_WINDOW;
 
 		break;
@@ -879,7 +930,13 @@ int s3cfb_blank(int blank_mode, struct fb_info *fb)
 			if (fbdev->lcd->init_ldi)
 				fbdev->lcd->init_ldi();
 		}
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)\
+	|| defined(CONFIG_CPU_EXYNOS4210)
+		win_status = window_on_off_status(fbdev);
+		if (win_status == 0)
+#else
 		if (win->id != pdata->default_win)
+#endif
 			return NOT_DEFAULT_WINDOW;
 
 		break;
@@ -907,7 +964,13 @@ int s3cfb_blank(int blank_mode, struct fb_info *fb)
 			/* s3cfb_display_off(fbdev);
 			pdata->clk_off(pdev, &fbdev->clock); */
 		}
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)\
+	|| defined(CONFIG_CPU_EXYNOS4210)
+		win_status = window_on_off_status(fbdev);
+		if (win_status != 0)
+#else
 		if (win->id != pdata->default_win)
+#endif
 			return NOT_DEFAULT_WINDOW;
 		break;
 

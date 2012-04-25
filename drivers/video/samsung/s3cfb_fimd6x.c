@@ -199,9 +199,13 @@ int s3cfb_set_clock(struct s3cfb_global *ctrl)
 	if (pdata->hw_ver == 0x70) {
 		cfg &= ~(S3C_VIDCON0_CLKVALUP_MASK |
 			S3C_VIDCON0_VCLKEN_MASK);
+#if defined(CONFIG_FB_S5P_MIPI_DSIM)
+		cfg |= (S3C_VIDCON0_CLKVALUP_ALWAYS |
+			S3C_VIDCON0_VCLKEN_FREERUN);
+#else
 		cfg |= (S3C_VIDCON0_CLKVALUP_ALWAYS |
 			S3C_VIDCON0_VCLKEN_NORMAL);
-
+#endif
 		src_clk = clk_get_rate(ctrl->clock);
 		printk(KERN_DEBUG "FIMD src sclk = %d\n", src_clk);
 	} else {
@@ -666,7 +670,7 @@ int s3cfb_get_win_cur_buf_addr(struct s3cfb_global *ctrl, int id)
 
 	start_addr = readl(ctrl->regs + S3C_VIDADDR_START0(id) + S3C_SHD_WIN_BASE);
 
-    dev_dbg(ctrl->dev, "[fb%d] start_addr: 0x%08x\n", id, start_addr);
+	dev_dbg(ctrl->dev, "[fb%d] start_addr: 0x%08x\n", id, start_addr);
 
 	return start_addr;
 }

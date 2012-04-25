@@ -122,7 +122,11 @@ obj-$(CONFIG_FB_S3C)		  += s3c-fb.o
 obj-$(CONFIG_S5P_DP)		  += s5p-dp.o s5p-dp-reg.o
 obj-$(CONFIG_FB_S3C2410)	  += s3c2410fb.o
 obj-$(CONFIG_FB_S5P)              += samsung/
+ifeq ($(CONFIG_NAPLES_COMMON),y)
+obj-$(CONFIG_S5P_MIPI_DSI2)	  += samsung/dsim2_tmp/
+else
 obj-$(CONFIG_S5P_MIPI_DSI2)	  += samsung/dsim2/
+endif
 obj-$(CONFIG_FB_S5P_EXTDSP)       += samsung_extdisp/
 obj-$(CONFIG_FIMD_EXT_SUPPORT)    += samsung/extension/
 obj-$(CONFIG_FB_FSL_DIU)	  += fsl-diu-fb.o

@@ -494,9 +494,13 @@ int s5p_dp_start_aux_transaction(struct s5p_dp_device *dp)
 	/* Clear interrupt source for AUX CH access error */
 	reg = readl(dp->reg_base + S5P_DP_INT_STA);
 	if (reg & AUX_ERR) {
+		dev_err(dp->dev, "AUX CH error happens reg : %x\n", reg);
 		writel(AUX_ERR, dp->reg_base + S5P_DP_INT_STA);
 		return -EREMOTEIO;
 	}
+
+	reg = readl(dp->reg_base + S5P_DP_INT_STA);
+	dev_err(dp->dev, "INT_STA AUX Err Status Reg : %x\n", reg);
 
 	/* Check AUX CH error access status */
 	reg = readl(dp->reg_base + S5P_DP_AUX_CH_STA);
@@ -707,8 +711,10 @@ int s5p_dp_read_bytes_from_dpcd(struct s5p_dp_device *dp,
 			retval = s5p_dp_start_aux_transaction(dp);
 			if (retval == 0)
 				break;
-			else
+			else {
 				dev_err(dp->dev, "Aux Transaction fail!\n");
+				msleep(20);
+			}
 		}
 
 		for (cur_data_idx = 0; cur_data_idx < cur_data_count;
@@ -1099,23 +1105,24 @@ int s5p_dp_init_video(struct s5p_dp_device *dp)
 	u32 reg;
 #if defined(CONFIG_MACH_P11_DP_01) || defined(CONFIG_MACH_P10_DP_01)
 
-	//Clear VID_CLK_CHG[1] and VID_FORMAT_CHG[3] and VSYNC_DET[7]
+	/* Clear VID_CLK_CHG[1] and VID_FORMAT_CHG[3] and VSYNC_DET[7] */
 	reg = VSYNC_DET | VID_FORMAT_CHG | VID_CLK_CHG;
 	writel(reg, dp->reg_base + S5P_DP_COMMON_INT_STA_1);
 
-	// I_STRM__CLK detect : DE_CTL : Auto detect
+	/* I_STRM__CLK detect : DE_CTL : Auto detect */
 	reg = 0x0;
 	writel(reg, dp->reg_base + S5P_DP_SYS_CTL_1);
 
-	//	I_STRM__CLK Freq Change Detect : clock Freq force change enable => Force clock not change , for protecting Display flicker 
-	reg = (0x4<< 4)|(0<<1)|(1<<0);
+	/* I_STRM__CLK Freq Change Detect : clock Freq force change enable
+		=> Force clock not change , for protecting Display flicker */
+	reg = (0x4 << 4)|(0 << 1)|(1 << 0);
 	writel(reg, dp->reg_base + S5P_DP_VIDEO_CTL_2);
 
-	// FIMD Video stream valid : Auto detect
+	/* FIMD Video stream valid : Auto detect */
 	reg = 0x0;
 	writel(reg, dp->reg_base + S5P_DP_VIDEO_CTL_3);
 
-	//Video VID_HRES_TH[7:4], VID_VRES_TH[3:0]
+	/* Video VID_HRES_TH[7:4], VID_VRES_TH[3:0] */
 	reg = (0x2 << 4) | (0x0 << 0);
 	writel(reg, dp->reg_base + S5P_DP_VIDEO_CTL_8);
 
@@ -1132,7 +1139,7 @@ int s5p_dp_init_video(struct s5p_dp_device *dp)
 
 	reg = 0x0;
 	writel(reg, dp->reg_base + S5P_DP_SYS_CTL_3);
-	
+
 #endif
 
 	reg = VID_HRES_TH(2) | VID_VRES_TH(0);

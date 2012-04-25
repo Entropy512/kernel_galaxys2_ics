@@ -31,6 +31,9 @@
 #include <mach/media.h>
 #include <mach/map.h>
 #include "s3cfb_extdsp.h"
+#ifdef CONFIG_BUSFREQ_OPP
+#include <mach/dev.h>
+#endif
 
 #ifdef CONFIG_HAS_WAKELOCK
 #include <linux/wakelock.h>
@@ -120,6 +123,11 @@ static int s3cfb_extdsp_probe(struct platform_device *pdev)
 
 	s3cfb_extdsp_update_power_state(fbdev[0], 0,
 			FB_BLANK_POWERDOWN);
+
+#ifdef CONFIG_BUSFREQ_OPP
+	/* To lock bus frequency in OPP mode */
+	fbdev[0]->bus_dev = dev_get("exynos-busfreq");
+#endif
 
 #ifdef CONFIG_HAS_WAKELOCK
 #ifdef CONFIG_HAS_EARLYSUSPEND

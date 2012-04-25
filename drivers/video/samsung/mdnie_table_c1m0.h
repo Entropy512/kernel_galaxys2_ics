@@ -625,15 +625,6 @@ struct mdnie_tunning_info tunning_table[CABC_MAX][MODE_MAX][SCENARIO_MAX] = {
 			{"STANDARD_GALLERY",		tune_standard_gallery},
 			{"STANDARD_VT",			tune_standard_vtcall},
 		}, {
-			{"MOVIE_UI",			tune_movie_ui},
-			{"MOVIE_VIDEO_NORMAL",		tune_movie_video},
-			{"MOVIE_VIDEO_WARM",		tune_movie_video},
-			{"MOVIE_VIDEO_COLD",		tune_movie_video},
-			{"CAMERA",			tune_camera},
-			{"MOVIE_UI",			tune_movie_ui},
-			{"MOVIE_GALLERY",		tune_movie_gallery},
-			{"MOVIE_VT",			tune_movie_vtcall},
-		}, {
 			{"NATURAL_UI",			tune_natural_ui},
 			{"NATURAL_VIDEO_NORMAL",	tune_natural_video},
 			{"NATURAL_VIDEO_WARM",		tune_natural_video},
@@ -642,6 +633,15 @@ struct mdnie_tunning_info tunning_table[CABC_MAX][MODE_MAX][SCENARIO_MAX] = {
 			{"NATURAL_UI",			tune_natural_ui},
 			{"NATURAL_GALLERY",		tune_natural_gallery},
 			{"NATURAL_VT",			tune_natural_vtcall},
+		}, {
+			{"MOVIE_UI",			tune_movie_ui},
+			{"MOVIE_VIDEO_NORMAL",		tune_movie_video},
+			{"MOVIE_VIDEO_WARM",		tune_movie_video},
+			{"MOVIE_VIDEO_COLD",		tune_movie_video},
+			{"CAMERA",			tune_camera},
+			{"MOVIE_UI",			tune_movie_ui},
+			{"MOVIE_GALLERY",		tune_movie_gallery},
+			{"MOVIE_VT",			tune_movie_vtcall},
 		},
 	}
 };

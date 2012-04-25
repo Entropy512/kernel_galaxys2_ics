@@ -1216,6 +1216,9 @@ static int s5p_dsim_probe(struct platform_device *pdev)
 	dsim.mipi_ddi_pd = (struct mipi_ddi_platform_data *) dsim.dsim_lcd_info->mipi_ddi_pd;
 	dsim.mipi_ddi_pd->te_irq = dsim.pd->te_irq;
 
+	if (dsim.pd->mipi_power)
+		dsim.pd->mipi_power(1);
+
 	strcpy(dsim.pd->lcd_panel_name, dsim.lcd_panel_info->name);
 
 	/* clock */

@@ -35,6 +35,10 @@
 #include <mach/map.h>
 #include "s3cfb.h"
 
+#ifdef CONFIG_BUSFREQ_OPP
+#include <mach/dev.h>
+#endif
+
 #ifdef CONFIG_FB_S5P_MDNIE
 #include "s3cfb_mdnie.h"
 #include "mdnie.h"
@@ -371,6 +375,13 @@ static int s3cfb_probe(struct platform_device *pdev)
 		s3cfb_display_on(fbdev[i]);
 #endif
 
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+#ifdef CONFIG_BUSFREQ_OPP
+		/* To lock bus frequency in OPP mode */
+		fbdev[i]->bus_dev = dev_get("exynos-busfreq");
+#endif
+#endif
+
 #ifdef CONFIG_HAS_WAKELOCK
 #ifdef CONFIG_HAS_EARLYSUSPEND
 		fbdev[i]->early_suspend.suspend = s3cfb_early_suspend;
@@ -493,12 +504,11 @@ void s3cfb_early_suspend(struct early_suspend *h)
 #elif defined(CONFIG_FB_S5P_LMS501KF03)
 		lms501kf03_ldi_disable();
 #endif
+		ret = s3cfb_display_off(fbdev[i]);
 
 #ifdef CONFIG_FB_S5P_MDNIE
 		ret += s3c_mdnie_stop();
 #endif
-		ret = s3cfb_display_off(fbdev[i]);
-
 		info->system_state = POWER_OFF;
 
 		if (fbdev[i]->regs) {
@@ -599,7 +609,9 @@ void s3cfb_late_resume(struct early_suspend *h)
 		s3c_mdnie_start(fbdev[i]);
 		set_mdnie_value(g_mdnie);
 #endif
+#ifndef CONFIG_MACH_JENGA
 		s3cfb_display_on(fbdev[i]);
+#endif
 
 		for (j = 0; j < pdata->nr_wins; j++) {
 			fb = fbdev[i]->fb[j];
@@ -616,6 +628,7 @@ void s3cfb_late_resume(struct early_suspend *h)
 		ams369fg06_ldi_init();
 		ams369fg06_ldi_enable();
 #endif
+
 		if (pdata->cfg_gpio)
 			pdata->cfg_gpio(pdev);
 
@@ -637,6 +650,8 @@ void s3cfb_late_resume(struct early_suspend *h)
 
 	return;
 }
+
+
 #else /* else !CONFIG_HAS_EARLYSUSPEND */
 
 int s3cfb_suspend(struct platform_device *pdev, pm_message_t state)

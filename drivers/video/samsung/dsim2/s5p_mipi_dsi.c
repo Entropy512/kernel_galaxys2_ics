@@ -602,13 +602,15 @@ static int s5p_mipi_dsi_probe(struct platform_device *pdev)
 			goto err_pm_runtime_active;
 		}
 
-		s5p_mipi_update_cfg(dsim);
+		s5p_mipi_dsi_init_interrupt(dsim);
 
 		/* set lcd panel sequence commands. */
 		if (client_drv && client_drv->set_sequence)
 			client_drv->set_sequence(dsim_ddi->dsim_lcd_dev);
-	} else
+	} else {
 		pm_runtime_set_suspended(&pdev->dev);
+		dsim->suspended = true;
+	}
 
 	pm_runtime_enable(&pdev->dev);
 	ret = pm_runtime_get_sync(&pdev->dev);

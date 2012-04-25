@@ -1360,8 +1360,10 @@ static int s3c_fb_ioctl(struct fb_info *info, unsigned int cmd,
 	int ret;
 	u32 crtc;
 
+#ifdef CONFIG_ION_EXYNOS
 	struct fb_var_screeninfo *var = &info->var;
 	int offset;
+#endif
 
 	union {
 		struct s3c_fb_user_window user_window;
@@ -2626,14 +2628,16 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 		dev_err(dev, "irq request failed\n");
 		goto err_ioremap;
 	}
-
-	s3c_fb_enable_irq_fifo(sfb);
 #endif
 
 	dev_dbg(dev, "got resources (regs %p), probing windows\n", sfb->regs);
 
 	platform_set_drvdata(pdev, sfb);
 	pm_runtime_get_sync(sfb->dev);
+
+#ifdef CONFIG_FB_EYYNOS_TRACE_UNDERRUN
+	s3c_fb_enable_irq_fifo(sfb);
+#endif
 
 	/* setup gpio and output polarity controls */
 

@@ -25,6 +25,10 @@
 #include <linux/suspend.h>
 #endif
 
+#ifdef CONFIG_BUSFREQ_OPP
+#include <mach/dev.h>
+#endif
+
 #include "s3cfb_extdsp.h"
 #define NOT_DEFAULT_WINDOW 99
 
@@ -32,6 +36,9 @@ int s3cfb_extdsp_enable_window(struct s3cfb_extdsp_global *fbdev, int id)
 {
 	struct s3cfb_extdsp_window *win = fbdev->fb[id]->par;
 
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_lock(fbdev->bus_dev, fbdev->dev, 133133);
+#endif
 	if (!win->enabled)
 		atomic_inc(&fbdev->enabled_win);
 
@@ -45,6 +52,10 @@ int s3cfb_extdsp_disable_window(struct s3cfb_extdsp_global *fbdev, int id)
 
 	if (win->enabled)
 		atomic_dec(&fbdev->enabled_win);
+
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_unlock(fbdev->bus_dev, fbdev->dev);
+#endif
 
 	win->enabled = 0;
 	return 0;

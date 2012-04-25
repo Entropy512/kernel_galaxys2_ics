@@ -24,17 +24,38 @@
 
 
 struct s6c1372_lcd {
+	unsigned int			power;
 	struct device			*dev;
 	struct lcd_device		*ld;
+	struct lcd_platform_data	*lcd_pd;
 };
 
 static int lvds_lcd_set_power(struct lcd_device *ld, int power)
 {
+	struct s6c1372_lcd *lcd = lcd_get_data(ld);
+	struct lcd_platform_data *pd = NULL;
+	if (power != FB_BLANK_UNBLANK && power != FB_BLANK_POWERDOWN &&
+		power != FB_BLANK_NORMAL) {
+		dev_err(&lcd->ld->dev, "power value should be 0, 1 or 4.\n");
+		return -EINVAL;
+	}
+	pd = lcd->lcd_pd;
+	if (power)
+		pd->power_on(lcd->ld, 0);
+	else
+		pd->power_on(lcd->ld, 1);
+	lcd->power = power;
 	return 0;
 }
+static int lvds_lcd_get_power(struct lcd_device *ld)
+{
+	struct s6c1372_lcd *lcd = lcd_get_data(ld);
 
+	return lcd->power;
+}
 static struct lcd_ops s6c1372_ops = {
 	.set_power = lvds_lcd_set_power,
+	.get_power = lvds_lcd_get_power,
 };
 
 extern unsigned int lcdtype;
@@ -79,6 +100,13 @@ static int __init s6c1372_probe(struct platform_device *pdev)
 		ret = PTR_ERR(lcd->ld);
 		goto out_free_lcd;
 	}
+	lcd->lcd_pd = pdev->dev.platform_data;
+	if (IS_ERR(lcd->lcd_pd)) {
+		pr_err("no platform data for lcd, cannot attach\n");
+		ret = PTR_ERR(lcd->lcd_pd);
+		goto out_free_lcd;
+	}
+	lcd->power = 1;
 	ret = device_create_file(&lcd->ld->dev, &dev_attr_lcd_type);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add sysfs entries\n");

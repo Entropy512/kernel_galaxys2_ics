@@ -155,6 +155,27 @@ void set_mdnie_value(struct mdnie_info *mdnie)
 	}
 
 #ifdef CONFIG_TARGET_LOCALE_KOR
+#if defined(CONFIG_MACH_M0_KOR_SKT) || defined(CONFIG_MACH_M0_KOR_KT) || \
+	defined(CONFIG_MACH_C1_KOR_SKT) || defined(CONFIG_MACH_C1_KOR_KT) || \
+	defined(CONFIG_MACH_C1_KOR_LGT)
+	dev_info(mdnie->dev, "ICS DMB SCENARIO ON\n");
+	if (SCENARIO_IS_DMB(mdnie->scenario)) {
+		idx = mdnie->scenario - DMB_NORMAL_MODE;
+		mdnie_send_sequence(mdnie, tune_ics_dmb[mdnie->mode].seq);
+		dev_info(mdnie->dev, "mode=%d, scenario=%d, outdoor=%d, cabc=%d, %s\n",
+			mdnie->mode, mdnie->scenario, mdnie->outdoor,
+			mdnie->cabc, tune_ics_dmb[mdnie->mode].name);
+	}
+
+	if (!((mdnie->tone == TONE_NORMAL) &&
+		  (mdnie->outdoor == OUTDOOR_OFF))) {
+		dev_info(mdnie->dev, "%s\n",
+			etc_table[mdnie->cabc][mdnie->outdoor][mdnie->tone].name);
+		mdnie_send_sequence(mdnie,
+			etc_table[mdnie->cabc][mdnie->outdoor][mdnie->tone].seq);
+	}
+	goto exit;
+#else
 	if (SCENARIO_IS_DMB(mdnie->scenario)) {
 		idx = mdnie->scenario - DMB_NORMAL_MODE;
 		mdnie_send_sequence(mdnie, tune_dmb[mdnie->outdoor][idx].seq);
@@ -163,6 +184,7 @@ void set_mdnie_value(struct mdnie_info *mdnie)
 			mdnie->cabc, tune_dmb[mdnie->outdoor][idx].name);
 		goto exit;
 	}
+#endif
 #endif
 
 	if (SCENARIO_IS_COLOR(mdnie->scenario)) {

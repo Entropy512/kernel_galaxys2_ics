@@ -6,10 +6,10 @@
 enum MODE {
 	DYNAMIC,
 	STANDARD,
-	MOVIE,
 #if !defined(CONFIG_FB_MDNIE_PWM)
 	NATURAL,
 #endif
+	MOVIE,
 	MODE_MAX,
 };
 

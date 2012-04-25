@@ -69,7 +69,7 @@ config FB_S5P_Y_VRES
 
 config VIDEO_SAMSUNG_MEMSIZE_FIMD
 	int "Memory size in kbytes for FIMD"
-	depends on FB_S5P
+	depends on (FB_S5P || DRM_EXYNOS_FIMD)
 	default "24576"
 
 config FB_S5P_MDNIE

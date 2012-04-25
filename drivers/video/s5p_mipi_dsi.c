@@ -677,7 +677,7 @@ static void s5p_mipi_dsi_late_resume(struct early_suspend *handler)
 
 #if defined(CONFIG_LCD_MIPI_TC358764)
 	int again = 1;
-	while (again == 1) {
+	while (again != 0 && again <= 1000) {
 		pm_runtime_get_sync(&pdev->dev);
 		clk_enable(dsim->clock);
 		s5p_mipi_dsi_init_dsim(dsim);
@@ -687,11 +687,11 @@ static void s5p_mipi_dsi_late_resume(struct early_suspend *handler)
 		s5p_mipi_dsi_set_display_mode(dsim, dsim->dsim_config);
 		s5p_mipi_dsi_clear_int_status(dsim, INTSRC_SFR_FIFO_EMPTY);
 		if (dsim->dsim_lcd_drv->displayon(dsim) == 0)
-			again = 1;
+			again++;
 		else
 			again = 0;
 		s5p_mipi_dsi_set_cpu_transfer_mode(dsim, 0);
-		if (again == 1)
+		if (again != 0)
 			s5p_mipi_dsi_sw_reset(dsim);
 	}
 #else
@@ -725,7 +725,7 @@ static int s5p_mipi_dsi_resume(struct device *dev)
 
 #if defined(CONFIG_LCD_MIPI_TC358764)
 	int again = 1;
-	while (again == 1) {
+	while (again != 0 && again <= 1000) {
 		pm_runtime_get_sync(dev);
 		clk_enable(dsim->clock);
 		s5p_mipi_dsi_init_dsim(dsim);
@@ -735,11 +735,11 @@ static int s5p_mipi_dsi_resume(struct device *dev)
 		s5p_mipi_dsi_set_display_mode(dsim, dsim->dsim_config);
 		s5p_mipi_dsi_clear_int_status(dsim, INTSRC_SFR_FIFO_EMPTY);
 		if (dsim->dsim_lcd_drv->displayon(dsim) == 0)
-			again = 1;
+			again++;
 		else
 			again = 0;
 		s5p_mipi_dsi_set_cpu_transfer_mode(dsim, 0);
-		if (again == 1)
+		if (again != 0)
 			s5p_mipi_dsi_sw_reset(dsim);
 	}
 #else
@@ -864,8 +864,7 @@ static int s5p_mipi_dsi_probe(struct platform_device *pdev)
 	}
 
 #if defined(CONFIG_LCD_MIPI_TC358764)
-	dsim->dsim_lcd_drv->probe(dsim);
-	while (again == 1) {
+	while (again != 0 && again <= 1000) {
 		s5p_mipi_dsi_init_dsim(dsim);
 		s5p_mipi_dsi_init_link(dsim);
 		/* initialize mipi-dsi client(lcd panel). */
@@ -874,18 +873,17 @@ static int s5p_mipi_dsi_probe(struct platform_device *pdev)
 		s5p_mipi_dsi_set_display_mode(dsim, dsim->dsim_config);
 		s5p_mipi_dsi_clear_int_status(dsim, INTSRC_SFR_FIFO_EMPTY);
 		if (dsim->dsim_lcd_drv->displayon(dsim) == 0)
-			again = 1;
+			again++;
 		else
 			again = 0;
 		s5p_mipi_dsi_set_cpu_transfer_mode(dsim, 0);
-		if (again == 1)
+		if (again != 0)
 			s5p_mipi_dsi_sw_reset(dsim);
 	}
 #else
 	s5p_mipi_dsi_init_dsim(dsim);
 	s5p_mipi_dsi_init_link(dsim);
 	/* initialize mipi-dsi client(lcd panel). */
-	dsim->dsim_lcd_drv->probe(dsim);
 	s5p_mipi_dsi_set_data_transfer_mode(dsim, 0);
 	s5p_mipi_dsi_set_display_mode(dsim, dsim->dsim_config);
 	dsim->dsim_lcd_drv->displayon(dsim);

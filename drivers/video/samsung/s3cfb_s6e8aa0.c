@@ -41,7 +41,7 @@
 	defined(CONFIG_MACH_C1VZW) || defined(CONFIG_MACH_SLP_PQ) ||\
 	defined(CONFIG_MACH_SLP_PQ_LTE) || defined(CONFIG_MACH_M3) ||\
 	defined(CONFIG_MACH_C1CTC) || defined(CONFIG_MACH_M0_CHNOPEN) ||\
-	defined(CONFIG_MACH_M0_CMCC)
+	defined(CONFIG_MACH_M0_CMCC) || defined(CONFIG_MACH_M0_CTC)
 #include "s6e8aa0_gamma_c1m0.h"
 #define SMART_DIMMING
 #else
@@ -74,8 +74,6 @@
 
 #ifdef SMART_DIMMING
 #define	PANEL_A1_M3			0xA1
-#define	PANEL_A2_M3			0xA2
-#define	PANEL_A1_SM2			0x12
 
 #define LDI_MTP_LENGTH		24
 #define LDI_MTP_ADDR			0xD3
@@ -99,12 +97,6 @@ struct str_elvss {
 	u8 reference;
 	u8 limit;
 };
-#endif
-
-#if defined(CONFIG_MACH_C1CTC) || defined(CONFIG_MACH_M0_CHNOPEN) ||\
-	defined(CONFIG_MACH_M0_CMCC)
-unsigned int lcdtype;
-EXPORT_SYMBOL(lcdtype);
 #endif
 
 struct lcd_info {
@@ -131,7 +123,6 @@ struct lcd_info {
 
 #ifdef SMART_DIMMING
 	unsigned int			support_elvss;
-	unsigned int			aid;
 
 	struct str_smart_dim		smart;
 	struct str_elvss		elvss;
@@ -676,9 +667,8 @@ err_alloc_elvss:
 		kfree(lcd->elvss_table[i-1]);
 		i--;
 	}
-err_alloc_elvss_table:
 	kfree(lcd->elvss_table);
-
+err_alloc_elvss_table:
 	return ret;
 }
 
@@ -718,9 +708,8 @@ err_alloc_gamma:
 		kfree(lcd->gamma_table[i-1]);
 		i--;
 	}
-err_alloc_gamma_table:
 	kfree(lcd->gamma_table);
-
+err_alloc_gamma_table:
 	return ret;
 }
 #endif
@@ -772,44 +761,38 @@ static int s6e8ax0_ldi_init(struct lcd_info *lcd)
 	s6e8ax0_write(lcd, SEQ_ELVSS_NVM_SETTING, ARRAY_SIZE(SEQ_ELVSS_NVM_SETTING));
 	s6e8ax0_write(lcd, SEQ_ELVSS_CONTROL, ARRAY_SIZE(SEQ_ELVSS_CONTROL));
 #else
-	s6e8ax0_write(lcd, SEQ_APPLY_LEVEL_2,\
-	ARRAY_SIZE(SEQ_APPLY_LEVEL_2));
-	s6e8ax0_write(lcd, SEQ_APPLY_MTP_KEY_ENABLE,\
-		ARRAY_SIZE(SEQ_APPLY_MTP_KEY_ENABLE));
-	s6e8ax0_write(lcd, SEQ_SLEEP_OUT, \
-		ARRAY_SIZE(SEQ_SLEEP_OUT));
+	s6e8ax0_write(lcd, SEQ_APPLY_LEVEL_2, ARRAY_SIZE(SEQ_APPLY_LEVEL_2));
+	s6e8ax0_write(lcd, SEQ_APPLY_MTP_KEY_ENABLE, ARRAY_SIZE(SEQ_APPLY_MTP_KEY_ENABLE));
+	s6e8ax0_write(lcd, SEQ_SLEEP_OUT, ARRAY_SIZE(SEQ_SLEEP_OUT));
 	msleep(5);
-	if (lcd->id[1] == 0xae)
-		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_480MBPS_46,\
-		ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_480MBPS_46));
-	else if (lcd->id[1] == 0x20) /* 4.8" HD for M0/C1*/
-		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_500MBPS,\
-		ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_500MBPS));
-	else
-		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_500MBPS_46,\
-		ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_500MBPS_46));
-	s6e8ax0_write(lcd, SEQ_DISPLAY_CONDITION_SET, \
-		ARRAY_SIZE(SEQ_DISPLAY_CONDITION_SET));
-	s6e8ax0_gamma_ctl(lcd);
-	s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, \
-		ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
+
 	if (lcd->id[1] == 0x20) { /* 4.8" HD for M0/C1*/
-		s6e8ax0_write(lcd, SEQ_ETC_PENTILE_CONTROL, \
-			ARRAY_SIZE(SEQ_ETC_PENTILE_CONTROL));
-		s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING, \
-			ARRAY_SIZE(SEQ_ETC_NVM_SETTING));
-		s6e8ax0_write(lcd, SEQ_ETC_POWER_CONTROL, \
-			ARRAY_SIZE(SEQ_ETC_POWER_CONTROL));
+		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_500MBPS, ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_500MBPS));
+		s6e8ax0_write(lcd, SEQ_DISPLAY_CONDITION_SET, ARRAY_SIZE(SEQ_DISPLAY_CONDITION_SET));
+		s6e8ax0_gamma_ctl(lcd);
+		s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
+		s6e8ax0_write(lcd, SEQ_ETC_PENTILE_CONTROL, ARRAY_SIZE(SEQ_ETC_PENTILE_CONTROL));
+		s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING, ARRAY_SIZE(SEQ_ETC_NVM_SETTING));
+		s6e8ax0_write(lcd, SEQ_ETC_POWER_CONTROL, ARRAY_SIZE(SEQ_ETC_POWER_CONTROL));
+	} else if (lcd->id[1] == 0xae) {
+		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_480MBPS_46, ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_480MBPS_46));
+		s6e8ax0_write(lcd, SEQ_DISPLAY_CONDITION_SET, ARRAY_SIZE(SEQ_DISPLAY_CONDITION_SET));
+		s6e8ax0_gamma_ctl(lcd);
+		s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
+		s6e8ax0_write(lcd, SEQ_ETC_PENTILE_CONTROL_46, ARRAY_SIZE(SEQ_ETC_PENTILE_CONTROL_46));
+		s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING_46, ARRAY_SIZE(SEQ_ETC_NVM_SETTING_46));
+		s6e8ax0_write(lcd, SEQ_ETC_POWER_CONTROL_46, ARRAY_SIZE(SEQ_ETC_POWER_CONTROL_46));
 	} else {
-		s6e8ax0_write(lcd, SEQ_ETC_PENTILE_CONTROL_46, \
-			ARRAY_SIZE(SEQ_ETC_PENTILE_CONTROL_46));
-		s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING_46, \
-			ARRAY_SIZE(SEQ_ETC_NVM_SETTING_46));
-		s6e8ax0_write(lcd, SEQ_ETC_POWER_CONTROL_46, \
-			ARRAY_SIZE(SEQ_ETC_POWER_CONTROL_46));
+		s6e8ax0_write(lcd, SEQ_PANEL_CONDITION_SET_500MBPS_46, ARRAY_SIZE(SEQ_PANEL_CONDITION_SET_500MBPS_46));
+		s6e8ax0_write(lcd, SEQ_DISPLAY_CONDITION_SET, ARRAY_SIZE(SEQ_DISPLAY_CONDITION_SET));
+		s6e8ax0_gamma_ctl(lcd);
+		s6e8ax0_write(lcd, SEQ_ETC_SOURCE_CONTROL, ARRAY_SIZE(SEQ_ETC_SOURCE_CONTROL));
+		s6e8ax0_write(lcd, SEQ_ETC_PENTILE_CONTROL_46, ARRAY_SIZE(SEQ_ETC_PENTILE_CONTROL_46));
+		s6e8ax0_write(lcd, SEQ_ETC_NVM_SETTING_46, ARRAY_SIZE(SEQ_ETC_NVM_SETTING_46));
+		s6e8ax0_write(lcd, SEQ_ETC_POWER_CONTROL_46, ARRAY_SIZE(SEQ_ETC_POWER_CONTROL_46));
 	}
-	s6e8ax0_write(lcd, SEQ_ELVSS_CONTROL,\
-		ARRAY_SIZE(SEQ_ELVSS_CONTROL));
+
+	s6e8ax0_write(lcd, SEQ_ELVSS_CONTROL, ARRAY_SIZE(SEQ_ELVSS_CONTROL));
 #endif
 
 	return ret;
@@ -1087,20 +1070,17 @@ static void s6e8aa0_check_id(struct lcd_info *lcd, u8 *idbuf)
 {
 	u32 i;
 
-	if (idbuf[2] == 0x33) {
+	for (i = 0; i < LDI_ID_LEN; i++)
+		lcd->smart.panelid[i] = idbuf[i];
+
+	if (idbuf[2] == 0x33)
 		lcd->support_elvss = 0;
-		printk(KERN_INFO "ID-3 is 0xff does not support dynamic elvss\n");
-	} else {
+	else {
 		lcd->support_elvss = 1;
 		lcd->elvss.limit = (idbuf[2] & 0xc0) >> 6;
 		lcd->elvss.reference = idbuf[2] & 0x3f;
-		printk(KERN_INFO "ID-3 is 0x%x support dynamic elvss\n", idbuf[2]);
-		printk(KERN_INFO "Dynamic ELVSS Information\n");
-		printk(KERN_INFO "limit    : %02x\n", lcd->elvss.limit);
+		printk(KERN_DEBUG "Dynamic ELVSS Information, 0x%x\n", lcd->elvss.reference);
 	}
-
-	for (i = 0; i < LDI_ID_LEN; i++)
-		lcd->smart.panelid[i] = idbuf[i];
 }
 #else
 static void s6e8aa0_check_id(struct lcd_info *lcd, u8 *idbuf)
@@ -1110,26 +1090,12 @@ static void s6e8aa0_check_id(struct lcd_info *lcd, u8 *idbuf)
 	for (i = 0; i < LDI_ID_LEN; i++)
 		lcd->smart.panelid[i] = idbuf[i];
 
-	lcd->aid = lcd->smart.panelid[2] & 0xe0 >> 5;
-
-#if defined(CONFIG_MACH_C1CTC) || defined(CONFIG_MACH_M0_CHNOPEN) ||\
-	defined(CONFIG_MACH_M0_CMCC)
-	lcdtype = lcd->smart.panelid[1];
-#endif
-
-	if (idbuf[0] == PANEL_A1_SM2) {
+	if (idbuf[0] == PANEL_A1_M3)
+		lcd->support_elvss = 0;
+	else {
 		lcd->support_elvss = 1;
-		lcd->aid = lcd->smart.panelid[2] & 0xe0 >> 5;
-		lcd->elvss.reference = lcd->smart.panelid[2] & 0x3f;
-
-		printk(KERN_DEBUG "Dynamic ELVSS Information\n");
-		printk(KERN_DEBUG "Refrence : %02x , lcd->aid= %02x\n", lcd->elvss.reference, lcd->aid);
-	} else if ((idbuf[0] == PANEL_A1_M3) || (idbuf[0] == PANEL_A2_M3)) {
-		lcd->support_elvss = 0;
-		printk(KERN_DEBUG "ID-3 is 0xff does not support dynamic elvss\n");
-	} else {
-		lcd->support_elvss = 0;
-		printk(KERN_DEBUG "No valid panel id\n");
+		lcd->elvss.reference = idbuf[2] & 0x3f;
+		printk(KERN_DEBUG "Dynamic ELVSS Information, 0x%x\n", lcd->elvss.reference);
 	}
 }
 #endif
@@ -1220,7 +1186,8 @@ static int s6e8ax0_probe(struct device *dev)
 
 	if (lcd->connected) {
 		ret = init_gamma_table(lcd);
-		ret += init_elvss_table(lcd);
+		if (lcd->support_elvss)
+			ret += init_elvss_table(lcd);
 
 		if (ret) {
 			lcd->gamma_table = (unsigned char **)gamma22_table_l;

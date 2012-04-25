@@ -71,6 +71,9 @@ struct s3cfb_extdsp_extdsp_desc {
 struct s3cfb_extdsp_global {
 	struct mutex		lock;
 	struct device		*dev;
+#ifdef CONFIG_BUSFREQ_OPP
+	struct device           *bus_dev;
+#endif
 	struct fb_info		**fb;
 
 	atomic_t		enabled_win;

@@ -41,6 +41,7 @@
 
 #define VER_142			(0x8e)	/* MACH_SLP_PQ */
 #define VER_42			(0x2a)	/* MACH_SLP_PQ_LTE */
+#define VER_32			(0x20)	/* MACH_SLP_PQ M0 B-Type */
 
 #define AID_DISABLE		(0x4)
 #define AID_1			(0x5)
@@ -73,7 +74,7 @@ struct s6e8aa0 {
 	unsigned int			power;
 	unsigned int			current_brightness;
 	unsigned int			updated;
-	unsigned int			gamma;
+	unsigned int			brightness;
 	unsigned int			resume_complete;
 	unsigned int			acl_enable;
 	unsigned int			cur_acl;
@@ -208,7 +209,14 @@ static void s6e8aa0_panel_cond(struct s6e8aa0 *lcd)
 		0x7d, 0x08, 0x27, 0x7d, 0x3f, 0x00, 0x00, 0x00, 0x20,
 		0x04, 0x08, 0x6e, 0x00, 0x00, 0x00, 0x02, 0x08, 0x08,
 		0x23, 0x23, 0xc0, 0xc8, 0x08, 0x48, 0xc1, 0x00, 0xc1,
-		0xff, 0xff, 0xc8,
+		0xff, 0xff, 0xc8
+	};
+	unsigned char data_to_send_v32[] = {
+		0xf8, 0x19, 0x35, 0x00, 0x00, 0x00, 0x94, 0x00, 0x3c,
+		0x7d, 0x10, 0x27, 0x08, 0x6e, 0x00, 0x00, 0x00, 0x00,
+		0x04, 0x08, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x08, 0x08,
+		0x23, 0x6e, 0xc0, 0xc1, 0x01, 0x81, 0xc1, 0x00, 0xc3,
+		0xf6, 0xf6, 0xc1
 	};
 	unsigned char *data_to_send;
 	unsigned int size;
@@ -220,6 +228,9 @@ static void s6e8aa0_panel_cond(struct s6e8aa0 *lcd)
 		data_to_send_v142[18] = s6e8aa0_apply_aid_panel_cond(lcd->aid);
 		data_to_send = data_to_send_v142;
 		size = ARRAY_SIZE(data_to_send_v142);
+	} else if (lcd->ver == VER_32) {
+		data_to_send = data_to_send_v32;
+		size = ARRAY_SIZE(data_to_send_v32);
 	} else
 		return;
 
@@ -252,10 +263,13 @@ static void s6e8aa0_etc_source_control(struct s6e8aa0 *lcd)
 static void s6e8aa0_etc_pentile_control(struct s6e8aa0 *lcd)
 {
 	struct mipi_dsim_master_ops *ops = lcd_to_master_ops(lcd);
-	const unsigned char data_to_send[] = {
+	unsigned char data_to_send[] = {
 		0xb6, 0x0c, 0x02, 0x03, 0x32, 0xff, 0x44, 0x44, 0xc0,
 		0x00
 	};
+
+	if (lcd->ver == VER_32)
+		data_to_send[5] = 0xc0;
 
 	ops->cmd_write(lcd_to_master(lcd), MIPI_DSI_DCS_LONG_WRITE,
 		(unsigned int)data_to_send, ARRAY_SIZE(data_to_send));
@@ -286,9 +300,12 @@ static void s6e8aa0_etc_mipi_control2(struct s6e8aa0 *lcd)
 static void s6e8aa0_etc_power_control(struct s6e8aa0 *lcd)
 {
 	struct mipi_dsim_master_ops *ops = lcd_to_master_ops(lcd);
-	const unsigned char data_to_send[] = {
+	unsigned char data_to_send[] = {
 		0xf4, 0xcf, 0x0a, 0x12, 0x10, 0x19, 0x33, 0x02
 	};
+
+	if (lcd->ver == VER_32)
+		data_to_send[3] = 0x15;
 
 	ops->cmd_write(lcd_to_master(lcd), MIPI_DSI_DCS_LONG_WRITE,
 		(unsigned int)data_to_send, ARRAY_SIZE(data_to_send));
@@ -333,22 +350,29 @@ static void s6e8aa0_elvss_nvm_set(struct s6e8aa0 *lcd)
 		0x40, 0x41, 0xd9, 0x00, 0x60, 0x19
 	};
 
-	switch (lcd->gamma) {
-	case 0 ... 3: /* 30cd ~ 100cd */
-		data_to_send[11] = 0xdf;
-		break;
-	case 4 ... 5: /* 120cd ~ 150cd */
-		data_to_send[11] = 0xdd;
-		break;
-	case 6 ... 7: /* 180cd ~ 210cd */
-		data_to_send[11] = 0xd9;
-		break;
-	case 8 ... 10: /* 240cd ~ 300cd */
-		data_to_send[11] = 0xd0;
-		break;
-	default:
-		break;
+	/* FIXME: !! need to change brightness and elvss */
+	if (lcd->ver == VER_32) {
+		data_to_send[8] = 0x07;
+		data_to_send[11] = 0xc1;
+	} else {
+		switch (lcd->brightness) {
+		case 0 ... 6: /* 30cd ~ 100cd */
+			data_to_send[11] = 0xdf;
+			break;
+		case 7 ... 11: /* 120cd ~ 150cd */
+			data_to_send[11] = 0xdd;
+			break;
+		case 12 ... 15: /* 180cd ~ 210cd */
+			data_to_send[11] = 0xd9;
+			break;
+		case 16 ... 24: /* 240cd ~ 300cd */
+			data_to_send[11] = 0xd0;
+			break;
+		default:
+			break;
+		}
 	}
+
 	ops->cmd_write(lcd_to_master(lcd), MIPI_DSI_DCS_LONG_WRITE,
 		(unsigned int)data_to_send, ARRAY_SIZE(data_to_send));
 }
@@ -410,6 +434,7 @@ static void s6e8aa0_acl_off(struct s6e8aa0 *lcd)
 static void s6e8aa0_acl_ctrl_set(struct s6e8aa0 *lcd)
 {
 	struct mipi_dsim_master_ops *ops = lcd_to_master_ops(lcd);
+	/* FIXME: !! must be review acl % value */
 	/* Full white 50% reducing setting */
 	const unsigned char cutoff_50[] = {
 		0xc1, 0x47, 0x53, 0x13, 0x53, 0x00, 0x00, 0x02, 0xcf,
@@ -434,33 +459,33 @@ static void s6e8aa0_acl_ctrl_set(struct s6e8aa0 *lcd)
 
 	if (lcd->acl_enable) {
 		if (lcd->cur_acl == 0) {
-			if (lcd->gamma == 0 || lcd->gamma == 1) {
+			if (lcd->brightness == 0 || lcd->brightness == 1) {
 				s6e8aa0_acl_off(lcd);
 				dev_dbg(&lcd->ld->dev,
 					"cur_acl=%d\n", lcd->cur_acl);
 			} else
 				s6e8aa0_acl_on(lcd);
 		}
-		switch (lcd->gamma) {
-		case 0: /* 30cd */
+		switch (lcd->brightness) {
+		case 0 ... 1: /* 30cd */
 			s6e8aa0_acl_off(lcd);
 			lcd->cur_acl = 0;
 			break;
-		case 1 ... 3: /* 50cd ~ 90cd */
+		case 2 ... 6: /* 50cd ~ 100cd */
 			ops->cmd_write(lcd_to_master(lcd),
 				MIPI_DSI_DCS_LONG_WRITE,
 				(unsigned int)cutoff_40,
 				ARRAY_SIZE(cutoff_40));
 			lcd->cur_acl = 40;
 			break;
-		case 4 ... 7: /* 120cd ~ 210cd */
+		case 7 ... 16: /* 120cd ~ 210cd */
 			ops->cmd_write(lcd_to_master(lcd),
 				MIPI_DSI_DCS_LONG_WRITE,
 				(unsigned int)cutoff_45,
 				ARRAY_SIZE(cutoff_45));
 			lcd->cur_acl = 45;
 			break;
-		case 8 ... 10: /* 220cd ~ 300cd */
+		case 17 ... 24: /* 220cd ~ 300cd */
 			ops->cmd_write(lcd_to_master(lcd),
 				MIPI_DSI_DCS_LONG_WRITE,
 				(unsigned int)cutoff_50,
@@ -527,7 +552,7 @@ static unsigned int s6e8aa0_read_mtp(struct s6e8aa0 *lcd, u8 *mtp_data)
 	return ret;
 }
 
-unsigned int convert_gamma_to_brightness(int gamma)
+unsigned int convert_brightness_to_gamma(int brightness)
 {
 	const unsigned int gamma_table[] = {
 		30, 30, 50, 70, 80, 90, 100, 120, 130, 140,
@@ -535,17 +560,17 @@ unsigned int convert_gamma_to_brightness(int gamma)
 		240, 250, 260, 270, 280, 300
 	};
 
-	return gamma_table[gamma] - 1;
+	return gamma_table[brightness] - 1;
 }
 
-static int s6e8aa0_update_gamma_ctrl(struct s6e8aa0 *lcd, int gamma)
+static int s6e8aa0_update_gamma_ctrl(struct s6e8aa0 *lcd, int brightness)
 {
 	struct mipi_dsim_master_ops *ops = lcd_to_master_ops(lcd);
 
 #ifdef CONFIG_BACKLIGHT_SMART_DIMMING
-	unsigned int brightness;
+	unsigned int gamma;
 	unsigned char gamma_set[GAMMA_TABLE_COUNT] = {0,};
-	brightness = convert_gamma_to_brightness(gamma);
+	gamma = convert_brightness_to_gamma(brightness);
 
 	gamma_set[0] = 0xfa;
 	gamma_set[1] = 0x01;
@@ -557,7 +582,7 @@ static int s6e8aa0_update_gamma_ctrl(struct s6e8aa0 *lcd, int gamma)
 			GAMMA_TABLE_COUNT);
 #else
 	ops->cmd_write(lcd_to_master(lcd), MIPI_DSI_DCS_LONG_WRITE,
-			(unsigned int)s6e8aa0_22_gamma_table[gamma],
+			(unsigned int)s6e8aa0_22_gamma_table[brightness],
 			GAMMA_TABLE_COUNT);
 #endif
 
@@ -565,16 +590,16 @@ static int s6e8aa0_update_gamma_ctrl(struct s6e8aa0 *lcd, int gamma)
 	ops->cmd_write(lcd_to_master(lcd), MIPI_DSI_DCS_SHORT_WRITE_PARAM,
 			0xf7, 0x03);
 
-	lcd->gamma = gamma;
+	lcd->brightness = brightness;
 
 	s6e8aa0_acl_ctrl_set(lcd);
 
 	return 0;
 }
 
-static int s6e8aa0_gamma_ctrl(struct s6e8aa0 *lcd, int gamma)
+static int s6e8aa0_gamma_ctrl(struct s6e8aa0 *lcd, int brightness)
 {
-	s6e8aa0_update_gamma_ctrl(lcd, gamma);
+	s6e8aa0_update_gamma_ctrl(lcd, brightness);
 
 	return 0;
 }
