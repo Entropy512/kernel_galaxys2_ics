@@ -2335,10 +2335,7 @@ static bool cbus_command_request(struct sii9234_data *sii9234,
 
 	sii9234->cbus_pkt.command = command;
 	sii9234->cbus_pkt.offset = offset;
-	if (command == CBUS_MSC_MSG)
-		sii9234->cbus_pkt.data[0] = offset;
-	else
-		sii9234->cbus_pkt.data[0] = data;
+	sii9234->cbus_pkt.data[0] = data;
 
 	pr_debug("sii9234: %s() Sending MSC_MSG SubCommand=%d"
 				", key-code=%d\n", __func__,

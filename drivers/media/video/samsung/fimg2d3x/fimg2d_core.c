@@ -154,17 +154,13 @@ int g2d_check_overlap(g2d_rect src_rect, g2d_rect dst_rect, g2d_clip clip)
 	src_start_addr = (unsigned int)GET_START_ADDR(src_rect);
 	src_end_addr = src_start_addr + (unsigned int)GET_RECT_SIZE(src_rect);
 	dst_start_addr = (unsigned int)GET_START_ADDR_C(dst_rect, clip);
-	dst_end_addr = dst_start_addr +
-			(unsigned int)GET_RECT_SIZE_C(dst_rect, clip);
+	dst_end_addr = dst_start_addr + (unsigned int)GET_RECT_SIZE_C(dst_rect, clip);
 
-	if ((dst_start_addr >= src_start_addr) &&
-			(dst_start_addr <= src_end_addr))
+	if ((dst_start_addr >= src_start_addr) && (dst_start_addr <= src_end_addr))
 		return true;
-	if ((dst_end_addr >= src_start_addr) &&
-			(dst_end_addr <= src_end_addr))
+	if ((dst_end_addr >= src_start_addr) && (dst_end_addr <= src_end_addr))
 		return true;
-	if ((src_start_addr >= dst_start_addr) &&
-			(src_end_addr <= dst_end_addr))
+	if ((src_start_addr >= dst_start_addr) && (src_end_addr <= dst_end_addr))
 		return true;
 
 	return false;
@@ -194,8 +190,7 @@ int g2d_do_blit(struct g2d_global *g2d_dev, g2d_params *params)
 		g2d_clip clip_src;
 		g2d_clip_for_src(&params->src_rect, &params->dst_rect, &params->clip, &clip_src);
 
-		if (g2d_check_overlap(params->src_rect, params->dst_rect,
-				params->clip))
+		if (g2d_check_overlap(params->src_rect, params->dst_rect, params->clip))
 			return false;
 
 		g2d_dev->src_attribute =

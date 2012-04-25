@@ -1465,7 +1465,7 @@ static int fimc_init_global(struct platform_device *pdev)
 		}
 
 		/* mclk */
-		cam->clk = clk_get(&pdev->dev, cam->clk_name);
+		cam->clk = clk_get(&pdev->dev, cam->get_clk_name());
 		if (IS_ERR(cam->clk)) {
 			fimc_err("%s: failed to get mclk source\n", __func__);
 			return -EINVAL;
@@ -1749,7 +1749,7 @@ static int __devinit fimc_probe(struct platform_device *pdev)
 	ctrl->power_status = FIMC_POWER_OFF;
 	pm_runtime_enable(&pdev->dev);
 #endif
-#ifdef CONFIG_BUSFREQ_OPP
+#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 	/* To lock bus frequency in OPP mode */
 	ctrl->bus_dev = dev_get(EXYNOS_BUSFREQ_NAME);
 #endif

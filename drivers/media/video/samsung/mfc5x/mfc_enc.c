@@ -148,11 +148,15 @@ int h263_get_init_arg(struct mfc_inst_ctx *ctx, void *arg)
 	struct mfc_enc_init_h263_arg *init_h263_arg;
 	unsigned int reg;
 	unsigned int shm;
+	struct mfc_enc_ctx *enc_ctx = (struct mfc_enc_ctx *)ctx->c_priv;;
 
 	get_init_arg(ctx, arg);
 
 	init_arg = (struct mfc_enc_init_arg *)arg;
 	init_h263_arg = &init_arg->codec.h263;
+
+	enc_ctx = (struct mfc_enc_ctx *)ctx->c_priv;
+	enc_ctx->numdpb = 2;
 
 	/* pictype : number of B, IDR period */
 	reg = read_reg(MFC_ENC_PIC_TYPE_CTRL);
@@ -231,11 +235,17 @@ int mpeg4_get_init_arg(struct mfc_inst_ctx *ctx, void *arg)
 	struct mfc_enc_init_mpeg4_arg *init_mpeg4_arg;
 	unsigned int reg;
 	unsigned int shm;
+	struct mfc_enc_ctx *enc_ctx = (struct mfc_enc_ctx *)ctx->c_priv;
 
 	get_init_arg(ctx, arg);
 
 	init_arg = (struct mfc_enc_init_arg *)arg;
 	init_mpeg4_arg = &init_arg->codec.mpeg4;
+
+	if (init_mpeg4_arg->in_bframenum > 0)
+		enc_ctx->numdpb = 4;
+	else
+		enc_ctx->numdpb = 2;
 
 	/* profile & level */
 	reg = read_reg(MFC_ENC_PROFILE);
@@ -329,11 +339,17 @@ int h264_get_init_arg(struct mfc_inst_ctx *ctx, void *arg)
 	struct mfc_enc_init_h264_arg *init_h264_arg;
 	unsigned int reg;
 	unsigned int shm;
+	struct mfc_enc_ctx *enc_ctx = (struct mfc_enc_ctx *)ctx->c_priv;
 
 	get_init_arg(ctx, arg);
 
 	init_arg = (struct mfc_enc_init_arg *)arg;
 	init_h264_arg = &init_arg->codec.h264;
+
+	if ((init_h264_arg->in_bframenum > 0) || (init_h264_arg->in_ref_num_p > 1))
+		enc_ctx->numdpb = 4;
+	else
+		enc_ctx->numdpb = 2;
 
 	/* height */
 	if (init_h264_arg->in_interlace_mode)
@@ -1217,7 +1233,7 @@ int set_strm_ref_buf(struct mfc_inst_ctx *ctx)
 
 	for (i = 0; i < 2; i++) {
 		/*
-		 * allocate y0, y1 ref buffer
+		 * allocate Y0, Y1 ref buffer
 		 */
 		alloc = _mfc_alloc_buf(ctx, enc_ctx->lumasize, ALIGN_2KB, MBT_DPB | PORT_A);
 		if (alloc == NULL) {
@@ -1229,9 +1245,12 @@ int set_strm_ref_buf(struct mfc_inst_ctx *ctx)
 		 * set luma ref buffer address
 		 */
 		write_reg(mfc_mem_base_ofs(alloc->real) >> 11, MFC_ENC_REF0_LUMA_ADR + (4 * i));
+	}
 
+	if (enc_ctx->numdpb == 4) {
+		for (i = 0; i < 2; i++) {
 		/*
-		 * allocate y2, y3 ref buffer
+		 * allocate Y2, Y3 ref buffer
 		 */
 		alloc = _mfc_alloc_buf(ctx, enc_ctx->lumasize, ALIGN_2KB, MBT_DPB | PORT_B);
 		if (alloc == NULL) {
@@ -1244,11 +1263,12 @@ int set_strm_ref_buf(struct mfc_inst_ctx *ctx)
 		 */
 		write_reg(mfc_mem_base_ofs(alloc->real) >> 11, MFC_ENC_REF2_LUMA_ADR + (4 * i));
 	}
+	}
 
 	/*
-	 * allocate c0 ~ c3 ref buffer
+	 * allocate C0 ~ C3 ref buffer
 	 */
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < enc_ctx->numdpb; i++) {
 		alloc = _mfc_alloc_buf(ctx, enc_ctx->chromasize, ALIGN_2KB, MBT_DPB | PORT_B);
 		if (alloc == NULL) {
 			mfc_err("failed alloc chroma ref buffer\n");
@@ -1528,7 +1548,6 @@ static int mfc_encoding_frame(struct mfc_inst_ctx *ctx, struct mfc_enc_exe_arg *
 #ifdef CONFIG_VIDEO_MFC_VCM_UMP
 	void *ump_handle;
 #endif
-
 
 	/* Set Frame Tag */
 	write_shm(ctx, exe_arg->in_frametag, SET_FRAME_TAG);

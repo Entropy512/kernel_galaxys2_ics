@@ -29,6 +29,30 @@ static inline char *imagename(enum image_object image)
 	}
 }
 
+static inline int is_opaque(enum color_format fmt)
+{
+	switch (fmt) {
+	case CF_ARGB_8888:
+	case CF_ARGB_1555:
+	case CF_ARGB_4444:
+		return 0;
+
+	case CF_XRGB_8888:
+	case CF_XRGB_1555:
+	case CF_XRGB_4444:
+		return 1;
+
+	case CF_RGB_565:
+	case CF_RGB_888:
+		return 1;
+
+	default:
+		break;
+	}
+
+	return 1;
+}
+
 static inline long elapsed_usec(struct timeval *start, struct timeval *end)
 {
 	long sec, usec, time;

@@ -10,8 +10,3 @@ config VIDEO_JPEG_V2X
 	select V4L2_MEM2MEM_DEV
 	---help---
 	  This is a Samsung JPEG H/W driver for V2.x
-
-config VIDEO_JPEG_DEBUG
-	bool "print JPEG debug message"
-	depends on VIDEO_JPEG_V2X
-	default n

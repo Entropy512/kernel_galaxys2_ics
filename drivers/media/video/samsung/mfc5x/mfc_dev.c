@@ -32,6 +32,9 @@
 #include <linux/clk.h>
 #endif
 
+#ifdef CONFIG_BUSFREQ_OPP
+#include <mach/dev.h>
+#endif
 #include <plat/cpu.h>
 
 #if defined(CONFIG_BUSFREQ) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
@@ -163,9 +166,7 @@ static int mfc_open(struct inode *inode, struct file *file)
 
 			mfcdev->drm_playback = 1;
 
-			/* Use MBS_FIRST_FIT default
 			mfc_set_buf_alloc_scheme(MBS_FIRST_FIT);
-			*/
 		} else {
 			/* reload F/W for first instance again */
 			if (soc_is_exynos4210()) {
@@ -192,6 +193,11 @@ static int mfc_open(struct inode *inode, struct file *file)
 			}
 		}
 #endif
+
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_lock(mfcdev->bus_dev, mfcdev->device, 133133);
+#endif
+
 		ret = mfc_power_on();
 		if (ret < 0) {
 			mfc_err("power enable failed\n");
@@ -304,6 +310,10 @@ err_start_hw:
 	}
 
 err_pwr_enable:
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_unlock(mfcdev->bus_dev, mfcdev->device);
+#endif
+
 err_fw_state:
 #ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
 err_drm_playback:
@@ -343,9 +353,7 @@ static int mfc_release(struct inode *inode, struct file *file)
 #ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
 	mfcdev->drm_playback = 0;
 
-	/* Use MBS_FIRST_FIT default
 	mfc_set_buf_alloc_scheme(MBS_BEST_FIT);
-	*/
 #endif
 	mfc_info("MFC instance [%d:%d] released\n", mfc_ctx->id,
 		atomic_read(&mfcdev->inst_cnt));
@@ -358,6 +366,9 @@ static int mfc_release(struct inode *inode, struct file *file)
 	mfc_destroy_inst(mfc_ctx);
 
 	if (atomic_read(&dev->inst_cnt) == 0) {
+#ifdef CONFIG_BUSFREQ_OPP
+		dev_unlock(mfcdev->bus_dev, mfcdev->device);
+#endif
 		ret = mfc_power_off();
 		if (ret < 0) {
 			mfc_err("power disable failed\n");
@@ -1186,6 +1197,10 @@ static int __devinit mfc_probe(struct platform_device *pdev)
 	}
 #endif
 
+#ifdef CONFIG_BUSFREQ_OPP
+	/* To lock bus frequency in OPP mode */
+	mfcdev->bus_dev = dev_get("exynos-busfreq");
+#endif
 	/*
 	 * initialize buffer manager
 	 */
@@ -1202,7 +1217,7 @@ static int __devinit mfc_probe(struct platform_device *pdev)
 		goto err_misc_reg;
 	}
 
-	if (soc_is_exynos4212() ||
+	if ((soc_is_exynos4212() && (samsung_rev() < EXYNOS4212_REV_1_0)) ||
 		(soc_is_exynos4412() && (samsung_rev() < EXYNOS4412_REV_1_1)))
 		mfc_pd_enable();
 

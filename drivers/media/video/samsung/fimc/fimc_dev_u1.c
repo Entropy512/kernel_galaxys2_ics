@@ -55,10 +55,9 @@ void s3c_fimc_irq_work(struct work_struct *work)
 {
 	struct fimc_control *ctrl = container_of(work, struct fimc_control,
 			work_struct);
-	int ret, irq_cnt;
+	int ret;
 
-	irq_cnt = atomic_read(&ctrl->irq_cnt);
-	if (irq_cnt > 0) {
+	if (ctrl->irq_cnt.counter > 0) {
 		do {
 			ret = atomic_dec_and_test((atomic_t *)&ctrl->irq_cnt);
 			pm_runtime_put_sync(ctrl->dev);
@@ -165,16 +164,14 @@ static inline u32 fimc_irq_out_single_buf(struct fimc_control *ctrl,
 		if (ret < 0)
 			fimc_err("%s:Fail: fimc_output_set_dst_addr\n", __func__);
 
-		ctrl->out->idxs.active.ctx = ctx_num;
-		ctrl->out->idxs.active.idx = next;
-
-		ctx->status = FIMC_STREAMON;
-		ctrl->status = FIMC_STREAMON;
-
 		ret = fimc_outdev_start_camif(ctrl);
 		if (ret < 0)
 			fimc_err("%s:Fail: fimc_start_camif\n", __func__);
 
+		ctrl->out->idxs.active.ctx = ctx_num;
+		ctrl->out->idxs.active.idx = next;
+		ctx->status = FIMC_STREAMON;
+		ctrl->status = FIMC_STREAMON;
 	} else {	/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -225,16 +222,14 @@ static inline u32 fimc_irq_out_multi_buf(struct fimc_control *ctrl,
 		if (ret < 0)
 			fimc_err("%s:Fail: fimc_output_set_dst_addr\n", __func__);
 
-		ctrl->out->idxs.active.ctx = ctx_num;
-		ctrl->out->idxs.active.idx = next;
-
-		ctx->status = FIMC_STREAMON;
-		ctrl->status = FIMC_STREAMON;
-
 		ret = fimc_outdev_start_camif(ctrl);
 		if (ret < 0)
 			fimc_err("%s:Fail: fimc_start_camif\n", __func__);
 
+		ctrl->out->idxs.active.ctx = ctx_num;
+		ctrl->out->idxs.active.idx = next;
+		ctx->status = FIMC_STREAMON;
+		ctrl->status = FIMC_STREAMON;
 	} else {	/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -308,17 +303,15 @@ static inline u32 fimc_irq_out_dma(struct fimc_control *ctrl,
 			if (check_bit(cfg, i))
 				fimc_hwset_output_address(ctrl, &buf_set, i);
 		}
+		ret = fimc_outdev_start_camif(ctrl);
+		if (ret < 0)
+			fimc_err("Fail: fimc_start_camif\n");
 
 		ctrl->out->idxs.active.ctx = ctx_num;
 		ctrl->out->idxs.active.idx = next;
 
 		ctx->status = FIMC_STREAMON;
 		ctrl->status = FIMC_STREAMON;
-
-		ret = fimc_outdev_start_camif(ctrl);
-		if (ret < 0)
-			fimc_err("Fail: fimc_start_camif\n");
-
 	} else {		/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -384,18 +377,10 @@ static inline void fimc_irq_out(struct fimc_control *ctrl)
 	struct fimc_ctx *ctx;
 	u32 wakeup = 1;
 	int ctx_num = ctrl->out->idxs.active.ctx;
+	ctx = &ctrl->out->ctx[ctx_num];
 
 	/* Interrupt pendding clear */
 	fimc_hwset_clear_irq(ctrl);
-
-	/* check context num */
-	if (ctx_num < 0 || ctx_num >= FIMC_MAX_CTXS) {
-		fimc_err("fimc_irq_out: invalid ctx (ctx=%d)\n", ctx_num);
-		wake_up(&ctrl->wq);
-		return;
-	}
-
-	ctx = &ctrl->out->ctx[ctx_num];
 
 	switch (ctx->overlay.mode) {
 	case FIMC_OVLY_NONE_SINGLE_BUF:
@@ -413,8 +398,6 @@ static inline void fimc_irq_out(struct fimc_control *ctrl)
 			wakeup = fimc_irq_out_fimd(ctrl, ctx);
 		break;
 	default:
-		fimc_err("[ctx=%d] fimc_irq_out: wrong overlay.mode (%d)\n",
-				ctx_num, ctx->overlay.mode);
 		break;
 	}
 
@@ -1710,11 +1693,13 @@ static int __devinit fimc_probe(struct platform_device *pdev)
 	sprintf(buf, "fimc%d_iqr_wq_name", ctrl->id);
 	ctrl->fimc_irq_wq = create_workqueue(buf);
 
-	if (ctrl->fimc_irq_wq == NULL)
-		printk(KERN_ERR "Cannot create workqueue for fimc driver\n");
+	if (ctrl->fimc_irq_wq == NULL) {
+		fimc_err("Cannot create workqueue for fimc driver\n");
+		goto err_global;
+	}
 
 	INIT_WORK(&ctrl->work_struct, s3c_fimc_irq_work);
-	atomic_set(&ctrl->irq_cnt, 0);
+	ctrl->irq_cnt.counter = 0;
 #endif
 
 	return 0;

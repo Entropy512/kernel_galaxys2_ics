@@ -32,15 +32,9 @@ struct mfc_pm {
 	char		pd_name[MFC_NAME_LEN];
 	char		clk_name[MFC_NAME_LEN];
 	struct clk	*clock;
-#ifdef CONFIG_ARCH_EXYNOS4
 	atomic_t	power;
-#if defined(CONFIG_PM_RUNTIME) || defined(CONFIG_CPU_FREQ)
+#ifdef CONFIG_PM_RUNTIME
 	struct device	*device;
-#endif
-#ifdef CONFIG_CPU_FREQ
-	struct clk	*op_clk;
-	struct notifier_block	freq_transition;
-#endif
 #endif
 };
 
@@ -109,6 +103,9 @@ struct mfc_dev {
 	struct s5p_vcm_mmu	*_vcm_mmu;
 
 	struct device		*device;
+#ifdef CONFIG_BUSFREQ_OPP
+	struct device           *bus_dev;
+#endif
 #if defined(CONFIG_BUSFREQ) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 	atomic_t		busfreq_lock_cnt; /* Bus frequency Lock count */
 #endif

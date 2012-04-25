@@ -26,7 +26,7 @@
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf-core.h>
 #include <media/v4l2-mediabus.h>
-#ifdef CONFIG_BUSFREQ_OPP
+#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 #include <mach/dev.h>
 #endif
 #include <plat/media.h>
@@ -452,7 +452,7 @@ struct fimc_control {
 	spinlock_t			outq_lock;
 	wait_queue_head_t		wq;
 	struct device			*dev;
-#ifdef CONFIG_BUSFREQ_OPP
+#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 	struct device			*bus_dev;
 #endif
 	int				irq;

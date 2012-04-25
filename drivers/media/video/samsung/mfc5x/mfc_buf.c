@@ -37,7 +37,7 @@ static struct list_head mfc_alloc_head[MFC_MAX_MEM_PORT_NUM];
 /* The free node list sorted by real address */
 static struct list_head mfc_free_head[MFC_MAX_MEM_PORT_NUM];
 
-static enum MFC_BUF_ALLOC_SCHEME buf_alloc_scheme = MBS_FIRST_FIT;
+static enum MFC_BUF_ALLOC_SCHEME buf_alloc_scheme = MBS_BEST_FIT;
 
 /* FIXME: test locking, add locking mechanisim */
 /*

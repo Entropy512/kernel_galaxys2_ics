@@ -39,8 +39,12 @@ void fimg2d4x_reset(struct fimg2d_control *info)
 #else
 	writel(FIMG2D_SFR_CLEAR, info->regs + FIMG2D_SOFT_RESET_REG);
 #endif
-	/* remove wince option */
+	/* turn off wince option */
 	writel(0x0, info->regs + FIMG2D_BLEND_FUNCTION_REG);
+
+	/* set default repeat mode to clamp */
+	writel(FIMG2D_SRC_REPEAT_CLAMP, info->regs + FIMG2D_SRC_REPEAT_MODE_REG);
+	writel(FIMG2D_MSK_REPEAT_CLAMP, info->regs + FIMG2D_MSK_REPEAT_MODE_REG);
 }
 
 void fimg2d4x_enable_irq(struct fimg2d_control *info)
@@ -335,8 +339,8 @@ void fimg2d4x_enable_dithering(struct fimg2d_control *info)
 	writel(cfg, info->regs + FIMG2D_BITBLT_COMMAND_REG);
 }
 
-
 #define MAX_PRECISION 16
+#define DEFAULT_SCALE_RATIO	0x10000
 
 /**
  * scale_factor_to_fixed16 - convert scale factor to fixed pint 16
@@ -347,6 +351,9 @@ inline static unsigned long scale_factor_to_fixed16(int n, int d)
 {
 	int i;
 	u32 fixed16;
+
+	if (!d)
+		return DEFAULT_SCALE_RATIO;
 
 	fixed16 = (n/d) << 16;
 	n %= d;
@@ -460,8 +467,8 @@ void fimg2d4x_set_src_repeat(struct fimg2d_control *info, struct fimg2d_repeat *
 	unsigned long cfg;
 
 	if (r->mode == NO_REPEAT)
-		cfg = FIMG2D_SRC_REPEAT_CLAMP;
-	else
+		return;
+
 		cfg = (r->mode - REPEAT_NORMAL) << FIMG2D_SRC_REPEAT_SHIFT;
 
 	writel(cfg, info->regs + FIMG2D_SRC_REPEAT_MODE_REG);

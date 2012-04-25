@@ -787,7 +787,7 @@ static int flite_register_callback(struct device *dev, void *p)
 
 	sd = dev_get_drvdata(dev);
 	if (sd) {
-		struct platform_device *pdev = v4l2_get_subdevdata(sd);
+		struct platform_device *pdev = v4l2_get_subdev_hostdata(sd);
 		*(sd_list + pdev->id) = sd;
 	}
 
@@ -1241,8 +1241,10 @@ int fimc_s_fmt_vid_private(struct file *file, void *fh, struct v4l2_format *f)
 		mbus_fmt = &ctrl->cap->mbus_fmt;
 		mbus_fmt->width = pix->width;
 		mbus_fmt->height = pix->height;
-
-		printk(KERN_INFO "%s mbus_fmt->width = %d, height = %d, \n",
+#ifdef CONFIG_MACH_S2PLUS
+		mbus_fmt->field = pix->priv;
+#endif
+		printk(KERN_INFO "%s mbus_fmt->width = %d, height = %d,\n",
 			__func__,mbus_fmt->width ,mbus_fmt->height);
 
 		depth = fimc_fmt_depth(ctrl, pix);
@@ -1348,11 +1350,9 @@ int fimc_s_fmt_vid_capture(struct file *file, void *fh, struct v4l2_format *f)
 		 * in JPEG compressed format
 		*/
 		cap->fmt.colorspace = V4L2_COLORSPACE_JPEG;
-		cap->fmt.priv = V4L2_PIX_FMT_MODE_CAPTURE;
 	} else {
 		cap->fmt.bytesperline = (cap->fmt.width * depth) >> 3;
 		cap->fmt.sizeimage = (cap->fmt.bytesperline * cap->fmt.height);
-		cap->fmt.priv = V4L2_PIX_FMT_MODE_PREVIEW;
 	}
 
 
@@ -2024,7 +2024,7 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 			ctrl->cap->sensor_output_height);
 		break;
 
-#ifdef CONFIG_BUSFREQ_OPP
+#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 	case V4L2_CID_CAMERA_BUSFREQ_LOCK:
 		/* lock bus frequency */
 		dev_lock(ctrl->bus_dev, ctrl->dev, (unsigned long)c->value);
@@ -2065,6 +2065,9 @@ int fimc_g_ext_ctrls_capture(void *fh, struct v4l2_ext_controls *c)
 	int ret = 0;
 	mutex_lock(&ctrl->v4l2_lock);
 
+	if (ctrl->cam->sd)
+		/* try on subdev */
+		ret = v4l2_subdev_call(ctrl->cam->sd, core, g_ext_ctrls, c);
 	if (ctrl->is.sd)
 		/* try on subdev */
 		ret = v4l2_subdev_call(ctrl->is.sd, core, g_ext_ctrls, c);
@@ -2731,6 +2734,8 @@ int fimc_qbuf_capture(void *fh, struct v4l2_buffer *b)
 	int idx = b->index;
 	int framecnt_seq;
 	int available_bufnum;
+	size_t length = 0;
+	int i;
 
 	if (!cap || !ctrl->cam) {
 		fimc_err("%s: No capture device.\n", __func__);
@@ -2769,6 +2774,48 @@ int fimc_qbuf_capture(void *fh, struct v4l2_buffer *b)
 	}
 
 	mutex_unlock(&ctrl->v4l2_lock);
+
+	if (!cap->cacheable)
+		return 0;
+
+	for (i = 0; i < 3; i++) {
+		if (cap->bufs[b->index].base[i])
+			length += cap->bufs[b->index].length[i];
+		else
+			break;
+	}
+
+	if (length > (unsigned long) L2_FLUSH_ALL) {
+		flush_cache_all();      /* L1 */
+		smp_call_function((smp_call_func_t)__cpuc_flush_kern_all, NULL, 1);
+		outer_flush_all();      /* L2 */
+	} else if (length > (unsigned long) L1_FLUSH_ALL) {
+		flush_cache_all();      /* L1 */
+		smp_call_function((smp_call_func_t)__cpuc_flush_kern_all, NULL, 1);
+
+		for (i = 0; i < 3; i++) {
+			phys_addr_t start = cap->bufs[b->index].base[i];
+			phys_addr_t end   = cap->bufs[b->index].base[i] +
+					    cap->bufs[b->index].length[i] - 1;
+
+			if (!start)
+				break;
+
+			outer_flush_range(start, end);  /* L2 */
+		}
+	} else {
+		for (i = 0; i < 3; i++) {
+			phys_addr_t start = cap->bufs[b->index].base[i];
+			phys_addr_t end   = cap->bufs[b->index].base[i] +
+					    cap->bufs[b->index].length[i] - 1;
+
+			if (!start)
+				break;
+
+			dmac_flush_range(phys_to_virt(start), phys_to_virt(end));
+			outer_flush_range(start, end);  /* L2 */
+		}
+	}
 
 	return 0;
 }

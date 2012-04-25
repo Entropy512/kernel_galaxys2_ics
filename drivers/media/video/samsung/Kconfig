@@ -21,7 +21,6 @@ if CPU_EXYNOS4210 || CPU_EXYNOS4212 || CPU_EXYNOS4412
 	source "drivers/media/video/samsung/mali/Kconfig"
 endif
 
-
 config VIDEO_FIMG2D
 	bool
 	select S5P_SYSTEM_MMU
@@ -83,7 +82,7 @@ config VIDEO_SAMSUNG_MEMSIZE_MFC1
 
 config VIDEO_SAMSUNG_MEMSIZE_JPEG
 	int "Memory size in kbytes for JPEG"
-	depends on (VIDEO_JPEG || VIDEO_JPEG_V2X) && (!CPU_EXYNOS5250)
+	depends on VIDEO_JPEG || (VIDEO_JPEG_V2X && CPU_EXYNOS4212)
 	default "40960"
 
 config VIDEO_SAMSUNG_MEMSIZE_TVOUT
