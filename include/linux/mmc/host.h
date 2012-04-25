@@ -238,7 +238,10 @@ struct mmc_host {
 
 #define MMC_CAP2_CACHE_CTRL	(1 << 1)	/* Allow cache control */
 #define MMC_CAP2_POWEROFF_NOTIFY (1 << 2)	/* Notify poweroff supported */
-#define MMC_CAP2_PACKED_CMD	(1 << 4)	/* Allow packed command */
+#define MMC_CAP2_PACKED_RD	(1 << 3)	/* Allow packed read */
+#define MMC_CAP2_PACKED_WR	(1 << 4)	/* Allow packed write */
+#define MMC_CAP2_PACKED_CMD	(MMC_CAP2_PACKED_RD | \
+				 MMC_CAP2_PACKED_WR) /* Allow packed commands */
 
 	mmc_pm_flag_t		pm_caps;	/* supported pm features */
 	unsigned int        power_notify_type;
@@ -310,6 +313,7 @@ struct mmc_host {
 	int			claim_cnt;	/* "claim" nesting count */
 
 	struct delayed_work	detect;
+	int			detect_change;	/* card detect flag */
 	struct wake_lock	detect_wake_lock;
 
 	const struct mmc_bus_ops *bus_ops;	/* current bus driver */

@@ -43,4 +43,10 @@ struct acc_con_platform_data {
 	int hdmi_hpd_gpio;
 };
 
+#if defined(CONFIG_STMPE811_ADC)
+u16 stmpe811_get_adc_data(u8 channel);
+#endif
+
+extern struct device *sec_switch_dev;
+
 #endif

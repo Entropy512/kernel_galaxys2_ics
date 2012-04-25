@@ -107,6 +107,7 @@ struct max77686_platform_data {
 	/* ---- PMIC ---- */
 	struct max77686_regulator_data *regulators;
 	int num_regulators;
+	int has_full_constraints;
 
 	struct max77686_opmode_data *opmode_data;
 	int ramp_rate;

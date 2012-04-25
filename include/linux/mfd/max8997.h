@@ -125,7 +125,7 @@ enum {
 	UART_PATH_AP,
 };
 
-enum cable_type {
+typedef enum cable_type {
 	CABLE_TYPE_NONE = 0,
 	CABLE_TYPE_USB,
 	CABLE_TYPE_OTG,
@@ -141,7 +141,7 @@ enum cable_type {
 	CABLE_TYPE_MHL,
 	CABLE_TYPE_MHL_VB,
 	CABLE_TYPE_UNKNOWN
-};
+} cable_type_t;
 
 struct max8997_muic_data {
 	void		(*usb_cb) (u8 attached);

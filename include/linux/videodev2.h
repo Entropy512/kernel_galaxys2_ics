@@ -439,7 +439,7 @@ struct v4l2_fmtdesc {
 	__u32		    index;             /* Format number      */
 	enum v4l2_buf_type  type;              /* buffer type        */
 	__u32               flags;
-	__u8		    description[32];   /* Description string */
+	__u8		    description[64];   /* Description string */
 	__u32		    pixelformat;       /* Format fourcc      */
 	__u32		    reserved[4];
 };

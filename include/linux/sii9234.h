@@ -46,4 +46,8 @@ extern	void mhl_hpd_handler(bool onoff);
 extern	int	max77693_muic_get_status1_adc1k_value(void);
 #endif
 
+#ifdef CONFIG_MACH_MIDAS
+extern void sii9234_wake_lock(void);
+extern void sii9234_wake_unlock(void);
+#endif
 #endif /* _SII9234_H_ */

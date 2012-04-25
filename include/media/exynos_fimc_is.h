@@ -14,6 +14,13 @@
 #include <linux/videodev2.h>
 
 #define FIMC_IS_MAX_CAMIF_CLIENTS	2
+#define EXYNOS4_FIMC_IS_MAX_DIV_CLOCKS		2
+#define EXYNOS4_FIMC_IS_MAX_CONTROL_CLOCKS	16
+
+#define UART_ISP_SEL		0
+#define UART_ISP_RATIO		1
+
+#define to_fimc_is_plat(d)	(to_platform_device(d)->dev.platform_data)
 
 struct platform_device;
 
@@ -40,9 +47,11 @@ struct exynos4_fimc_is_sensor_info {
 */
 struct exynos4_platform_fimc_is {
 	int	hw_ver;
-	struct exynos4_fimc_is_sensor_info
-		*sensor_info[FIMC_IS_MAX_CAMIF_CLIENTS];
+	struct clk	*div_clock[EXYNOS4_FIMC_IS_MAX_DIV_CLOCKS];
+	struct clk	*control_clock[EXYNOS4_FIMC_IS_MAX_CONTROL_CLOCKS];
 	void	(*cfg_gpio)(struct platform_device *pdev);
+	int	(*clk_get)(struct platform_device *pdev);
+	int	(*clk_put)(struct platform_device *pdev);
 	int	(*clk_cfg)(struct platform_device *pdev);
 	int	(*clk_on)(struct platform_device *pdev);
 	int	(*clk_off)(struct platform_device *pdev);
@@ -68,6 +77,8 @@ extern void exynos_fimc_is_cfg_gpio(struct platform_device *pdev);
 extern int exynos_fimc_is_cfg_clk(struct platform_device *pdev);
 extern int exynos_fimc_is_clk_on(struct platform_device *pdev);
 extern int exynos_fimc_is_clk_off(struct platform_device *pdev);
+extern int exynos_fimc_is_clk_get(struct platform_device *pdev);
+extern int exynos_fimc_is_clk_put(struct platform_device *pdev);
 
 /* defined by architecture to configure gpio */
 extern void exynos5_fimc_is_cfg_gpio(struct platform_device *pdev);

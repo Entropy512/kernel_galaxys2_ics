@@ -82,8 +82,12 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 #define TCP_URG_VALID	0x0100
 #define TCP_URG_NOTYET	0x0200
 #define TCP_URG_READ	0x0400
-
-#define TCP_RETR1	3	/*
+#ifdef CONFIG_TARGET_KOR_LGT_TCP 
+#define TCP_RETR1	4
+#else
+#define TCP_RETR1	3	
+#endif
+            /*
 				 * This is how many retries it does before it
 				 * tries to figure out if the gateway is
 				 * down. Minimal RFC value is 3; it corresponds
@@ -122,7 +126,11 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 #endif
 #define TCP_RTO_MAX	((unsigned)(120*HZ))
 #define TCP_RTO_MIN	((unsigned)(HZ/5))
+#ifdef CONFIG_TARGET_KOR_LGT_TCP 
+#define TCP_TIMEOUT_INIT ((unsigned)(1*HZ))	/* RFC 1122 initial RTO value	*/
+#else
 #define TCP_TIMEOUT_INIT ((unsigned)(3*HZ))	/* RFC 1122 initial RTO value	*/
+#endif
 
 #define TCP_RESOURCE_PROBE_INTERVAL ((unsigned)(HZ/2U)) /* Maximal interval between probes
 					                 * for local resources.

@@ -14,6 +14,8 @@
 #ifndef _LINUX_MMC_DW_MMC_H_
 #define _LINUX_MMC_DW_MMC_H_
 
+#include <linux/scatterlist.h>
+
 #define MAX_MCI_SLOTS	2
 
 enum dw_mci_state {
@@ -79,6 +81,7 @@ struct dw_mci_next {
  * @pdev: Platform device associated with the MMC controller.
  * @pdata: Platform data associated with the MMC controller.
  * @slot: Slots sharing this MMC controller.
+ * @fifo_depth: depth of FIFO.
  * @data_shift: log2 of FIFO item size.
  * @push_data: Pointer to FIFO push function.
  * @pull_data: Pointer to FIFO pull function.
@@ -113,7 +116,7 @@ struct dw_mci {
 	void __iomem		*regs;
 
 	struct scatterlist	*sg;
-	unsigned int		pio_offset;
+	struct sg_mapping_iter	sg_miter;
 
 	struct dw_mci_slot	*cur_slot;
 	struct mmc_request	*mrq;
@@ -162,7 +165,7 @@ struct dw_mci {
 	u32			ddr_timing;
 
 	/* FIFO push and pull */
-	u32			fifo_depth;
+	int			fifo_depth;
 	int			data_shift;
 	void (*push_data)(struct dw_mci *host, void *buf, int cnt);
 	void (*pull_data)(struct dw_mci *host, void *buf, int cnt);
@@ -215,10 +218,14 @@ struct dw_mci_board {
 
 	unsigned int caps;	/* Capabilities */
 	unsigned int caps2;	/* More capabilities */
+	/*
+	 * Override fifo depth. If 0, autodetect it from the FIFOTH register,
+	 * but note that this may not be reliable after a bootloader has used
+	 * it.
+	 */
+	unsigned int fifo_depth;
 
 	unsigned int buf_size;	/* Buffer size */
-
-	u32 fifo_depth;
 
 	/* delay in mS before detecting cards after interrupt */
 	u32 detect_delay_ms;

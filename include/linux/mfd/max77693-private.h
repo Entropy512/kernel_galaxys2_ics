@@ -206,6 +206,14 @@ enum max77693_reg_ctrl1_val {
 	MAX77693_MUIC_CTRL1_BIN_7_111 = 0x07,
 };
 
+enum max77693_switch_sel_val {
+	MAX77693_SWITCH_SEL_1st_BIT_USB		= 0x1 << 0,
+	MAX77693_SWITCH_SEL_2nd_BIT_UART	= 0x1 << 1,
+#ifdef CONFIG_LTE_VIA_SWITCH
+	MAX77693_SWITCH_SEL_3rd_BIT_LTE_UART	= 0x1 << 2,
+#endif
+};
+
 enum max77693_reg_ctrl1_type {
 	CTRL1_AP_USB =
 		(MAX77693_MUIC_CTRL1_BIN_1_001 << COMP2SW_SHIFT)

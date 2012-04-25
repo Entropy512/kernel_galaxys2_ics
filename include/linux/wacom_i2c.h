@@ -1,3 +1,7 @@
+
+#ifndef _LINUX_WACOM_I2C_H
+#define _LINUX_WACOM_I2C_H
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -9,11 +13,9 @@
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
-#include <linux/earlysuspend.h>
 
-#define SEC_DVFS_LOCK
-#ifdef SEC_DVFS_LOCK
-#include <mach/cpufreq.h>
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
 #endif
 
 #define NAMEBUF 12
@@ -55,6 +57,9 @@
 /* #define INIT_FIRMWARE_FLASH */
 
 #if defined(CONFIG_MACH_P4)
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+#define SEC_BUS_LOCK
+#endif
 #define WACOM_HAVE_RESET_CONTROL 0
 #define WACOM_POSX_MAX 21866
 #define WACOM_POSY_MAX 13730
@@ -178,4 +183,14 @@ struct wacom_i2c {
 	int (*power)(int on);
 	struct work_struct update_work;
 	struct delayed_work resume_work;
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	unsigned int cpufreq_level;
+	bool dvfs_lock_status;
+	struct delayed_work dvfs_work;
+#ifdef SEC_BUS_LOCK
+	struct device *bus_dev;
+#endif
+#endif
 };
+
+#endif /* _LINUX_WACOM_I2C_H */

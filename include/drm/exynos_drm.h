@@ -77,6 +77,22 @@ struct drm_exynos_gem_mmap {
 };
 
 /**
+ * A structure for user connection request of virtual display.
+ *
+ * @connection: indicate whether doing connetion or not by user.
+ * @extensions: if this value is 1 then the vidi driver would need additional
+ *	128bytes edid data.
+ * @pad: just padding to be 64-bit aligned.
+ * @edid: the edid data pointer from user side.
+ */
+struct drm_exynos_vidi_connection {
+	unsigned int connection;
+	unsigned int extensions;
+	unsigned int pad;
+	void *edid;
+};
+
+/**
  * A structure for ump.
  *
  * @gem_handle: a pointer to gem object created.
@@ -149,6 +165,7 @@ struct drm_exynos_plane_set_zpos {
 #define DRM_EXYNOS_GEM_MMAP		0x02
 /* Reserved 0x03 ~ 0x05 for exynos specific gem ioctl */
 #define DRM_EXYNOS_PLANE_SET_ZPOS	0x06
+#define DRM_EXYNOS_VIDI_CONNECTION	0x07
 
 /* temporary ioctl command. */
 #define DRM_EXYNOS_GEM_EXPORT_UMP	0x10
@@ -181,22 +198,39 @@ struct drm_exynos_plane_set_zpos {
 #define DRM_IOCTL_EXYNOS_PLANE_SET_ZPOS	DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_EXYNOS_PLANE_SET_ZPOS, struct drm_exynos_plane_set_zpos)
 
+#define DRM_IOCTL_EXYNOS_VIDI_CONNECTION	DRM_IOWR(DRM_COMMAND_BASE + \
+		DRM_EXYNOS_VIDI_CONNECTION, struct drm_exynos_vidi_connection)
+
+/**
+ * A structure for lcd panel information.
+ *
+ * @timing: default video mode for initializing
+ * @width_mm: physical size of lcd width.
+ * @height_mm: physical size of lcd height.
+ */
+struct exynos_drm_panel_info {
+	struct fb_videomode timing;
+	u32 width_mm;
+	u32 height_mm;
+};
+
 /**
  * Platform Specific Structure for DRM based FIMD.
  *
- * @timing: default video mode for initializing
+ * @panel: default panel info for initializing
  * @default_win: default window layer number to be used for UI.
  * @bpp: default bit per pixel.
  * @enabled: indicate whether fimd hardware was on or not at bootloader.
  */
 struct exynos_drm_fimd_pdata {
-	struct fb_videomode		timing;
+	struct exynos_drm_panel_info panel;
 	u32				vidcon0;
 	u32				vidcon1;
 	unsigned int			default_win;
 	unsigned int			bpp;
 	bool				enabled;
 	bool				mdnie_enabled;
+	bool				boot_on;
 	unsigned int			dynamic_refresh;
 	unsigned int			high_freq;
 };
@@ -221,11 +255,13 @@ struct exynos_drm_common_hdmi_pd {
  * @timing: default video mode for initializing
  * @default_win: default window layer number to be used for UI.
  * @bpp: default bit per pixel.
+ * @is_v13: set if hdmi version 13 is.
  */
 struct exynos_drm_hdmi_pdata {
 	struct fb_videomode		timing;
 	unsigned int			default_win;
 	unsigned int			bpp;
+	unsigned int			is_v13:1;
 };
 
 #endif
