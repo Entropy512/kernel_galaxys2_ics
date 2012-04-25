@@ -218,6 +218,9 @@
 static struct wacom_g5_callbacks *wacom_callbacks;
 #endif /* CONFIG_EPEN_WACOM_G5SP */
 
+#if defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+#include <linux/synaptics_s7301.h>
+#endif
 static struct charging_status_callbacks {
 	void (*tsp_set_charging_cable) (int type);
 } charging_cbs;
@@ -2182,6 +2185,7 @@ static struct s3c_mshci_platdata exynos4_mshc_pdata __initdata = {
 #elif defined(CONFIG_EXYNOS4_MSHC_DDR)
 	.host_caps = MMC_CAP_1_8V_DDR | MMC_CAP_UHS_DDR50,
 #endif
+	.int_power_gpio = GPIO_XMMC0_CDn,
 };
 #endif
 
@@ -4413,6 +4417,14 @@ static struct mxt_platform_data mxt_data = {
 
 #if defined(CONFIG_TOUCHSCREEN_MXT1386)
 static struct mxt_callbacks *charger_callbacks;
+static void  sec_mxt1386_charger_infom(bool en)
+{
+	if (charger_callbacks && charger_callbacks->inform_charger)
+		charger_callbacks->inform_charger(charger_callbacks, en);
+
+	printk(KERN_DEBUG "[TSP] %s - %s\n", __func__,
+		en ? "on" : "off");
+}
 static void p3_register_touch_callbacks(struct mxt_callbacks *cb)
 {
 	charger_callbacks = cb;
@@ -4567,7 +4579,7 @@ static struct mxt_platform_data p4w_touch_platform_data = {
 	.palmsupression_config.reserved1 = 0,
 	.palmsupression_config.reserved2 = 0,
 	/* 40 -> 20(For PalmSuppression detect) */
-	.palmsupression_config.largeobjthr = 20,
+	.palmsupression_config.largeobjthr = 10,
 	/* 5 -> 50(For PalmSuppression detect) */
 	.palmsupression_config.distancethr = 50,
 	.palmsupression_config.supextto = 5,
@@ -4615,6 +4627,42 @@ static struct mxt_platform_data p4w_touch_platform_data = {
 #endif
 };
 #endif
+
+#if defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+static void synaptics_tsp_set_power(bool en)
+{
+	if (en) {
+		s3c_gpio_cfgpin(GPIO_TSP_LDO_ON, S3C_GPIO_OUTPUT);
+		s3c_gpio_setpull(GPIO_TSP_LDO_ON, S3C_GPIO_PULL_NONE);
+		gpio_set_value(GPIO_TSP_LDO_ON, 1);
+		s3c_gpio_cfgpin(GPIO_TSP_RST, S3C_GPIO_OUTPUT);
+		s3c_gpio_setpull(GPIO_TSP_RST, S3C_GPIO_PULL_NONE);
+		gpio_set_value(GPIO_TSP_RST, 1);
+		s3c_gpio_setpull(GPIO_TSP_INT, S3C_GPIO_PULL_NONE);
+		s3c_gpio_cfgpin(GPIO_TSP_INT, S3C_GPIO_SFN(0xf));
+	} else {
+		s3c_gpio_cfgpin(GPIO_TSP_INT, S3C_GPIO_OUTPUT);
+		s3c_gpio_setpull(GPIO_TSP_INT, S3C_GPIO_PULL_NONE);
+		gpio_set_value(GPIO_TSP_INT, 0);
+		s3c_gpio_cfgpin(GPIO_TSP_RST, S3C_GPIO_OUTPUT);
+		s3c_gpio_setpull(GPIO_TSP_RST, S3C_GPIO_PULL_NONE);
+		gpio_set_value(GPIO_TSP_RST, 0);
+		s3c_gpio_cfgpin(GPIO_TSP_LDO_ON, S3C_GPIO_OUTPUT);
+		s3c_gpio_setpull(GPIO_TSP_LDO_ON, S3C_GPIO_PULL_NONE);
+		gpio_set_value(GPIO_TSP_LDO_ON, 0);
+	}
+}
+
+static struct synaptics_platform_data synaptics_pdata = {
+	.max_x = TS_MAX_X_COORD,
+	.max_y = TS_MAX_Y_COORD,
+	.max_pressure = TS_MAX_Z_TOUCH,
+	.max_width = TS_MAX_W_TOUCH,
+	.set_power = synaptics_tsp_set_power,
+	.mux_i2c_set = NULL,
+};
+#endif
+
 #ifdef CONFIG_I2C_S3C2410
 /* I2C0 */
 static struct i2c_board_info i2c_devs0[] __initdata = {
@@ -4653,23 +4701,34 @@ static struct i2c_board_info i2c_devs2[] __initdata = {
 #endif
 #ifdef CONFIG_S3C_DEV_I2C3
 /* I2C3 */
-#if defined(CONFIG_TOUCHSCREEN_MXT1386)
+#if defined(CONFIG_TOUCHSCREEN_MXT1386)	\
+	|| defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+#include <plat/regs-iic.h>
 static struct s3c2410_platform_i2c i2c3_data __initdata = {
 	.flags		= 0,
 	.bus_num	= 3,
 	.slave_addr	= 0x10,
-	.frequency	= 200 * 1000,
-	.sda_delay	= 100,
+	.frequency	= 400 * 1000,
+	.sda_delay	= S3C2410_IICLC_SDA_DELAY5 | S3C2410_IICLC_FILTER_ON,
 };
 #endif
 
-static struct i2c_board_info i2c_devs3[] __initdata = {
-#if defined(CONFIG_TOUCHSCREEN_MXT1386)
+#if defined(CONFIG_TOUCHSCREEN_MXT1386)	\
+	&& defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+static struct i2c_board_info i2c_devs3_mxt[] __initdata = {
 	{
 		I2C_BOARD_INFO("sec_touchscreen", 0x4c),
 		.platform_data = &p4w_touch_platform_data,
 	},
-#endif
+};
+static struct i2c_board_info i2c_devs3_syn[] __initdata = {
+	{
+		I2C_BOARD_INFO(SYNAPTICS_TS_NAME, 0x20),
+		.platform_data = &synaptics_pdata,
+	},
+};
+#else
+static struct i2c_board_info i2c_devs3[] __initdata = {
 #ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT224_U1
 	{
 		I2C_BOARD_INFO(MXT224_DEV_NAME, 0x4a),
@@ -4694,13 +4753,13 @@ static struct i2c_board_info i2c_devs3[] __initdata = {
 	    .platform_data	= &ts_data,
 	},
 #endif
-
 };
 #endif
+#endif	/* CONFIG_S3C_DEV_I2C3 */
+
 #ifdef CONFIG_S3C_DEV_I2C4
 #ifdef CONFIG_EPEN_WACOM_G5SP
 static int p4w_wacom_init_hw(void);
-static int p4w_wacom_exit_hw(void);
 static int p4w_wacom_suspend_hw(void);
 static int p4w_wacom_resume_hw(void);
 static int p4w_wacom_early_suspend_hw(void);
@@ -4713,7 +4772,6 @@ static struct wacom_g5_platform_data p4w_wacom_platform_data = {
 	.y_invert = 0,
 	.xy_switch = 0,
 	.init_platform_hw = p4w_wacom_init_hw,
-/*	.exit_platform_hw =,	*/
 	.suspend_platform_hw = p4w_wacom_suspend_hw,
 	.resume_platform_hw = p4w_wacom_resume_hw,
 	.early_suspend_platform_hw = p4w_wacom_early_suspend_hw,
@@ -4833,10 +4891,10 @@ static int p4w_wacom_reset_hw(void)
 	msleep(200);
 	gpio_set_value(OMAP_GPIO_PEN_RST, 1);
 #endif
-	printk(KERN_INFO "[E-PEN] : wacom warm reset(%d).\n", WACOM_HAVE_RESET_CONTROL);
+	printk(KERN_INFO "[E-PEN] : wacom warm reset(%d).\n",
+		WACOM_HAVE_RESET_CONTROL);
 	return 0;
 }
-
 #endif /* CONFIG_EPEN_WACOM_G5SP */
 
 
@@ -5151,7 +5209,25 @@ static struct i2c_board_info i2c_devs11[] __initdata = {
 
 #endif
 
-#endif
+#endif /* CONFIG_S3C_DEV_I2C11_EMUL */
+
+/* I2C13 EMUL*/
+#ifdef CONFIG_VIDEO_SR200PC20_P2
+static struct i2c_gpio_platform_data  i2c13_platdata = {
+	.sda_pin		= VT_CAM_SDA_18V,
+	.scl_pin		= VT_CAM_SCL_18V,
+	.udelay			= 2,    /* 250KHz */
+	.sda_is_open_drain	= 0,
+	.scl_is_open_drain	= 0,
+	.scl_is_output_only	= 0,
+};
+
+static struct platform_device s3c_device_i2c13 = {
+	.name			= "i2c-gpio",
+	.id			= 13,
+	.dev.platform_data	= &i2c13_platdata,
+};
+#endif /* CONFIG_VIDEO_SR200PC20_P2 */
 
 #if defined(CONFIG_MHL_SII9234)
 static void sii9234_init(void)
@@ -5416,6 +5492,11 @@ static struct lcd_platform_data p4_lcd_platform_data = {
 static struct platform_device lcd_s6c1372 = {
 	.name   = "s6c1372",
 	.id	= -1,
+#if defined(CONFIG_FB_S5P_S6F1202A)
+	.dev.platform_data = &p2_lcd_platform_data,
+#else
+	.dev.platform_data = &p4_lcd_platform_data,
+#endif
 };
 static struct s3c_platform_fb fb_platform_data __initdata = {
 	.hw_ver		= 0x70,
@@ -6005,7 +6086,8 @@ static void  sec_charger_cb(int set_cable_type)
 #if defined(CONFIG_TOUCHSCREEN_MMS152)
 	sec_charger_melfas_cb(is_cable_attached);
 #elif defined(CONFIG_TOUCHSCREEN_MXT1386)
-/*	sec_mxt1386_charger_infom(is_cable_attached); */
+	if (system_rev < 13)
+		sec_mxt1386_charger_infom(is_cable_attached);
 #else
 	if (charging_cbs.tsp_set_charging_cable)
 		charging_cbs.tsp_set_charging_cable(is_cable_attached);
@@ -6413,6 +6495,9 @@ static struct platform_device *smdkc210_devices[] __initdata = {
 #endif
 #if defined(CONFIG_S3C_DEV_I2C11_EMUL)
 	&s3c_device_i2c11,
+#endif
+#if defined(CONFIG_VIDEO_SR200PC20_P2)
+	&s3c_device_i2c13,
 #endif
 #if defined(CONFIG_S3C_DEV_I2C14_EMUL)
 	&s3c_device_i2c14,
@@ -6847,9 +6932,12 @@ static void __init exynos4_reserve_mem(void)
 		"android_pmem.0=pmem;android_pmem.1=pmem_gpu1;"
 		"s3cfb.0=fimd;exynos4-fb.0=fimd;"
 		"s3c-fimc.0=fimc0;s3c-fimc.1=fimc1;s3c-fimc.2=fimc2;"
-		"exynos4210-fimc.0=fimc0;exynos4210-fimc.1=fimc1;"
-		"exynos4210-fimc.2=fimc2;exynos4210-fimc3=fimc3;"
-		"s3c-mfc=mfc,mfc0,mfc1;"
+		"exynos4210-fimc.0=fimc0;exynos4210-fimc.1=fimc1;exynos4210-fimc.2=fimc2;exynos4210-fimc3=fimc3;"
+#ifdef CONFIG_VIDEO_MFC5X
+		"s3c-mfc/A=mfc0,mfc-secure;"
+		"s3c-mfc/B=mfc1,mfc-normal;"
+		"s3c-mfc/AB=mfc;"
+#endif
 		"samsung-rp=srp;"
 		"s5p-jpeg=jpeg;"
 #ifdef CONFIG_VIDEO_EXYNOS_FIMC_IS
@@ -6937,7 +7025,8 @@ static void __init universal_tsp_init(void)
 	gpio_export(gpio, 0);
 #endif
 
-#if defined(CONFIG_TOUCHSCREEN_MXT1386) || defined(CONFIG_TOUCHSCREEN_MMS152)
+#if defined(CONFIG_TOUCHSCREEN_MXT1386) || defined(CONFIG_TOUCHSCREEN_MMS152) \
+	|| defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
 	gpio = GPIO_TSP_RST;
 	gpio_request(gpio, "TSP_RST");
 	gpio_direction_output(gpio, 1);
@@ -6954,9 +7043,16 @@ static void __init universal_tsp_init(void)
 #endif
 	s3c_gpio_cfgpin(gpio, S3C_GPIO_SFN(0xf));
 	s3c_gpio_setpull(gpio, S3C_GPIO_PULL_UP);
+#if defined(CONFIG_TOUCHSCREEN_MXT1386)	\
+	&& defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+	i2c_devs3_mxt[0].irq = gpio_to_irq(gpio);
+	i2c_devs3_syn[0].irq = gpio_to_irq(gpio);
+#else
 	i2c_devs3[0].irq = gpio_to_irq(gpio);
+#endif
 
-	printk(KERN_INFO "%s touch : %d\n", __func__, i2c_devs3[0].irq);
+	printk(KERN_INFO "%s touch irq : %d, system_rev : %d\n",
+		__func__, gpio_to_irq(gpio), system_rev);
 
 #if defined(CONFIG_TOUCHSCREEN_MMS152)
 
@@ -7058,12 +7154,21 @@ static void __init smdkc210_machine_init(void)
 #endif
 #ifdef CONFIG_S3C_DEV_I2C3
 	universal_tsp_init();
-#if defined(CONFIG_TOUCHSCREEN_MXT1386)
+#if defined(CONFIG_TOUCHSCREEN_MXT1386) \
+	&& defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S7301)
+	if (system_rev >= 13)
+		i2c_register_board_info(3, i2c_devs3_syn,
+			ARRAY_SIZE(i2c_devs3_syn));
+	else {
+		i2c_register_board_info(3, i2c_devs3_mxt,
+			ARRAY_SIZE(i2c_devs3_mxt));
+		i2c3_data.frequency = 100 * 1000;
+	}
 	s3c_i2c3_set_platdata(&i2c3_data);
 #else
 	s3c_i2c3_set_platdata(NULL);
-#endif
 	i2c_register_board_info(3, i2c_devs3, ARRAY_SIZE(i2c_devs3));
+#endif
 #endif
 #ifdef CONFIG_S3C_DEV_I2C4
 #ifdef CONFIG_EPEN_WACOM_G5SP
@@ -7153,6 +7258,13 @@ static void __init smdkc210_machine_init(void)
 		platform_device_register(&s3c_device_i2c12);
 	}
 #endif
+
+	/* I2C13 EMUL */
+#if 0 /*defined(CONFIG_VIDEO_SR200PC20) && defined(CONFIG_MACH_P4W_REV01)*/
+	if (system_rev < 2)
+		platform_device_register(&s3c_device_i2c13);
+#endif
+
 #if defined(CONFIG_MHL_SII9234)
 	sii9234_init();
 	i2c_register_board_info(15, i2c_devs15, ARRAY_SIZE(i2c_devs15));

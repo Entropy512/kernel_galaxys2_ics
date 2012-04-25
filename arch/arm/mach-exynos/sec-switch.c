@@ -39,10 +39,13 @@
 #include <linux/jack.h>
 #endif
 
+#ifdef CONFIG_MACH_SLP_NAPLES
+#include <mach/naples-tsp.h>
+#endif
 #define MUIC_DEBUG 1
 #ifdef MUIC_DEBUG
 #define MUIC_PRINT_LOG()	\
-	pr_info("MUIC:[%s] func:%s \n", __FILE__, __func__);
+	pr_info("MUIC:[%s] func:%s\n", __FILE__, __func__);
 #else
 #define MUIC_PRINT_LOG()	{}
 #endif
@@ -61,6 +64,51 @@ bool is_cable_attached;
 bool is_jig_attached;
 
 static int uart_switch_init(void);
+
+#ifdef CONFIG_CHARGER_MANAGER
+#define CURRENT_USB	475000
+#define CURRENT_TA	650000
+
+enum cable_type_t {
+	CABLE_TYPE_NONE = 0,
+	CABLE_TYPE_USB,
+	CABLE_TYPE_TA,
+};
+
+static void charge_current_set(int cable_type)
+{
+	static struct regulator *regulator;
+	int ret;
+
+	if (regulator == NULL) {
+		regulator = regulator_get(NULL, "vinchg1");
+		if (IS_ERR_OR_NULL(regulator)) {
+			pr_err("%s : falied to get regulator\n", __func__);
+			regulator = NULL;
+			goto out;
+		}
+	}
+
+	switch (cable_type) {
+	case CABLE_TYPE_USB:
+		ret = regulator_set_current_limit(regulator, CURRENT_USB,
+			CURRENT_USB + 25000);
+		break;
+	case CABLE_TYPE_TA:
+		ret = regulator_set_current_limit(regulator, CURRENT_TA,
+			CURRENT_TA + 25000);
+		break;
+	default:
+		pr_err("%s : unsupported type of cable\n", __func__);
+	}
+
+	if (ret < 0)
+		pr_err("%s : failed to set current limit\n", __func__);
+
+out:
+	return;
+}
+#endif
 
 static ssize_t midas_switch_show_vbus(struct device *dev,
 				      struct device_attribute *attr, char *buf)
@@ -177,6 +225,17 @@ int max77693_muic_charger_cb(enum cable_type_muic cable_type)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_CHARGER_MANAGER
+	if (is_cable_attached)
+		charge_current_set(CABLE_TYPE_TA);
+#endif
+#ifdef CONFIG_MACH_SLP_NAPLES
+	tsp_charger_infom(is_cable_attached);
+#endif
+#ifdef CONFIG_JACK_MON
+	jack_event_handler("charger", is_cable_attached);
+#endif
+
 	return 0;
 }
 
@@ -214,6 +273,9 @@ void max77693_muic_usb_cb(u8 usb_mode)
 			pr_info("usb: muic: USB_CABLE_ATTACHED(%d)\n",
 				usb_mode);
 			usb_gadget_vbus_connect(gadget);
+#ifdef CONFIG_CHARGER_MANAGER
+			charge_current_set(CABLE_TYPE_USB);
+#endif
 			break;
 		default:
 			pr_info("usb: muic: invalid mode%d\n", usb_mode);
@@ -269,12 +331,18 @@ void max77693_muic_mhl_cb(int attached)
 	if (attached == MAX77693_MUIC_ATTACHED) {
 		/*MHL_On(1);*/ /* GPIO_LEVEL_HIGH */
 		pr_info("MHL Attached !!\n");
-#ifdef	CONFIG_SAMSUNG_MHL
+#ifdef CONFIG_SAMSUNG_MHL
 		sii9234_mhl_detection_sched();
+#ifdef CONFIG_MACH_MIDAS
+		sii9234_wake_lock();
+#endif
 #endif
 	} else {
 		/*MHL_On(0);*/ /* GPIO_LEVEL_LOW */
 		pr_info("MHL Detached !!\n");
+#if defined(CONFIG_SAMSUNG_MHL) && defined(CONFIG_MACH_MIDAS)
+		sii9234_wake_unlock();
+#endif
 	}
 }
 
@@ -283,16 +351,21 @@ bool max77693_muic_is_mhl_attached(void)
 	const int err = -1;
 	int val;
 	int ret;
-	MUIC_PRINT_LOG();
+#ifdef CONFIG_SAMSUNG_USE_11PIN_CONNECTOR
+	val = max77693_muic_get_status1_adc1k_value();
+	pr_info("%s(1): %d\n", __func__, val);
+	return val;
+#else
 	ret = gpio_request(GPIO_MHL_SEL, "MHL_SEL");
 	if (ret) {
 			pr_err("fail to request gpio %s\n", "GPIO_MHL_SEL");
 			return err;
 	}
 	val = gpio_get_value(GPIO_MHL_SEL);
-	pr_info("MUIC val:%d\n", val);
+	pr_info("%s(2): %d\n", __func__, val);
 	gpio_free(GPIO_MHL_SEL);
 	return !!val;
+#endif
 }
 
 void max77693_muic_deskdock_cb(bool attached)
@@ -309,7 +382,7 @@ void max77693_muic_cardock_cb(bool attached)
 {
 	MUIC_PRINT_LOG();
 	pr_info("MUIC cardock attached=%d\n", attached);
-	pr_info("##MUIC [ %s ]- func : %s !! \n", __FILE__, __func__);
+	pr_info("##MUIC [ %s ]- func : %s !!\n", __FILE__, __func__);
 	if (attached)
 		switch_set_state(&switch_dock, 2);
 	else

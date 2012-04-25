@@ -97,10 +97,21 @@
 #include <linux/mfd/wm8994/gpio.h>
 #endif
 
-#if defined(CONFIG_EXYNOS_SETUP_THERMAL)
+#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
 #include <plat/s5p-tmu.h>
+#include <mach/regs-tmu.h>
 #endif
 #include <plat/media.h>
+
+#if defined(CONFIG_BATTERY_SAMSUNG_P1X)
+#include <linux/battery/sec_battery.h>
+#include <linux/battery/sec_fuelgauge.h>
+#include <linux/battery/sec_charger.h>
+#endif
+#ifdef CONFIG_STMPE811_ADC
+#include <linux/stmpe811-adc.h>
+struct stmpe811_platform_data stmpe811_pdata;
+#endif
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define SMDK5250_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -170,12 +181,18 @@ struct platform_device exynos_device_md2 = {
 };
 #endif
 
+#if defined(CONFIG_DP_40HZ_P11)
+#define FPS 40
+#elif defined(CONFIG_DP_60HZ_P11)
+#define FPS 60
+#endif
+
 #ifdef CONFIG_FB_S3C
 #if defined(CONFIG_MACH_P11_DP_01)
 
 static struct s3c_fb_pd_win p11_fb_win0 = {
 	.win_mode = {
-		.refresh	= 60,
+		.refresh	= FPS,
 		.left_margin	= 80,
 		.right_margin	= 48,
 		.upper_margin	= 37,
@@ -193,7 +210,7 @@ static struct s3c_fb_pd_win p11_fb_win0 = {
 
 static struct s3c_fb_pd_win p11_fb_win1 = {
 	.win_mode = {
-		.refresh	= 60,
+		.refresh	= FPS,
 		.left_margin	= 80,
 		.right_margin	= 48,
 		.upper_margin	= 37,
@@ -213,7 +230,7 @@ static struct s3c_fb_pd_win p11_fb_win1 = {
 
 static struct s3c_fb_pd_win p11_fb_win2 = {
 	.win_mode = {
-		.refresh	= 60,
+		.refresh	= FPS,
 		.left_margin	= 80,
 		.right_margin	= 48,
 		.upper_margin	= 37,
@@ -435,7 +452,7 @@ static struct video_info p11_dp_config = {
 	.v_back_porch		= 37,
 	.v_front_porch		= 3,
 
-	.v_sync_rate		= 60,
+	.v_sync_rate		= FPS,
 
 	.mvid			= 0,
 	.nvid			= 0,
@@ -456,6 +473,7 @@ static struct video_info p11_dp_config = {
 
 	.test_pattern		= COLORBAR_32,
 	.link_rate		= LINK_RATE_2_70GBPS,
+
 	.lane_count		= LANE_COUNT4,
 
 	.video_mute_on		= 0,
@@ -606,8 +624,9 @@ static struct dw_mci_board exynos_dwmci_pdata __initdata = {
 	.bus_hz			= 66 * 1000 * 1000,
 	.caps			= MMC_CAP_UHS_DDR50 | MMC_CAP_1_8V_DDR | MMC_CAP_8_BIT_DATA | MMC_CAP_CMD23,
 #if defined(CONFIG_MACH_P11_04_BD)
-	.caps2			= MMC_CAP2_PACKED_CMD | MMC_CAP2_CACHE_CTRL,
+	.caps2			= MMC_CAP2_PACKED_CMD,
 #endif
+	.fifo_depth		= 0x80,
 	.detect_delay_ms	= 200,
 	.hclk_name		= "dwmci",
 	.cclk_name		= "sclk_dwmci",
@@ -1002,7 +1021,7 @@ static struct regulator_init_data max77686_buck3_data = {
 static struct regulator_init_data max77686_buck4_data = {
 	 .constraints = {
 		 .name = "vdd_g3d range",
-		 .min_uV = 900000,
+		 .min_uV = 850000,
 		 .max_uV = 1300000,
 		 .boot_on = 1,
 		 .valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
@@ -1953,6 +1972,617 @@ static struct platform_device samsung_device_battery = {
 };
 #endif
 
+#if defined(CONFIG_STMPE811_ADC)
+static struct i2c_gpio_platform_data gpio_i2c_data19 = {
+	.sda_pin = GPIO_ADC_SDA_18V,
+	.scl_pin = GPIO_ADC_SCL_18V,
+};
+
+struct platform_device s3c_device_i2c19 = {
+	.name = "i2c-gpio",
+	.id = 19,
+	.dev.platform_data = &gpio_i2c_data19,
+};
+
+
+/* I2C19 */
+static struct i2c_board_info i2c_devs19_emul[] __initdata = {
+	{
+		I2C_BOARD_INFO("stmpe811-adc", (0x82 >> 1)),
+		.platform_data	= &stmpe811_pdata,
+	},
+};
+#endif
+
+#if defined(CONFIG_BATTERY_SAMSUNG_P1X)
+#define SEC_BATTERY_PMIC_NAME ""
+#define SEC_FUELGAUGE_I2C_ID 9
+#define SEC_CHARGER_I2C_ID 10
+
+/* temperature table for ADC 6 */
+static sec_bat_adc_table_data_t temper_amb_table[] = {
+	{  165,	 800 },
+	{  171,	 790 },
+	{  177,	 780 },
+	{  183,	 770 },
+	{  189,	 760 },
+	{  196,	 750 },
+	{  202,	 740 },
+	{  208,	 730 },
+	{  214,	 720 },
+	{  220,	 710 },
+	{  227,	 700 },
+	{  237,	 690 },
+	{  247,	 680 },
+	{  258,	 670 },
+	{  269,	 660 },
+	{  281,	 650 },
+	{  296,	 640 },
+	{  311,	 630 },
+	{  326,	 620 },
+	{  341,	 610 },
+	{  356,	 600 },
+	{  370,	 590 },
+	{  384,	 580 },
+	{  398,	 570 },
+	{  412,	 560 },
+	{  427,	 550 },
+	{  443,	 540 },
+	{  457,	 530 },
+	{  471,	 520 },
+	{  485,	 510 },
+	{  498,	 500 },
+	{  507,	 490 },
+	{  516,	 480 },
+	{  525,	 470 },
+	{  535,	 460 },
+	{  544,	 450 },
+	{  553,	 440 },
+	{  562,	 430 },
+	{  579,	 420 },
+	{  596,	 410 },
+	{  613,	 400 },
+	{  630,	 390 },
+	{  648,	 380 },
+	{  665,	 370 },
+	{  684,	 360 },
+	{  702,	 350 },
+	{  726,	 340 },
+	{  750,	 330 },
+	{  774,	 320 },
+	{  798,	 310 },
+	{  821,	 300 },
+	{  844,	 290 },
+	{  867,	 280 },
+	{  891,	 270 },
+	{  914,	 260 },
+	{  937,	 250 },
+	{  960,	 240 },
+	{  983,	 230 },
+	{ 1007,	 220 },
+	{ 1030,	 210 },
+	{ 1054,	 200 },
+	{ 1083,	 190 },
+	{ 1113,	 180 },
+	{ 1143,	 170 },
+	{ 1173,	 160 },
+	{ 1202,	 150 },
+	{ 1232,	 140 },
+	{ 1262,	 130 },
+	{ 1291,	 120 },
+	{ 1321,	 110 },
+	{ 1351,	 100 },
+	{ 1357,	  90 },
+	{ 1363,	  80 },
+	{ 1369,	  70 },
+	{ 1375,	  60 },
+	{ 1382,	  50 },
+	{ 1402,	  40 },
+	{ 1422,	  30 },
+	{ 1442,	  20 },
+	{ 1462,	  10 },
+	{ 1482,	   0 },
+	{ 1519,	 -10 },
+	{ 1528,	 -20 },
+	{ 1546,	 -30 },
+	{ 1563,	 -40 },
+	{ 1587,	 -50 },
+	{ 1601,	 -60 },
+	{ 1614,	 -70 },
+	{ 1625,  -80 },
+	{ 1641,  -90 },
+	{ 1663, -100 },
+	{ 1678, -110 },
+	{ 1693, -120 },
+	{ 1705, -130 },
+	{ 1720, -140 },
+	{ 1736, -150 },
+	{ 1751, -160 },
+	{ 1767, -170 },
+	{ 1782, -180 },
+	{ 1798, -190 },
+	{ 1815, -200 },
+};
+/* temperature table for ADC 7 */
+static sec_bat_adc_table_data_t temper_table[] = {
+	{  193,	 800 },
+	{  200,	 790 },
+	{  207,	 780 },
+	{  215,	 770 },
+	{  223,	 760 },
+	{  230,	 750 },
+	{  238,	 740 },
+	{  245,	 730 },
+	{  252,	 720 },
+	{  259,	 710 },
+	{  266,	 700 },
+	{  277,	 690 },
+	{  288,	 680 },
+	{  300,	 670 },
+	{  311,	 660 },
+	{  326,	 650 },
+	{  340,	 640 },
+	{  354,	 630 },
+	{  368,	 620 },
+	{  382,	 610 },
+	{  397,	 600 },
+	{  410,	 590 },
+	{  423,	 580 },
+	{  436,	 570 },
+	{  449,	 560 },
+	{  462,	 550 },
+	{  475,	 540 },
+	{  488,	 530 },
+	{  491,	 520 },
+	{  503,	 510 },
+	{  535,	 500 },
+	{  548,	 490 },
+	{  562,	 480 },
+	{  576,	 470 },
+	{  590,	 460 },
+	{  603,	 450 },
+	{  616,	 440 },
+	{  630,	 430 },
+	{  646,	 420 },
+	{  663,	 410 },
+	{  679,	 400 },
+	{  696,	 390 },
+	{  712,	 380 },
+	{  728,	 370 },
+	{  745,	 360 },
+	{  762,	 350 },
+	{  784,	 340 },
+	{  806,	 330 },
+	{  828,	 320 },
+	{  850,	 310 },
+	{  872,	 300 },
+	{  895,	 290 },
+	{  919,	 280 },
+	{  942,	 270 },
+	{  966,	 260 },
+	{  989,	 250 },
+	{ 1013,	 240 },
+	{ 1036,	 230 },
+	{ 1060,	 220 },
+	{ 1083,	 210 },
+	{ 1107,	 200 },
+	{ 1133,	 190 },
+	{ 1159,	 180 },
+	{ 1186,	 170 },
+	{ 1212,	 160 },
+	{ 1238,	 150 },
+	{ 1265,	 140 },
+	{ 1291,	 130 },
+	{ 1316,	 120 },
+	{ 1343,	 110 },
+	{ 1370,	 100 },
+	{ 1381,	  90 },
+	{ 1393,	  80 },
+	{ 1404,	  70 },
+	{ 1416,	  60 },
+	{ 1427,	  50 },
+	{ 1453,	  40 },
+	{ 1479,	  30 },
+	{ 1505,	  20 },
+	{ 1531,	  10 },
+	{ 1557,	   0 },
+	{ 1565,	 -10 },
+	{ 1577,	 -20 },
+	{ 1601,	 -30 },
+	{ 1620,	 -40 },
+	{ 1633,	 -50 },
+	{ 1642,	 -60 },
+	{ 1656,	 -70 },
+	{ 1667,  -80 },
+	{ 1674,  -90 },
+	{ 1689, -100 },
+	{ 1704, -110 },
+	{ 1719, -120 },
+	{ 1734, -130 },
+	{ 1749, -140 },
+	{ 1763, -150 },
+	{ 1778, -160 },
+	{ 1793, -170 },
+	{ 1818, -180 },
+	{ 1823, -190 },
+	{ 1838, -200 },
+};
+
+/* ADC region should be exclusive */
+static sec_bat_adc_region_t cable_adc_value_table[] = {
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_BATTERY */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_UPS */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_MAINS */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_USB */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_OTG */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_DOCK */
+	{  0,	 0 },	/* POWER_SUPPLY_TYPE_MISC */
+};
+
+/* charging current (mA, 0 - NOT supported) */
+static int charging_current_table[] = {
+	0,	/* POWER_SUPPLY_TYPE_BATTERY */
+	0,	/* POWER_SUPPLY_TYPE_UPS */
+	1600,	/* POWER_SUPPLY_TYPE_MAINS */
+	500,	/* POWER_SUPPLY_TYPE_USB */
+	(-300),	/* POWER_SUPPLY_TYPE_OTG */
+	0,	/* POWER_SUPPLY_TYPE_DOCK */
+	700,	/* POWER_SUPPLY_TYPE_MISC */
+};
+
+static bool sec_bat_adc_none_init(
+				struct platform_device *pdev)
+{
+	return true;
+}
+
+static bool sec_bat_adc_none_exit(void)
+{
+	return true;
+}
+
+static int sec_bat_adc_none_read(
+				unsigned int channel)
+{
+	return 0;
+}
+
+static struct s3c_adc_client *padc;
+
+static bool sec_bat_adc_ap_init(
+				struct platform_device *pdev)
+{
+	return true;
+}
+
+static bool sec_bat_adc_ap_exit(void)
+{
+	return true;
+}
+
+static int sec_bat_adc_ap_read(
+				unsigned int channel)
+{
+	return 0;
+}
+
+u16 stmpe811_get_adc_data(u8 channel);
+
+static bool sec_bat_adc_ic_init(
+				struct platform_device *pdev)
+{
+	return true;
+}
+
+static bool sec_bat_adc_ic_exit(void)
+{
+	return true;
+}
+
+static int sec_bat_adc_ic_read(
+				unsigned int channel)
+{
+	return stmpe811_get_adc_data(channel);
+}
+
+static bool sec_bat_gpio_init(void)
+{
+	s3c_gpio_cfgpin(GPIO_TA_nCONNECTED, S3C_GPIO_INPUT);
+	s3c_gpio_setpull(GPIO_TA_nCONNECTED, S3C_GPIO_PULL_UP);
+
+	return true;
+}
+
+static bool sec_bat_is_lpm(void)
+{
+	return false;
+}
+
+static void sec_bat_initial_check(void)
+{
+}
+
+static bool sec_bat_check_jig_status(void)
+{
+	return false;
+}
+
+static void sec_bat_switch_to_check(void)
+{
+}
+
+static void sec_bat_switch_to_normal(void)
+{
+}
+
+static int sec_bat_check_cable_status(void)
+{
+	return POWER_SUPPLY_TYPE_BATTERY;
+}
+
+/* callback for battery check
+ * return : bool
+ * true - battery detected, false battery NOT detected
+ */
+static bool sec_bat_check_callback(void)
+{
+	return true;
+}
+
+static bool sec_bat_check_result_callback(void)
+{
+	return true;
+}
+
+/* callback for OVP/UVLO check
+ * return : int
+ * battery health
+ */
+static int sec_bat_ovp_uvlo_callback(void)
+{
+	int health;
+	health = POWER_SUPPLY_HEALTH_GOOD;
+
+	return health;
+}
+
+static bool sec_bat_ovp_uvlo_result_callback(int health)
+{
+	return true;
+}
+
+/*
+ * val.intval : temperature
+ */
+static bool sec_bat_get_temperature_callback(
+				enum power_supply_property psp,
+			    union power_supply_propval *val)
+{
+	return true;
+}
+
+static bool sec_fg_gpio_init(void)
+{
+	return true;
+}
+
+static bool sec_fg_fuelalert_process(bool is_fuel_alerted)
+{
+	return true;
+}
+
+static bool sec_chg_gpio_init(void)
+{
+	s3c_gpio_cfgpin(GPIO_TA_EN, S3C_GPIO_OUTPUT);
+	s3c_gpio_setpull(GPIO_TA_EN, S3C_GPIO_PULL_UP);
+	gpio_set_value(GPIO_TA_EN, 1);
+
+	s3c_gpio_cfgpin(GPIO_TA_nCHG, S3C_GPIO_INPUT);
+	s3c_gpio_setpull(GPIO_TA_nCHG, S3C_GPIO_PULL_UP);
+
+	return true;
+}
+
+static sec_battery_platform_data_t sec_battery_pdata = {
+	.pmic_name = SEC_BATTERY_PMIC_NAME,
+
+	.adc_api[SEC_BATTERY_ADC_TYPE_NONE] = {
+		.init = sec_bat_adc_none_init,
+		.exit = sec_bat_adc_none_exit,
+		.read = sec_bat_adc_none_read
+		},
+	.adc_api[SEC_BATTERY_ADC_TYPE_AP] = {
+		.init = sec_bat_adc_ap_init,
+		.exit = sec_bat_adc_ap_exit,
+		.read = sec_bat_adc_ap_read
+		},
+	.adc_api[SEC_BATTERY_ADC_TYPE_IC] = {
+		.init = sec_bat_adc_ic_init,
+		.exit = sec_bat_adc_ic_exit,
+		.read = sec_bat_adc_ic_read
+		},
+
+	.adc_check_count = 7,
+	.adc_max_value = 4095,
+	.adc_type = {
+		SEC_BATTERY_ADC_TYPE_AP,
+		SEC_BATTERY_ADC_TYPE_NONE,
+		SEC_BATTERY_ADC_TYPE_NONE,
+		SEC_BATTERY_ADC_TYPE_NONE,
+		SEC_BATTERY_ADC_TYPE_NONE,
+		SEC_BATTERY_ADC_TYPE_NONE,
+		SEC_BATTERY_ADC_TYPE_IC,
+		SEC_BATTERY_ADC_TYPE_AP,
+		},
+
+	/* Battery */
+	.vendor = "SDI SDI",
+	.technology = POWER_SUPPLY_TECHNOLOGY_LION,
+	.bat_gpio_ta_nconnected = GPIO_TA_nCONNECTED,
+	.bat_gpio_init = sec_bat_gpio_init,
+	.bat_gpio_irq = GPIO_TA_nCONNECTED,
+	.bat_irq_attr = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+	.is_lpm = sec_bat_is_lpm,
+	.initial_check = sec_bat_initial_check,
+	.check_jig_status = sec_bat_check_jig_status,
+	.check_cable_status = sec_bat_check_cable_status,
+	.cable_check_type =
+		SEC_BATTERY_CABLE_CHECK_PSY |
+		SEC_BATTERY_CABLE_CHECK_POLLING,
+	.cable_source_type = SEC_BATTERY_CABLE_SOURCE_ADC,
+	.cable_check_adc_channel = 6,
+	.cable_check_max_voltage = 3300,
+	.cable_adc_value = cable_adc_value_table,
+	.cable_switch_check = sec_bat_switch_to_check,
+	.cable_switch_normal = sec_bat_switch_to_normal,
+
+	.event_check = false,
+	.event_waiting_time = 60,
+
+	/* Monitor setting */
+	.polling_type = SEC_BATTERY_MONITOR_ALARM,
+	.short_polling_time = 10,
+	.normal_polling_time = 30,
+	.long_polling_time = 60,
+	.monitor_initial_count = 3,
+
+	/* Battery check */
+	.battery_check_type = SEC_BATTERY_CHECK_NONE,
+	.check_count = 3,
+	.check_result_callback = sec_bat_check_result_callback,
+	/* Battery check by ADC */
+	.check_adc_channel = 0,
+	.check_adc_max = 0,
+	.check_adc_min = 0,
+	/* check by callback */
+	.check_callback = sec_bat_check_callback,
+
+	/* OVP/UVLO check */
+	.ovp_uvlo_check_type = SEC_BATTERY_OVP_UVLO_CHGINT,
+	.ovp_uvlo_result_callback = sec_bat_ovp_uvlo_result_callback,
+	/* check by callback */
+	.ovp_uvlo_callback = sec_bat_ovp_uvlo_callback,
+
+	/* Temperature check */
+	.thermal_source = SEC_BATTERY_THERMAL_SOURCE_FG,
+	.temp_adc_channel = 0,
+	.temp_adc_table = temper_table,
+	.temp_adc_table_size =
+		sizeof(temper_table)/sizeof(sec_bat_adc_table_data_t),
+	.temp_amb_adc_channel = 0,
+	.temp_amb_adc_table = temper_amb_table,
+	.temp_amb_adc_table_size =
+		sizeof(temper_amb_table)/sizeof(sec_bat_adc_table_data_t),
+	.get_temperature_callback = sec_bat_get_temperature_callback,
+
+	.temp_check_type = SEC_BATTERY_TEMP_CHECK_TEMP,
+	.temp_check_count = 3,
+	.temp_high_threshold_event = 650,
+	.temp_high_recovery_event = 450,
+	.temp_low_threshold_event = 0,
+	.temp_low_recovery_event = -50,
+	.temp_high_threshold_normal = 470,
+	.temp_high_recovery_normal = 400,
+	.temp_low_threshold_normal = 0,
+	.temp_low_recovery_normal = -30,
+	.temp_high_threshold_lpm = 600,
+	.temp_high_recovery_lpm = 420,
+	.temp_low_threshold_lpm = 2,
+	.temp_low_recovery_lpm = -30,
+
+	.full_check_type = SEC_BATTERY_FULLCHARGED_CHGGPIO,
+	.full_check_count = 3,
+	.full_check_adc_channel = 0,
+	.full_check_adc_1st = 850,
+	.full_check_adc_2nd = 650,
+	.full_check_current_1st = 0,
+	.full_check_current_2nd = 0,
+	.chg_gpio_full_check = GPIO_TA_nCHG,
+	.chg_polarity_full_check = 1,
+	.full_condition_type =
+		SEC_BATTERY_FULL_CONDITION_SOC,
+	.full_condition_soc = 98,
+	.full_condition_avgvcell = 4190,
+
+	.recharge_condition_type =
+		SEC_BATTERY_RECHARGE_CONDITION_SOC |
+		SEC_BATTERY_RECHARGE_CONDITION_VCELL,
+	.recharge_condition_soc = 98,
+	.recharge_condition_avgvcell = 4170,
+	.recharge_condition_vcell = 4170,
+
+	.charging_total_time = 6 * 60 * 60,
+	.recharging_total_time = 90 * 60,
+	.charging_reset_time = 10 * 60,
+
+	/* Fuel Gauge */
+	.fg_gpio_init = sec_fg_gpio_init,
+	.fg_gpio_irq = GPIO_FUEL_ALERT,
+	.fg_irq_attr = IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+	.fuel_alert_soc = 1,
+	.repeated_fuelalert = false,
+	.fuelalert_process = sec_fg_fuelalert_process,
+	.capacity_calculation_type =
+		SEC_FUELGAUGE_CAPACITY_TYPE_RAW,
+		/* SEC_FUELGAUGE_CAPACITY_TYPE_SCALE | */
+		/* SEC_FUELGAUGE_CAPACITY_TYPE_ATOMIC, */
+	.capacity_max = 1000,
+	.capacity_min = 0,
+
+	/* Charger */
+	.chg_gpio_en = GPIO_TA_EN,
+	.chg_gpio_status = GPIO_TA_nCHG,
+	.chg_gpio_init = sec_chg_gpio_init,
+	.chg_gpio_irq = 0,
+	.chg_irq_attr = 0,
+	.charging_current = charging_current_table,
+};
+
+static struct platform_device sec_device_battery = {
+	.name = "sec-battery",
+	.id = -1,
+	.dev.platform_data = &sec_battery_pdata,
+};
+
+static struct i2c_gpio_platform_data gpio_i2c_data_fuelgauge = {
+	.sda_pin = GPIO_FUEL_SDA_18V,
+	.scl_pin = GPIO_FUEL_SCL_18V,
+};
+
+struct platform_device sec_device_fuelgauge = {
+	.name = "i2c-gpio",
+	.id = SEC_FUELGAUGE_I2C_ID,
+	.dev.platform_data = &gpio_i2c_data_fuelgauge,
+};
+
+static struct i2c_board_info sec_brdinfo_fuelgauge[] __initdata = {
+	{
+		I2C_BOARD_INFO("sec-fuelgauge",
+			SEC_FUELGAUGE_I2C_SLAVEADDR),
+		.platform_data	= &sec_battery_pdata,
+	},
+};
+
+static struct i2c_gpio_platform_data gpio_i2c_data_charger = {
+	.sda_pin = GPIO_CHG_SDA_18V,
+	.scl_pin = GPIO_CHG_SCL_18V,
+};
+
+struct platform_device sec_device_charger = {
+	.name = "i2c-gpio",
+	.id = SEC_CHARGER_I2C_ID,
+	.dev.platform_data = &gpio_i2c_data_charger,
+};
+
+static struct i2c_board_info sec_brdinfo_charger[] __initdata = {
+	{
+		I2C_BOARD_INFO("sec-charger",
+			SEC_CHARGER_I2C_SLAVEADDR),
+		.platform_data	= &sec_battery_pdata,
+	},
+};
+#endif
+
 #ifdef CONFIG_BUSFREQ_OPP
 /* BUSFREQ to control memory/bus*/
 static struct device_domain busfreq;
@@ -1966,6 +2596,7 @@ static struct platform_device exynos5_busfreq = {
 static struct platform_device *p11_devices[] __initdata = {
 	/* Samsung Power Domain */
 #ifdef CONFIG_EXYNOS_DEV_PD
+	&exynos5_device_pd[PD_MFC],
 	&exynos5_device_pd[PD_G3D],
 	&exynos5_device_pd[PD_ISP],
 	&exynos5_device_pd[PD_GSCL],
@@ -2122,6 +2753,14 @@ static struct platform_device *p11_devices[] __initdata = {
 #ifdef CONFIG_BATTERY_SAMSUNG
 	&samsung_device_battery,
 #endif
+#if defined(CONFIG_STMPE811_ADC)
+	&s3c_device_i2c19,
+#endif
+#if defined(CONFIG_BATTERY_SAMSUNG_P1X)
+	&sec_device_charger,
+	&sec_device_fuelgauge,
+	&sec_device_battery,
+#endif
 
 #ifdef CONFIG_SND_SAMSUNG_I2S
 	&exynos_device_i2s0,
@@ -2138,8 +2777,8 @@ static struct platform_device *p11_devices[] __initdata = {
 	&exynos_device_srp,
 #endif
 
-#ifdef CONFIG_EXYNOS_SETUP_THERMAL
-	&exynos_device_tmu,
+#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
+	&s5p_device_tmu,
 #endif
 
 #ifdef CONFIG_S5P_DEV_ACE
@@ -2175,20 +2814,25 @@ static struct platform_device *p11_devices[] __initdata = {
 
 };
 
-#ifdef CONFIG_EXYNOS_SETUP_THERMAL
+#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
 /* below temperature base on the celcius degree */
-struct tmu_data exynos_tmu_data __initdata = {
+struct s5p_platform_tmu exynos_tmu_data __initdata = {
 	.ts = {
-		.stop_throttle  = 82,
-		.start_throttle = 85,
-		.stop_warning  = 95,
-		.start_warning = 103,
+                .stop_1st_throttle  = 78,
+                .start_1st_throttle = 80,
+                .stop_2nd_throttle  = 87,
+                .start_2nd_throttle = 103,
 		.start_tripping = 110, /* temp to do tripping */
+                .start_emergency    = 120, /* To protect chip,forcely kernel panic */
+                .stop_mem_throttle  = 80,
+                .start_mem_throttle = 85,
+        },
+        .cpufreq = {
+                .limit_1st_throttle  = 800000, /* 800MHz in KHz order */
+                .limit_2nd_throttle  = 200000, /* 200MHz in KHz order */
 	},
-	.efuse_value = 55,
-	.slope = 0x10008802,
-	.mode = 0,
 };
+
 #endif
 
 #ifdef CONFIG_VIDEO_EXYNOS_HDMI_CEC
@@ -2201,20 +2845,6 @@ static struct s5p_platform_cec hdmi_cec_data __initdata = {
 static void __init exynos_reserve_mem(void)
 {
 	static struct cma_region regions[] = {
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM
-		{
-			.name = "pmem",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K,
-			.start = 0,
-		},
-#endif
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_GPU1
-		{
-			.name = "pmem_gpu1",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_GPU1 * SZ_1K,
-			.start = 0,
-		},
-#endif
 		{
 			.name = "ion",
 			.size = 30 * SZ_1M,
@@ -2309,7 +2939,6 @@ static void __init exynos_reserve_mem(void)
 #ifdef CONFIG_EXYNOS_C2C
 		"samsung-c2c=c2c_shdmem;"
 #endif
-		"android_pmem.0=pmem;android_pmem.1=pmem_gpu1;"
 		"s3cfb.0=fimd;"
 #ifdef CONFIG_AUDIO_SAMSUNG_MEMSIZE_SRP
 		"samsung-rp=srp;"
@@ -2477,10 +3106,11 @@ static void __init p11_map_io(void)
 static void __init exynos_sysmmu_init(void)
 {
 #ifdef CONFIG_VIDEO_JPEG_V2X
-	ASSIGN_SYSMMU_POWERDOMAIN(jpeg, &exynos5_device_pd[PD_GSCL].dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(jpeg).dev, &s5p_device_jpeg.dev);
 #endif
 #ifdef CONFIG_VIDEO_SAMSUNG_S5P_MFC
+	ASSIGN_SYSMMU_POWERDOMAIN(mfc_l, &exynos5_device_pd[PD_MFC].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(mfc_r, &exynos5_device_pd[PD_MFC].dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(mfc_l).dev, &s5p_device_mfc.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(mfc_r).dev, &s5p_device_mfc.dev);
 #endif
@@ -2506,12 +3136,17 @@ static void __init exynos_sysmmu_init(void)
 	sysmmu_set_owner(&SYSMMU_PLATDEV(2d).dev, &s5p_device_fimg2d.dev);
 #endif
 #ifdef CONFIG_VIDEO_EXYNOS5_FIMC_IS
-	/*
-	ASSIGN_SYSMMU_POWERDOMAIN(is_isp, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_drc, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_fd, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_cpu, &exynos4_device_pd[PD_ISP].dev)
-	*/
+	ASSIGN_SYSMMU_POWERDOMAIN(is_isp, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_drc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_fd, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_cpu, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_odc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_sclrc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_sclrp, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_dis0, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_dis1, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_3dnr, &exynos5_device_pd[PD_ISP].dev);
+
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_isp).dev, &exynos5_device_fimc_is.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_drc).dev, &exynos5_device_fimc_is.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_fd).dev, &exynos5_device_fimc_is.dev);
@@ -2540,13 +3175,13 @@ static void p11_power_off(void)
 
 static void __init p11_machine_init(void)
 {
-	pm_power_off = p11_power_off;
-
 #ifdef CONFIG_S3C64XX_DEV_SPI
 	struct clk *sclk = NULL;
 	struct clk *prnt = NULL;
 	struct device *spi1_dev = &exynos_device_spi1.dev;
 #endif
+
+	pm_power_off = p11_power_off;
 
 #ifdef CONFIG_EXYNOS4_DEV_DWMCI
 	exynos_dwmci_set_platdata(&exynos_dwmci_pdata);
@@ -2599,6 +3234,9 @@ static void __init p11_machine_init(void)
 #endif
 
 #if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC)
+#if defined(CONFIG_EXYNOS_DEV_PD)
+	s5p_device_mfc.dev.parent = &exynos5_device_pd[PD_MFC].dev;
+#endif
 	exynos4_mfc_setup_clock(&s5p_device_mfc.dev, 300 * MHZ);
 
 	dev_set_name(&s5p_device_mfc.dev, "s3c-mfc");
@@ -2645,16 +3283,31 @@ static void __init p11_machine_init(void)
 	i2c_register_board_info(15, i2c_devs15, ARRAY_SIZE(i2c_devs15));
 #endif
 
+#if defined(CONFIG_STMPE811_ADC)
+	i2c_register_board_info(19, i2c_devs19_emul,
+		ARRAY_SIZE(i2c_devs19_emul));
+#endif
+#if defined(CONFIG_BATTERY_SAMSUNG_P1X)
+	i2c_register_board_info(SEC_CHARGER_I2C_ID,
+		sec_brdinfo_charger, ARRAY_SIZE(sec_brdinfo_charger));
+	i2c_register_board_info(SEC_FUELGAUGE_I2C_ID,
+		sec_brdinfo_fuelgauge, ARRAY_SIZE(sec_brdinfo_fuelgauge));
+#endif
+
 	platform_device_register(&vbatt_device);
 
 	platform_add_devices(p11_devices, ARRAY_SIZE(p11_devices));
 
 #ifdef CONFIG_FB_S3C
 #if defined(CONFIG_MACH_P11_DP_01)
+#if defined(CONFIG_DP_40HZ_P11)
 	exynos4_fimd_setup_clock(&s5p_device_fimd1.dev, "sclk_fimd", "sclk_vpll",
-			270 * MHZ);
+			180 * MHZ);
+#elif defined(CONFIG_DP_60HZ_P11)
+	exynos4_fimd_setup_clock(&s5p_device_fimd1.dev, "sclk_fimd", "sclk_vpll",
+		270 * MHZ);
+#endif
 #elif defined(CONFIG_MACH_P11_DP_00)
-
 	exynos4_fimd_setup_clock(&s5p_device_fimd1.dev, "sclk_fimd", "sclk_vpll",
 			87 * MHZ);
 #endif
@@ -2695,9 +3348,12 @@ static void __init p11_machine_init(void)
 	dev_set_name(&exynos5_device_fimc_is.dev, "exynos5-fimc-is");
 
 	exynos5_fimc_is_set_platdata(NULL);
-
+#if defined(CONFIG_EXYNOS_DEV_PD)
+	exynos5_device_pd[PD_ISP].dev.parent = &exynos5_device_pd[PD_GSCL].dev;
+	exynos5_device_fimc_is.dev.parent = &exynos5_device_pd[PD_ISP].dev;
 #endif
-#ifdef CONFIG_EXYNOS_SETUP_THERMAL
+#endif
+#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
 	s5p_tmu_set_platdata(&exynos_tmu_data);
 #endif
 #ifdef CONFIG_VIDEO_EXYNOS_GSCALER
@@ -2732,9 +3388,6 @@ static void __init p11_machine_init(void)
 #endif
 
 #ifdef CONFIG_VIDEO_JPEG_V2X
-#ifdef CONFIG_EXYNOS_DEV_PD
-	s5p_device_jpeg.dev.parent = &exynos5_device_pd[PD_GSCL].dev;
-#endif
 	exynos5_jpeg_setup_clock(&s5p_device_jpeg.dev, 150000000);
 #endif
 
@@ -2757,7 +3410,7 @@ static void __init p11_machine_init(void)
 #endif
 
 #ifdef CONFIG_S3C64XX_DEV_SPI
-	sclk = clk_get(spi1_dev, "dout_spi1");
+	sclk = clk_get(spi1_dev, "sclk_spi1");
 	if (IS_ERR(sclk))
 		dev_err(spi1_dev, "failed to get sclk for SPI-1\n");
 	prnt = clk_get(spi1_dev, "mout_mpll_user");
@@ -2788,6 +3441,7 @@ static void __init p11_machine_init(void)
 	ppmu_init(&exynos_ppmu[PPMU_DDR_C], &exynos5_busfreq.dev);
 	ppmu_init(&exynos_ppmu[PPMU_DDR_R1], &exynos5_busfreq.dev);
 	ppmu_init(&exynos_ppmu[PPMU_DDR_L], &exynos5_busfreq.dev);
+	ppmu_init(&exynos_ppmu[PPMU_RIGHT0_BUS], &exynos5_busfreq.dev);
 #endif
 }
 

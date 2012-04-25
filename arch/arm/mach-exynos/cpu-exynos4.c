@@ -409,6 +409,11 @@ static void exynos4_sw_reset(void)
 	}
 }
 
+static void __iomem *exynos4_pmu_init_zero[] = {
+	S5P_CMU_RESET_ISP_SYS,
+	S5P_CMU_SYSCLK_ISP_SYS,
+};
+
 int __init exynos4_init(void)
 {
 	unsigned int value;
@@ -419,6 +424,14 @@ int __init exynos4_init(void)
 
 	/* set idle function */
 	pm_idle = exynos4_idle;
+
+	/*
+	 * on exynos4x12, CMU reset system power register should to be set 0x0
+	 */
+	if (!soc_is_exynos4210()) {
+		for (i = 0; i < ARRAY_SIZE(exynos4_pmu_init_zero); i++)
+			__raw_writel(0x0, exynos4_pmu_init_zero[i]);
+	}
 
 	/* set sw_reset function */
 	s5p_reset_hook = exynos4_sw_reset;

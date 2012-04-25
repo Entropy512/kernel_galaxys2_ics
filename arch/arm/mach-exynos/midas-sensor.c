@@ -52,19 +52,20 @@ static void lsm331dlc_gpio_init(void)
 	i2c_devs1[0].irq = gpio_to_irq(GPIO_ACC_INT);
 
 	/* Gyro sensor interrupt pin initialization */
-#if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) ||\
-	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+#if 0
 	s5p_register_gpio_interrupt(GPIO_GYRO_INT);
 	s3c_gpio_cfgpin(GPIO_GYRO_INT, S3C_GPIO_SFN(0xF));
-#else /* For Midas */
+#else
 	s3c_gpio_cfgpin(GPIO_GYRO_INT, S3C_GPIO_INPUT);
 #endif
 	gpio_set_value(GPIO_GYRO_INT, 2);
 	s3c_gpio_setpull(GPIO_GYRO_INT, S3C_GPIO_PULL_DOWN);
 	s5p_gpio_set_drvstr(GPIO_GYRO_INT, S5P_GPIO_DRVSTR_LV1);
-	i2c_devs1[1].irq = -1;/*gpio_to_irq(GPIO_GYRO_INT);*/
+#if 0
+	i2c_devs1[1].irq = gpio_to_irq(GPIO_GYRO_INT); /* interrupt */
+#else
+	i2c_devs1[1].irq = -1; /* polling */
+#endif
 
 	/* Gyro sensor data enable pin initialization */
 	s3c_gpio_cfgpin(GPIO_GYRO_DE, S3C_GPIO_OUTPUT);
@@ -153,8 +154,7 @@ static struct i2c_board_info i2c_devs10_emul[] __initdata = {
 
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 static void ak8975c_gpio_init(void)
 {
 	int ret = gpio_request(GPIO_MSENSOR_INT, "gpio_akm_int");
@@ -219,8 +219,7 @@ static int __init midas_sensor_init(void)
 #ifdef CONFIG_SENSORS_AK8975C
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	ak8975c_gpio_init();
 #endif
 	i2c_add_devices(10, i2c_devs10_emul, ARRAY_SIZE(i2c_devs10_emul));

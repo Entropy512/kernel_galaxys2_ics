@@ -156,6 +156,32 @@ struct sched_log {
 };
 #endif				/* CONFIG_SEC_DEBUG_SCHED_LOG */
 
+enum sec_debug_aux_log_idx {
+	SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+	SEC_DEBUG_AUXLOG_ITEM_MAX,
+};
+
+
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+#define AUX_LOG_CPU_CLOCK_MAX 64
+#define AUX_LOG_LENGTH 128
+
+struct auxiliary_info {
+	unsigned long long time;
+	int cpu;
+	char log[AUX_LOG_LENGTH];
+};
+
+/* This structure will be modified if some other items added for log */
+struct auxiliary_log {
+	struct auxiliary_info CpuClockLog[AUX_LOG_CPU_CLOCK_MAX];
+};
+
+extern void sec_debug_aux_log(int idx, char *fmt, ...);
+#else
+#define sec_debug_aux_log(idx, ...) do { } while (0)
+#endif
+
 #ifdef CONFIG_SEC_DEBUG_SEMAPHORE_LOG
 #define SEMAPHORE_LOG_MAX 100
 struct sem_debug {

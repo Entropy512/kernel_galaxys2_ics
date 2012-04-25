@@ -20,6 +20,13 @@
 
 #include <mach/asv.h>
 #include <mach/map.h>
+#include <plat/cpu.h>
+
+/* ASV function for Fused Chip */
+#define IDS_ARM_OFFSET	24
+#define IDS_ARM_MASK	0xFF
+#define HPM_OFFSET	12
+#define HPM_MASK	0x1F
 
 #define VA_LID		(S5P_VA_CHIPID + 0x14)
 #define NR_SS_CASE	3
@@ -81,12 +88,6 @@ static int exynos4x12_nonfuse_asv_store_result(struct samsung_asv *asv_info)
 	return 0;
 }
 
-/* ASV function for Fused Chip */
-#define IDS_ARM_OFFSET	24
-#define IDS_ARM_MASK	0xFF
-#define HPM_OFFSET	12
-#define HPM_MASK	0x1F
-
 struct asv_judge_table exynos4x12_limit[] = {
 	/* HPM, IDS */
 	{  0,   0},		/* Reserved Group */
@@ -132,6 +133,7 @@ static int exynos4x12_fuse_asv_store_result(struct samsung_asv *asv_info)
 	pr_info("EXYNOS4X12: IDS : %d HPM : %d RESULT : %d\n",
 		asv_info->ids_result, asv_info->hpm_result, exynos_result_of_asv);
 
+	if (soc_is_exynos4412()) {
 	switch (exynos_result_of_asv) {
 	case 0:
 	case 1:
@@ -144,7 +146,7 @@ static int exynos4x12_fuse_asv_store_result(struct samsung_asv *asv_info)
 		exynos4x12_set_abb(ABB_MODE_130V);
 		break;
 	}
-
+	}
 	return 0;
 }
 

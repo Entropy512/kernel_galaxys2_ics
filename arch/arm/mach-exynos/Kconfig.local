@@ -80,4 +80,7 @@ config MACH_M0_CMCC
 config MACH_M0_CHNOPEN
 	bool "M0 CHN OPEN board"
 
+config MACH_M0_CTC
+	bool "M0 CHN CTC board"
+
 endchoice

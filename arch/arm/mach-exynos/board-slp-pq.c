@@ -15,7 +15,6 @@
 #include <linux/gpio_keys.h>
 #include <linux/i2c.h>
 #include <linux/i2c-gpio.h>
-#include <linux/i2c/mms114.h>
 #include <linux/mmc/host.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
@@ -41,6 +40,7 @@
 #include <linux/sensor/lps331ap.h>
 #include <linux/devfreq/exynos4_bus.h>
 #include <linux/extcon.h>
+#include <linux/platform_data/mms_ts.h>
 #include <drm/exynos_drm.h>
 
 #include <asm/mach/arch.h>
@@ -68,6 +68,10 @@
 #include <plat/fimd_lite_ext.h>
 #if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC) || defined(CONFIG_VIDEO_MFC5X)
 #include <plat/s5p-mfc.h>
+#endif
+
+#ifdef CONFIG_I2C_SI4705
+#include <linux/si4705_pdata.h>
 #endif
 
 #include <mach/map.h>
@@ -110,6 +114,12 @@ enum gpio_i2c {
 	I2C_MHL_D	= 16, /* 16 is hardcoded from midas-mhl.c */
 	I2C_PSENSE,
 	I2C_IF_PMIC,
+	I2C_FM_RADIO	= 19, /* refer from midas */
+};
+
+enum board_rev {
+	M0_PROXIMA_REV0_0 = 0x3,
+	M0_PROXIMA_REV0_1 = 0x0
 };
 
 static int hwrevision(int rev)
@@ -279,6 +289,7 @@ static struct s3c_sdhci_platdata slp_midas_hsmmc2_pdata __initdata = {
 	.clk_type		= S3C_SDHCI_CLK_DIV_EXTERNAL,
 	.max_width		= 4,
 	.host_caps		= MMC_CAP_4_BIT_DATA,
+	.vmmc_name		= "vtf_2.8v",
 };
 
 static DEFINE_MUTEX(notify_lock);
@@ -521,6 +532,10 @@ static struct platform_device exynos_drm_hdmi_device = {
 	},
 };
 
+static struct platform_device exynos_drm_vidi_device = {
+	.name	= "exynos-drm-vidi",
+};
+
 static void madis_tv_setup(void)
 {
 	gpio_request(GPIO_HDMI_HPD, "HDMI_HPD");
@@ -536,16 +551,45 @@ static void madis_tv_setup(void)
 	s5p_device_hdmi.dev.platform_data = &drm_hdmi_pdata;
 }
 
-static struct melfas_tsi_platform_data melfas_tsp_pdata = {
-	.x_size = 720,
-	.y_size = 1280,
+int tsp_get_lcdtype(void)
+{
+	unsigned int hwrev = system_rev & 0xff;
+	unsigned int lcd_type = 0;
+
+	if (hwrev == 0x7)
+		lcd_type = 0x20;
+
+	return lcd_type;
+}
+
+static struct melfas_tsi_platform_data mms_ts_pdata = {
+	.max_x = 720,
+	.max_y = 1280,
+	.invert_x = 0,
+	.invert_y = 0,
 	.gpio_int = GPIO_TSP_INT,
+	.gpio_scl = GPIO_TSP_SCL_18V,
+	.gpio_sda = GPIO_TSP_SDA_18V,
 	.power = melfas_power,
-	.mt_protocol_b = true,
-	.enable_btn_touch = true,
-	.set_touch_i2c = melfas_set_touch_i2c,
-	.set_touch_i2c_to_gpio = melfas_set_touch_i2c_to_gpio,
-	.input_event = flexrate_request,
+	.mux_fw_flash = melfas_mux_fw_flash,
+	.is_vdd_on = is_melfas_vdd_on,
+	.input_event = midas_tsp_request_qos,
+	.lcd_type = tsp_get_lcdtype,
+};
+
+static struct melfas_tsi_platform_data mms_ts_pdata_rotate = {
+	.max_x = 720,
+	.max_y = 1280,
+	.invert_x = 720,
+	.invert_y = 1280,
+	.gpio_int = GPIO_TSP_INT,
+	.gpio_scl = GPIO_TSP_SCL_18V,
+	.gpio_sda = GPIO_TSP_SDA_18V,
+	.power = melfas_power,
+	.mux_fw_flash = melfas_mux_fw_flash,
+	.is_vdd_on = is_melfas_vdd_on,
+	.input_event = midas_tsp_request_qos,
+	.lcd_type = tsp_get_lcdtype,
 };
 
 static struct i2c_board_info i2c_devs0[] __initdata = {
@@ -564,6 +608,23 @@ static struct i2c_board_info i2c_devs1[] __initdata = {
 		I2C_BOARD_INFO("lsm330dlc_gyro", (0xD6 >> 1)),
 	},
 };
+
+static void check_hw_revision(void)
+{
+	unsigned int hwrev = system_rev & 0xff;
+
+	switch (hwrev) {
+	case M0_PROXIMA_REV0_0:	/* Proxima Rev0.0: M0_PROXIMA_REV0.0_1114 */
+		midas_tsp_set_platdata(&mms_ts_pdata_rotate);
+		midas_tsp_init();
+		break;
+	case M0_PROXIMA_REV0_1:	/* Proxima Rev0.1: M0_PROXIMA_REV0.1_1125 */
+		midas_tsp_set_platdata(&mms_ts_pdata);
+		midas_tsp_init();
+	default:
+		break;
+	}
+}
 
 static void lsm331dlc_gpio_init(void)
 {
@@ -608,19 +669,19 @@ static void lsm331dlc_gpio_init(void)
 #ifdef CONFIG_VIBETONZ
 static struct max77693_haptic_platform_data max77693_haptic_pdata = {
 	.max_timeout = 10000,
-	.duty = 44000,
-	.period = 44642,
+	.duty = 37641,
+	.period = 38022,
 	.reg2 = MOTOR_LRA | EXT_PWM | DIVIDER_128,
 	.init_hw = NULL,
 	.motor_en = NULL,
-	.pwm_id = 1,
+	.pwm_id = 0,
 	.regulator_name = "vmotor",
 };
 #endif
 
 #ifdef CONFIG_LEDS_MAX77693
 static struct max77693_led_platform_data max77693_led_pdata = {
-	.num_leds = 2,
+	.num_leds = 4,
 
 	.leds[0].name = "leds-sec",
 	.leds[0].id = MAX77693_FLASH_LED_1,
@@ -635,6 +696,17 @@ static struct max77693_led_platform_data max77693_led_pdata = {
 	.leds[1].timer_mode = MAX77693_TIMER_MODE_MAX_TIMER,
 	.leds[1].cntrl_mode = MAX77693_LED_CTRL_BY_I2C,
 	.leds[1].brightness = MAX_TORCH_DRV_LEVEL,
+
+	.leds[2].name = "torch-sec1",
+	.leds[2].id = MAX77693_TORCH_LED_1,
+	.leds[2].cntrl_mode = MAX77693_LED_CTRL_BY_FLASHSTB,
+	.leds[2].brightness = 0x0F,
+
+	.leds[3].name = "torch-sec2",
+	.leds[3].id = MAX77693_TORCH_LED_2,
+	.leds[3].cntrl_mode = MAX77693_LED_CTRL_BY_I2C,
+	.leds[3].brightness = 0x0F,
+
 };
 #endif
 
@@ -848,16 +920,20 @@ static struct platform_device midas_slp_usb_multi = {
 
 #ifdef CONFIG_DRM_EXYNOS_FIMD
 static struct exynos_drm_fimd_pdata drm_fimd_pdata = {
-	.timing	= {
-		.xres		= 720,
-		.yres		= 1280,
-		.hsync_len	= 5,
-		.left_margin	= 10,
-		.right_margin	= 10,
-		.vsync_len	= 2,
-		.upper_margin	= 13,
-		.lower_margin	= 1,
-		.refresh	= 60,
+	.panel = {
+		.timing	= {
+			.xres		= 720,
+			.yres		= 1280,
+			.hsync_len	= 5,
+			.left_margin	= 5,
+			.right_margin	= 5,
+			.vsync_len	= 2,
+			.upper_margin	= 13,
+			.lower_margin	= 1,
+			.refresh	= 60,
+		},
+		.width_mm	= 58,
+		.height_mm	= 103,
 	},
 	.vidcon0		= VIDCON0_VIDOUT_RGB | VIDCON0_PNRMODE_RGB,
 	.vidcon1		= VIDCON1_INV_VCLK,
@@ -865,7 +941,24 @@ static struct exynos_drm_fimd_pdata drm_fimd_pdata = {
 	.bpp			= 32,
 	.dynamic_refresh	= 1,
 	.high_freq		= 1,
+	.boot_on		= true,
 };
+
+static unsigned long fbmem_start, fbmem_size;
+static int __init early_fbmem(char *p)
+{
+	char *endp;
+
+	if (!p)
+		return -EINVAL;
+
+	fbmem_size = memparse(p, &endp);
+	if (*endp == '@')
+		fbmem_start = memparse(endp + 1, &endp);
+
+	return endp > p ? 0 : -EINVAL;
+}
+early_param("fbmem", early_fbmem);
 #endif
 
 #ifdef CONFIG_MDNIE_SUPPORT
@@ -1005,6 +1098,10 @@ static struct wm8994_pdata wm1811_pdata = {
 	.micd_lvl_sel = 0xFF,
 
 	.ldo_ena_always_driven = true,
+	.ldo_ena_delay = 30000,
+
+	.lineout1fb = 1,
+	.lineout2fb = 1,
 };
 #endif
 
@@ -1069,7 +1166,7 @@ static struct bcm47511_platform_data midas_bcm47511_data = {
 	.regpu		= GPIO_GPS_PWR_EN,	/* XM0DATA[15] */
 	.nrst		= GPIO_GPS_nRST,	/* XM0DATA[14] */
 	.uart_rxd	= GPIO_GPS_RXD,		/* XURXD[1] */
-	.gps_cntl	= GPIO_GPS_CNTL,	/* XM0ADDR[6] */
+	.gps_cntl	= -1,	/* GPS_CNTL - XM0ADDR[6] */
 	.reg32khz	= "lpo_in",
 };
 
@@ -1135,6 +1232,46 @@ static struct platform_device midas_keypad = {
 	},
 };
 
+#ifdef CONFIG_I2C_SI4705
+static void pq_si4705_reset(int enable)
+{
+	pr_info("%s: enable is %d", __func__, enable);
+	if (enable)
+		gpio_set_value(GPIO_FM_RST, 1);
+	else
+		gpio_set_value(GPIO_FM_RST, 0);
+}
+
+static void pq_si4705_init(void)
+{
+	gpio_request(GPIO_FM_RST, "fmradio_reset");
+	s3c_gpio_cfgpin(GPIO_FM_RST, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_FM_RST, 0);
+}
+
+static struct i2c_gpio_platform_data gpio_i2c_fm_radio = {
+	.sda_pin	= EXYNOS4_GPY0(3),
+	.scl_pin	= EXYNOS4_GPY0(2),
+};
+
+struct platform_device device_i2c_fm_radio = {
+	.name = "i2c-gpio",
+	.id = I2C_FM_RADIO,
+	.dev.platform_data = &gpio_i2c_fm_radio,
+};
+
+static struct si4705_pdata pq_fm_radio_info = {
+	.reset = pq_si4705_reset,
+};
+
+static struct i2c_board_info i2c_devs_fm_radio[] __initdata = {
+	{
+		I2C_BOARD_INFO("si4705", 0x22>>1),
+		.platform_data = &pq_fm_radio_info,
+		.irq = IRQ_EINT(11),
+	}
+};
+#endif
 /* I2C GPIO: Fuel Gauge */
 static struct i2c_gpio_platform_data gpio_i2c_fuel = {
 	/* PQ/PQLTE use GPF1(4, 5) */
@@ -1356,7 +1493,7 @@ static struct exynos4_bus_platdata devfreq_bus_pdata = {
 		.upthreshold = 90,
 		.downdifferential = 10,
 	},
-	.polling_ms = 5,
+	.polling_ms = 50,
 };
 static struct platform_device devfreq_busfreq = {
 	.name		= "exynos4412-busfreq",
@@ -1364,6 +1501,13 @@ static struct platform_device devfreq_busfreq = {
 	.dev		= {
 		.platform_data = &devfreq_bus_pdata,
 	},
+};
+#endif
+
+#if defined(CONFIG_ARM_EXYNOS4_DISPLAY_DEVFREQ)
+static struct platform_device devfreq_display = {
+	.name		= "exynos4412-display",
+	.id		= -1,
 };
 #endif
 
@@ -1456,6 +1600,9 @@ static struct platform_device *slp_midas_devices[] __initdata = {
 #ifdef CONFIG_MACH_SLP_PQ_LTE
 	&device_i2c_3_touch,	/* PQ_LTE only: Meltas Touchkey */
 #endif
+#ifdef CONFIG_I2C_SI4705
+	&device_i2c_fm_radio,
+#endif
 	&device_i2c_codec,	/* codec: wm1811 */
 	&device_i2c_if_pmic,	/* if_pmic: max77693 */
 	&device_i2c_fuel,	/* max17047-fuelgauge */
@@ -1526,6 +1673,7 @@ static struct platform_device *slp_midas_devices[] __initdata = {
 	&s5p_device_mixer,
 	&s5p_device_hdmi,
 	&exynos_drm_hdmi_device,
+	&exynos_drm_vidi_device,
 #ifdef CONFIG_DRM_EXYNOS
 	&exynos_drm_device,
 #endif
@@ -1535,7 +1683,6 @@ static struct platform_device *slp_midas_devices[] __initdata = {
 	&s3c_device_fimc1,
 	&s3c_device_fimc2,
 	&s3c_device_fimc3,
-/* CONFIG_VIDEO_SAMSUNG_S5P_FIMC is the feature for mainline */
 #elif defined(CONFIG_VIDEO_SAMSUNG_S5P_FIMC)
 	&s5p_device_fimc0,
 	&s5p_device_fimc1,
@@ -1556,6 +1703,10 @@ static struct platform_device *slp_midas_devices[] __initdata = {
 	&exynos_device_flite0,
 	&exynos_device_flite1,
 	&midas_charger_manager,
+	&s3c_device_adc,
+#ifdef CONFIG_SENSORS_NTC_THERMISTOR
+	&midas_ncp15wb473_thermistor,
+#endif
 	&midas_keypad,
 	&midas_jack,
 	&midas_uart_select,
@@ -1568,6 +1719,9 @@ static struct platform_device *slp_midas_devices[] __initdata = {
 #endif
 #if defined(CONFIG_ARM_EXYNOS4_BUS_DEVFREQ)
 	&devfreq_busfreq,
+#endif
+#if defined(CONFIG_ARM_EXYNOS4_DISPLAY_DEVFREQ)
+	&devfreq_display,
 #endif
 	&opt_gp2a,
 #ifdef CONFIG_EXYNOS4_SETUP_THERMAL
@@ -1606,6 +1760,11 @@ struct s5p_platform_tmu midas_tmu_data __initdata = {
 static void __init exynos4_reserve_mem(void)
 {
 	static struct cma_region regions[] = {
+#ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMD
+		{
+			.name = "fimd"
+		},
+#endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC0
 		{
 			.name = "fimc0",
@@ -1674,6 +1833,7 @@ static void __init exynos4_reserve_mem(void)
 			.name		= "fw",
 			.size		= 1 << 20,
 			{ .alignment	= 128 << 10 },
+			.start		= 0x60500000,	/* FIXME */
 		},
 #endif
 #ifdef CONFIG_DRM_EXYNOS
@@ -1697,6 +1857,7 @@ static void __init exynos4_reserve_mem(void)
 	};
 
 	static const char map[] __initconst =
+		"s3cfb.0=fimd;"
 		"s3c-fimc.0=fimc0;s3c-fimc.1=fimc1;s3c-fimc.2=fimc2;s3c-fimc.3=fimc3;"
 		"exynos4210-fimc.0=fimc0;exynos4210-fimc.1=fimc1;exynos4210-fimc.2=fimc2;exynos4210-fimc.3=fimc3;"
 #ifdef CONFIG_VIDEO_MFC5X
@@ -1713,6 +1874,10 @@ static void __init exynos4_reserve_mem(void)
 #endif
 		""
 	;
+	if (fbmem_start)
+		regions[0].start = (dma_addr_t)fbmem_start;
+	if (fbmem_size)
+		regions[0].size = (size_t)fbmem_size;
 
 	cma_set_defaults(regions, map);
 	cma_early_regions_reserve(NULL);
@@ -1777,7 +1942,7 @@ err_clk:
 }
 #endif
 
-static void __init madis_fb_init(void)
+static void __init midas_fb_init(void)
 {
 #ifdef CONFIG_S5P_MIPI_DSI2
 	struct s5p_platform_mipi_dsim *dsim_pd;
@@ -1786,7 +1951,7 @@ static void __init madis_fb_init(void)
 	dsim_pd = (struct s5p_platform_mipi_dsim *)&dsim_platform_data;
 
 	strcpy(dsim_pd->lcd_panel_name, "s6e8aa0");
-	dsim_pd->lcd_panel_info = (void *)&drm_fimd_pdata.timing;
+	dsim_pd->lcd_panel_info = (void *)&drm_fimd_pdata.panel.timing;
 
 	s5p_mipi_dsi_register_lcd_device(&mipi_lcd_device);
 	if (hwrevision(1))
@@ -1919,8 +2084,6 @@ static void __init midas_machine_init(void)
 	i2c_register_board_info(1, i2c_devs1, ARRAY_SIZE(i2c_devs1));
 
 	s3c_i2c3_set_platdata(NULL);
-	midas_tsp_set_platdata(&melfas_tsp_pdata);
-	midas_tsp_init();
 
 #ifdef CONFIG_MACH_SLP_PQ
 	/* codec: PQ rev01, HW REV: 00, i2c: i2c4 */
@@ -1941,10 +2104,9 @@ static void __init midas_machine_init(void)
 	s3c_i2c7_set_platdata(NULL);
 
 	/* Workaround for repeated interrupts from MAX77686 during sleep */
-	exynos4_max77686_info.wakeup = 0;
-	/* LDO3 should be enabled during LP */
-	exynos4_max77686_info.opmode_data[MAX77686_LDO3].mode =
-			MAX77686_OPMODE_LP;
+	if (hwrevision(0))
+		exynos4_max77686_info.wakeup = 0;
+
 	i2c_register_board_info(7, i2c_devs7, ARRAY_SIZE(i2c_devs7));
 
 	GPIO_I2C_PIN_SETUP(if_pmic);
@@ -2031,6 +2193,12 @@ static void __init midas_machine_init(void)
 	i2c_register_board_info(I2C_FUEL, i2c_devs_fuel,
 				ARRAY_SIZE(i2c_devs_fuel));
 
+#ifdef CONFIG_I2C_SI4705
+	GPIO_I2C_PIN_SETUP(fm_radio);
+	pq_si4705_init();
+	i2c_register_board_info(I2C_FM_RADIO, i2c_devs_fm_radio,
+				ARRAY_SIZE(i2c_devs_fm_radio));
+#endif
 #ifdef CONFIG_EXYNOS4_DEV_DWMCI
 	exynos_dwmci_set_platdata(&exynos_dwmci_pdata);
 #else
@@ -2088,12 +2256,18 @@ static void __init midas_machine_init(void)
 	/* Disable unused clocks to remove power leakage on idle state */
 	midas_disable_unused_clock();
 
+#ifdef CONFIG_SENSORS_NTC_THERMISTOR
+	/* PQ Rev00 doesn't have ntc on board */
+	if (!hwrevision(0))
+		adc_ntc_init(2); /* Channel 2 */
+#endif
+
 	platform_add_devices(slp_midas_devices, ARRAY_SIZE(slp_midas_devices));
 
 	/* Extcon */
 	midas_extcon_init();
 
-	madis_fb_init();
+	midas_fb_init();
 #ifdef CONFIG_MDNIE_SUPPORT
 	exynos4_common_setup_clock("sclk_mdnie", "mout_mpll_user",
 				400 * MHZ, 1);
@@ -2128,6 +2302,7 @@ static void __init midas_machine_init(void)
 
 	spi_register_board_info(spi1_board_info, ARRAY_SIZE(spi1_board_info));
 #endif
+	check_hw_revision();
 }
 
 MACHINE_START(SLP_PQ, "SLP_PQ")

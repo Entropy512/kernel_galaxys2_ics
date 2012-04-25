@@ -22,6 +22,7 @@
 #include <linux/regulator/fixed.h>
 #include <linux/mfd/wm8994/pdata.h>
 #include <linux/mfd/max8997.h>
+#include <linux/mfd/max77686.h>
 #include <linux/mmc/host.h>
 #include <linux/memblock.h>
 #include <linux/fb.h>
@@ -91,6 +92,11 @@
 #include <plat/s5p-tmu.h>
 #endif
 #include <plat/media.h>
+
+#ifdef CONFIG_FB_MIPI_DSIM
+#include <plat/dsim.h>
+#include <plat/mipi_dsi.h>
+#endif
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define SMDK5250_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -542,6 +548,171 @@ static struct s3c_fb_platdata smdk5250_lcd1_pdata __initdata = {
 };
 #endif
 
+#ifdef CONFIG_FB_MIPI_DSIM
+#if defined(CONFIG_LCD_MIPI_S6E8AB0)
+static struct mipi_dsim_config dsim_info = {
+       .e_interface	= DSIM_VIDEO,
+       .e_pixel_format	= DSIM_24BPP_888,
+       /* main frame fifo auto flush at VSYNC pulse */
+       .auto_flush		= false,
+       .eot_disable		= false,
+       .auto_vertical_cnt	= true,
+       .hse = false,
+       .hfp = false,
+       .hbp = false,
+       .hsa = false,
+
+       .e_no_data_lane	= DSIM_DATA_LANE_4,
+       .e_byte_clk	= DSIM_PLL_OUT_DIV8,
+       .e_burst_mode	= DSIM_BURST,
+
+       .p = 2,
+       .m = 57,
+       .s = 1,
+
+       /* D-PHY PLL stable time spec :min = 200usec ~ max 400usec */
+       .pll_stable_time = 500,
+
+       .esc_clk = 20 * 1000000,        /* escape clk : 10MHz */
+
+       /* stop state holding counter after bta change count 0 ~ 0xfff */
+       .stop_holding_cnt = 0x0fff,
+       .bta_timeout = 0xff,            /* bta timeout 0 ~ 0xff */
+       .rx_timeout = 0xffff,	       /* lp rx timeout 0 ~ 0xffff */
+
+       .dsim_ddi_pd = &s6e8ab0_mipi_lcd_driver,
+};
+
+static struct mipi_dsim_lcd_config dsim_lcd_info = {
+       .rgb_timing.left_margin	= 0xa,
+       .rgb_timing.right_margin	= 0xa,
+       .rgb_timing.upper_margin = 80,
+       .rgb_timing.lower_margin = 48,
+       .rgb_timing.hsync_len	= 5,
+       .rgb_timing.vsync_len	= 32,
+       .cpu_timing.cs_setup	= 0,
+       .cpu_timing.wr_setup	= 1,
+       .cpu_timing.wr_act	= 0,
+       .cpu_timing.wr_hold	= 0,
+       .lcd_size.width		= 1280,
+       .lcd_size.height		= 800,
+};
+#elif defined (CONFIG_LCD_MIPI_S6E63M0)
+static struct mipi_dsim_config dsim_info = {
+       .e_interface    = DSIM_VIDEO,
+       .e_pixel_format = DSIM_24BPP_888,
+       /* main frame fifo auto flush at VSYNC pulse */
+       .auto_flush = false,
+       .eot_disable = false,
+       .auto_vertical_cnt = true,
+       .hse = false,
+       .hfp = false,
+       .hbp = false,
+       .hsa = false,
+
+       .e_no_data_lane = DSIM_DATA_LANE_2,
+       .e_byte_clk = DSIM_PLL_OUT_DIV8,
+       .e_burst_mode = DSIM_NON_BURST_SYNC_PULSE,
+
+       .p = 3,
+       .m = 90,
+       .s = 1,
+
+       /* D-PHY PLL stable time spec :min = 200usec ~ max 400usec */
+       .pll_stable_time = 500,
+
+       .esc_clk = 10 * 1000000,       /* escape clk : 10MHz */
+
+       /* stop state holding counter after bta change count 0 ~ 0xfff */
+       .stop_holding_cnt	= 0x0fff,
+       .bta_timeout		= 0xff,        /* bta timeout 0 ~ 0xff */
+       .rx_timeout		= 0xffff,      /* lp rx timeout 0 ~ 0xffff */
+
+       .dsim_ddi_pd = &s6e63m0_mipi_lcd_driver,
+};
+
+static struct mipi_dsim_lcd_config dsim_lcd_info = {
+       .rgb_timing.left_margin	= 0x16,
+       .rgb_timing.right_margin = 0x16,
+       .rgb_timing.upper_margin = 0x28,
+       .rgb_timing.lower_margin = 0x1,
+       .rgb_timing.hsync_len	= 0x2,
+       .rgb_timing.vsync_len	= 0x3,
+       .cpu_timing.cs_setup	= 0,
+       .cpu_timing.wr_setup	= 1,
+       .cpu_timing.wr_act	= 0,
+       .cpu_timing.wr_hold	= 0,
+       .lcd_size.width		= 480,
+       .lcd_size.height		= 800,
+};
+#elif defined (CONFIG_LCD_MIPI_TC358764)
+static struct mipi_dsim_config dsim_info = {
+       .e_interface	= DSIM_VIDEO,
+       .e_pixel_format	= DSIM_24BPP_888,
+       /* main frame fifo auto flush at VSYNC pulse */
+       .auto_flush	= false,
+       .eot_disable	= false,
+       .auto_vertical_cnt = false,
+       .hse = false,
+       .hfp = false,
+       .hbp = false,
+       .hsa = false,
+
+       .e_no_data_lane	= DSIM_DATA_LANE_4,
+       .e_byte_clk	= DSIM_PLL_OUT_DIV8,
+       .e_burst_mode	= DSIM_BURST,
+
+       .p = 3,
+       .m = 115,
+       .s = 1,
+
+       /* D-PHY PLL stable time spec :min = 200usec ~ max 400usec */
+       .pll_stable_time = 500,
+
+       .esc_clk = 0.4 * 1000000,      /* escape clk : 10MHz */
+
+       /* stop state holding counter after bta change count 0 ~ 0xfff */
+       .stop_holding_cnt	= 0x0f,
+       .bta_timeout		= 0xff,          /* bta timeout 0 ~ 0xff */
+       .rx_timeout		= 0xffff,         /* lp rx timeout 0 ~ 0xffff */
+
+       .dsim_ddi_pd = &tc358764_mipi_lcd_driver,
+};
+
+static struct mipi_dsim_lcd_config dsim_lcd_info = {
+       .rgb_timing.left_margin  = 0x4,
+       .rgb_timing.right_margin = 0x4,
+       .rgb_timing.upper_margin = 0x4,
+       .rgb_timing.lower_margin = 0x4,
+       .rgb_timing.hsync_len	= 0x4,
+       .rgb_timing.vsync_len	= 0x4,
+       .cpu_timing.cs_setup	= 0,
+       .cpu_timing.wr_setup	= 1,
+       .cpu_timing.wr_act	= 0,
+       .cpu_timing.wr_hold	= 0,
+       .lcd_size.width		= 1280,
+       .lcd_size.height		= 800,
+};
+#endif
+
+static struct s5p_platform_mipi_dsim dsim_platform_data = {
+       .clk_name		= "dsim0",
+       .dsim_config		= &dsim_info,
+       .dsim_lcd_config		= &dsim_lcd_info,
+
+       .part_reset		= s5p_dsim_part_reset,
+       .init_d_phy		= s5p_dsim_init_d_phy,
+       .get_fb_frame_done	= NULL,
+       .trigger			= NULL,
+
+       /*
+        * the stable time of needing to write data on SFR
+        * when the mipi mode becomes LP mode.
+        */
+      .delay_for_stabilization = 600,
+};
+#endif
+
 #ifdef CONFIG_S5P_DP
 static struct video_info smdk5250_dp_config = {
 	.name			= "WQXGA(2560x1600) LCD, for SMDK TEST",
@@ -677,6 +848,7 @@ static struct dw_mci_board exynos_dwmci_pdata __initdata = {
 	.bus_hz			= 66 * 1000 * 1000,
 	.caps			= MMC_CAP_UHS_DDR50 | MMC_CAP_1_8V_DDR |
 				  MMC_CAP_8_BIT_DATA | MMC_CAP_CMD23,
+	.fifo_depth             = 0x80,
 	.detect_delay_ms	= 200,
 	.hclk_name		= "dwmci",
 	.cclk_name		= "sclk_dwmci",
@@ -1057,7 +1229,7 @@ static struct regulator_init_data __initdata max8997_buck2_data = {
 static struct regulator_init_data __initdata max8997_buck3_data = {
 	.constraints	= {
 		.name		= "vdd_g3d range",
-		.min_uV		= 950000,
+		.min_uV		= 850000,
 		.max_uV		= 1200000,
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
@@ -1124,6 +1296,167 @@ static struct max8997_platform_data __initdata exynos5_max8997_info = {
 	.buck5_voltage[7] = 1100000, /* 1.1V */
 };
 
+/* max77686 */
+static struct regulator_consumer_supply max77686_buck1 =
+REGULATOR_SUPPLY("vdd_mif", NULL);
+
+static struct regulator_consumer_supply max77686_buck2 =
+REGULATOR_SUPPLY("vdd_arm", NULL);
+
+static struct regulator_consumer_supply max77686_buck3 =
+REGULATOR_SUPPLY("vdd_int", NULL);
+
+static struct regulator_consumer_supply max77686_buck4 =
+REGULATOR_SUPPLY("vdd_g3d", NULL);
+
+static struct regulator_consumer_supply __initdata max77686_ldo11_consumer =
+REGULATOR_SUPPLY("vdd_ldo11", NULL);
+
+static struct regulator_consumer_supply __initdata max77686_ldo14_consumer =
+REGULATOR_SUPPLY("vdd_ldo14", NULL);
+
+static struct regulator_init_data max77686_buck1_data = {
+	.constraints = {
+		.name = "vdd_mif range",
+		.min_uV = 950000,
+		.max_uV = 1300000,
+		.always_on = 1,
+		.boot_on = 1,
+		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+				REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies = 1,
+	.consumer_supplies = &max77686_buck1,
+};
+
+static struct regulator_init_data max77686_buck2_data = {
+	.constraints = {
+		.name = "vdd_arm range",
+		.min_uV = 850000,
+		.max_uV = 1350000,
+		.always_on = 1,
+		.boot_on = 1,
+		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+	},
+	.num_consumer_supplies = 1,
+	.consumer_supplies = &max77686_buck2,
+};
+
+static struct regulator_init_data max77686_buck3_data = {
+	.constraints = {
+		.name = "vdd_int range",
+		.min_uV = 1050000,
+		.max_uV = 1200000,
+		.always_on = 1,
+		.boot_on = 1,
+		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+	},
+	.num_consumer_supplies = 1,
+	.consumer_supplies = &max77686_buck3,
+};
+
+static struct regulator_init_data max77686_buck4_data = {
+	.constraints = {
+		.name = "vdd_g3d range",
+		.min_uV = 850000,
+		.max_uV = 1300000,
+		.boot_on = 1,
+		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+				  REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled = 1,
+		},
+	},
+	.num_consumer_supplies = 1,
+	.consumer_supplies = &max77686_buck4,
+};
+
+static struct regulator_init_data __initdata max77686_ldo11_data = {
+	.constraints	= {
+		.name		= "vdd_ldo11 range",
+		.min_uV		= 1900000,
+		.max_uV		= 1900000,
+		.apply_uV	= 1,
+		.always_on	= 1,
+		.state_mem	= {
+			.enabled	= 1,
+		},
+	},
+	.num_consumer_supplies	= 1,
+	.consumer_supplies	= &max77686_ldo11_consumer,
+};
+
+static struct regulator_init_data __initdata max77686_ldo14_data = {
+	.constraints	= {
+		.name		= "vdd_ldo14 range",
+		.min_uV		= 1900000,
+		.max_uV		= 1900000,
+		.apply_uV	= 1,
+		.always_on	= 1,
+		.state_mem	= {
+			.enabled	= 1,
+		},
+	},
+	.num_consumer_supplies	= 1,
+	.consumer_supplies	= &max77686_ldo14_consumer,
+};
+
+static struct max77686_regulator_data max77686_regulators[] = {
+	{MAX77686_BUCK1, &max77686_buck1_data,},
+	{MAX77686_BUCK2, &max77686_buck2_data,},
+	{MAX77686_BUCK3, &max77686_buck3_data,},
+	{MAX77686_BUCK4, &max77686_buck4_data,},
+	{MAX77686_LDO11, &max77686_ldo11_data,},
+	{MAX77686_LDO14, &max77686_ldo14_data,},
+};
+
+struct max77686_opmode_data max77686_opmode_data[MAX77686_REG_MAX] = {
+	[MAX77686_LDO11] = {MAX77686_LDO11, MAX77686_OPMODE_STANDBY},
+	[MAX77686_LDO14] = {MAX77686_LDO14, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK1] = {MAX77686_BUCK1, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK2] = {MAX77686_BUCK2, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK3] = {MAX77686_BUCK3, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK4] = {MAX77686_BUCK4, MAX77686_OPMODE_STANDBY},
+};
+
+static struct max77686_platform_data exynos4_max77686_info = {
+	.num_regulators = ARRAY_SIZE(max77686_regulators),
+	.regulators = max77686_regulators,
+	.irq_gpio	= 0,
+	.irq_base	= 0,
+	.wakeup		= 0,
+
+	.opmode_data = max77686_opmode_data,
+	.ramp_rate = MAX77686_RAMP_RATE_27MV,
+
+	.buck2_voltage[0] = 1300000,	/* 1.3V */
+	.buck2_voltage[1] = 1000000,	/* 1.0V */
+	.buck2_voltage[2] = 950000,	/* 0.95V */
+	.buck2_voltage[3] = 900000,	/* 0.9V */
+	.buck2_voltage[4] = 1000000,	/* 1.0V */
+	.buck2_voltage[5] = 1000000,	/* 1.0V */
+	.buck2_voltage[6] = 950000,	/* 0.95V */
+	.buck2_voltage[7] = 900000,	/* 0.9V */
+
+	.buck3_voltage[0] = 1037500,	/* 1.0375V */
+	.buck3_voltage[1] = 1000000,	/* 1.0V */
+	.buck3_voltage[2] = 950000,	/* 0.95V */
+	.buck3_voltage[3] = 900000,	/* 0.9V */
+	.buck3_voltage[4] = 1000000,	/* 1.0V */
+	.buck3_voltage[5] = 1000000,	/* 1.0V */
+	.buck3_voltage[6] = 950000,	/* 0.95V */
+	.buck3_voltage[7] = 900000,	/* 0.9V */
+
+	.buck4_voltage[0] = 1100000,	/* 1.1V */
+	.buck4_voltage[1] = 1000000,	/* 1.0V */
+	.buck4_voltage[2] = 950000,	/* 0.95V */
+	.buck4_voltage[3] = 900000,	/* 0.9V */
+	.buck4_voltage[4] = 1000000,	/* 1.0V */
+	.buck4_voltage[5] = 1000000,	/* 1.0V */
+	.buck4_voltage[6] = 950000,	/* 0.95V */
+	.buck4_voltage[7] = 900000,	/* 0.9V */
+};
+
 #ifdef CONFIG_REGULATOR_S5M8767
 /* S5M8767 Regulator */
 static int s5m_cfg_irq(void)
@@ -1153,6 +1486,8 @@ static struct regulator_init_data s5m8767_buck1_data = {
 		.max_uV		= 1200000,
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
+		.always_on = 1,
+		.boot_on = 1,
 		.state_mem	= {
 			.disabled	= 1,
 		},
@@ -1168,6 +1503,8 @@ static struct regulator_init_data s5m8767_buck2_data = {
 		.max_uV		= 1500000,
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
+		.always_on = 1,
+		.boot_on = 1,
 		.state_mem	= {
 			.disabled	= 1,
 		},
@@ -1184,6 +1521,8 @@ static struct regulator_init_data s5m8767_buck3_data = {
 		.apply_uV	= 1,
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				REGULATOR_CHANGE_STATUS,
+		.always_on = 1,
+		.boot_on = 1,
 		.state_mem	= {
 			.uV		= 1100000,
 			.mode		= REGULATOR_MODE_NORMAL,
@@ -1197,10 +1536,12 @@ static struct regulator_init_data s5m8767_buck3_data = {
 static struct regulator_init_data s5m8767_buck4_data = {
 	.constraints	= {
 		.name		= "vdd_g3d range",
-		.min_uV		=  950000,
+		.min_uV		=  850000,
 		.max_uV		= 1200000,
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				REGULATOR_CHANGE_STATUS,
+		.always_on = 1,
+		.boot_on = 1,
 		.state_mem	= {
 			.disabled	= 1,
 		},
@@ -1216,12 +1557,22 @@ static struct s5m_regulator_data gaia_regulators[] = {
 	{ S5M8767_BUCK4, &s5m8767_buck4_data },
 };
 
+struct s5m_opmode_data s5m8767_opmode_data[S5M8767_REG_MAX] = {
+	[S5M8767_BUCK1] = {S5M8767_BUCK1, S5M_OPMODE_STANDBY},
+	[S5M8767_BUCK2] = {S5M8767_BUCK2, S5M_OPMODE_STANDBY},
+	[S5M8767_BUCK3] = {S5M8767_BUCK3, S5M_OPMODE_STANDBY},
+	[S5M8767_BUCK4] = {S5M8767_BUCK4, S5M_OPMODE_STANDBY},
+};
+
 static struct s5m_platform_data exynos5_s5m8767_pdata = {
 	.device_type		= S5M8767X,
 	.irq_base		= IRQ_BOARD_START,
 	.num_regulators		= ARRAY_SIZE(gaia_regulators),
 	.regulators		= gaia_regulators,
 	.cfg_pmic_irq		= s5m_cfg_irq,
+	.wakeup			= 1,
+	.opmode_data		= s5m8767_opmode_data,
+	.wtsr_smpl		= 1,
 
 	.buck2_voltage[0]	= 1250000,
 	.buck2_voltage[1]	= 1200000,
@@ -1529,6 +1880,9 @@ static struct i2c_board_info i2c_devs0[] __initdata = {
 	{
 		I2C_BOARD_INFO("max8997", 0x66),
 		.platform_data	= &exynos5_max8997_info,
+	}, {
+		I2C_BOARD_INFO("max77686", (0x12 >> 1)),
+		.platform_data	= &exynos4_max77686_info,
 	},
 #endif
 };
@@ -1774,6 +2128,8 @@ static struct platform_device *smdk5250_devices[] __initdata = {
 	&SYSMMU_PLATDEV(gsc1),
 	&SYSMMU_PLATDEV(gsc2),
 	&SYSMMU_PLATDEV(gsc3),
+	&SYSMMU_PLATDEV(flite0),
+	&SYSMMU_PLATDEV(flite1),
 	&SYSMMU_PLATDEV(tv),
 	&SYSMMU_PLATDEV(rot),
 	&SYSMMU_PLATDEV(is_isp),
@@ -1908,20 +2264,6 @@ static struct s5p_platform_cec hdmi_cec_data __initdata = {
 static void __init exynos_reserve_mem(void)
 {
 	static struct cma_region regions[] = {
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM
-		{
-			.name = "pmem",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K,
-			.start = 0,
-		},
-#endif
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_GPU1
-		{
-			.name = "pmem_gpu1",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_GPU1 * SZ_1K,
-			.start = 0,
-		},
-#endif
 		{
 			.name = "ion",
 			.size = 30 * SZ_1M,
@@ -1952,6 +2294,20 @@ static void __init exynos_reserve_mem(void)
 		{
 			.name = "gsc3",
 			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_GSC3 * SZ_1K,
+			.start = 0
+		},
+#endif
+#ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FLITE0
+		{
+			.name = "flite0",
+			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FLITE0 * SZ_1K,
+			.start = 0
+		},
+#endif
+#ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FLITE1
+		{
+			.name = "flite1",
+			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FLITE1 * SZ_1K,
 			.start = 0
 		},
 #endif
@@ -2014,11 +2370,11 @@ static void __init exynos_reserve_mem(void)
 #ifdef CONFIG_EXYNOS_C2C
 		"samsung-c2c=c2c_shdmem;"
 #endif
-		"android_pmem.0=pmem;android_pmem.1=pmem_gpu1;"
 		"s3cfb.0=fimd;exynos5-fb.1=fimd;"
 		"samsung-rp=srp;"
 		"exynos-gsc.0=gsc0;exynos-gsc.1=gsc1;exynos-gsc.2=gsc2;exynos-gsc.3=gsc3;"
-		"ion-exynos=ion,gsc0,gsc1,gsc2,gsc3,fimd,fw,b1;"
+		"exynos-fimc-lite.0=flite0;exynos-fimc-lite.1=flite1;"
+		"ion-exynos=ion,gsc0,gsc1,gsc2,gsc3,flite0,flite1,fimd,fw,b1;"
 		"exynos-rot=rot;"
 		"s5p-mfc-v6/f=fw;"
 		"s5p-mfc-v6/a=b1;"
@@ -2056,11 +2412,11 @@ static void __init smdk5250_camera_gpio_cfg(void)
 
 #if defined(CONFIG_VIDEO_EXYNOS_GSCALER) && defined(CONFIG_VIDEO_EXYNOS_FIMC_LITE)
 #if defined(CONFIG_VIDEO_S5K4BA)
-static struct exynos_gscaler_isp_info s5k4ba = {
+static struct exynos_isp_info s5k4ba = {
 	.board_info	= &s5k4ba_info,
 	.cam_srclk_name	= "xxti",
 	.clk_frequency  = 24000000UL,
-	.bus_type	= GSC_ITU_601,
+	.bus_type	= CAM_TYPE_ITU,
 #ifdef CONFIG_ITU_A
 	.cam_clk_name	= "sclk_cam0",
 	.i2c_bus_num	= 4,
@@ -2071,7 +2427,7 @@ static struct exynos_gscaler_isp_info s5k4ba = {
 	.i2c_bus_num	= 5,
 	.cam_port	= CAM_PORT_B, /* A-Port : 0, B-Port : 1 */
 #endif
-	.flags		= GSC_CLK_INV_VSYNC,
+	.flags		= CAM_CLK_INV_VSYNC,
 };
 /* This is for platdata of fimc-lite */
 static struct s3c_platform_camera flite_s5k4ba = {
@@ -2084,11 +2440,11 @@ static struct s3c_platform_camera flite_s5k4ba = {
 };
 #endif
 #if defined(CONFIG_VIDEO_M5MOLS)
-static struct exynos_gscaler_isp_info m5mols = {
+static struct exynos_isp_info m5mols = {
 	.board_info	= &m5mols_board_info,
 	.cam_srclk_name	= "xxti",
 	.clk_frequency  = 24000000UL,
-	.bus_type	= GSC_MIPI_CSI2,
+	.bus_type	= CAM_TYPE_MIPI,
 #ifdef CONFIG_CSI_C
 	.cam_clk_name	= "sclk_cam0",
 	.i2c_bus_num	= 4,
@@ -2099,7 +2455,7 @@ static struct exynos_gscaler_isp_info m5mols = {
 	.i2c_bus_num	= 5,
 	.cam_port	= CAM_PORT_B, /* A-Port : 0, B-Port : 1 */
 #endif
-	.flags		= GSC_CLK_INV_PCLK | GSC_CLK_INV_VSYNC,
+	.flags		= CAM_CLK_INV_PCLK | CAM_CLK_INV_VSYNC,
 	.csi_data_align = 32,
 };
 /* This is for platdata of fimc-lite */
@@ -2138,20 +2494,14 @@ static void __init smdk5250_set_camera_platdata(void)
 #if defined(CONFIG_VIDEO_M5MOLS)
 	exynos_gsc0_default_data.isp_info[gsc_cam_index++] = &m5mols;
 #if defined(CONFIG_CSI_C)
-	exynos_flite0_default_data.cam[flite0_cam_index++] = &flite_m5mo;
+	exynos_flite0_default_data.cam[flite0_cam_index] = &flite_m5mo;
+	exynos_flite0_default_data.isp_info[flite0_cam_index] = &m5mols;
+	flite0_cam_index++;
 #endif
 #if defined(CONFIG_CSI_D)
-	exynos_flite1_default_data.cam[flite1_cam_index++] = &flite_m5mo;
-#endif
-#endif
-
-#if defined(CONFIG_VIDEO_S5K4BA)
-	exynos_gsc0_default_data.isp_info[gsc_cam_index++] = &s5k4ba;
-#if defined(CONFIG_ITU_A)
-	exynos_flite0_default_data.cam[flite0_cam_index++] = &flite_s5k4ba;
-#endif
-#if defined(CONFIG_ITU_B)
-	exynos_flite1_default_data.cam[flite1_cam_index++] = &flite_s5k4ba;
+	exynos_flite1_default_data.cam[flite1_cam_index] = &flite_m5mo;
+	exynos_flite1_default_data.isp_info[flite1_cam_index] = &m5mols;
+	flite1_cam_index++;
 #endif
 #endif
 	/* flite platdata register */
@@ -2217,7 +2567,6 @@ static void __init smdk5250_map_io(void)
 static void __init exynos_sysmmu_init(void)
 {
 #ifdef CONFIG_VIDEO_JPEG_V2X
-	ASSIGN_SYSMMU_POWERDOMAIN(jpeg, &exynos5_device_pd[PD_GSCL].dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(jpeg).dev, &s5p_device_jpeg.dev);
 #endif
 #if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC)
@@ -2239,6 +2588,12 @@ static void __init exynos_sysmmu_init(void)
 	sysmmu_set_owner(&SYSMMU_PLATDEV(gsc2).dev, &exynos5_device_gsc2.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(gsc3).dev, &exynos5_device_gsc3.dev);
 #endif
+#ifdef CONFIG_VIDEO_EXYNOS_FIMC_LITE
+	ASSIGN_SYSMMU_POWERDOMAIN(flite0, &exynos5_device_pd[PD_GSCL].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(flite1, &exynos5_device_pd[PD_GSCL].dev);
+	sysmmu_set_owner(&SYSMMU_PLATDEV(flite0).dev, &exynos_device_flite0.dev);
+	sysmmu_set_owner(&SYSMMU_PLATDEV(flite1).dev, &exynos_device_flite1.dev);
+#endif
 #ifdef CONFIG_VIDEO_EXYNOS_ROTATOR
 	sysmmu_set_owner(&SYSMMU_PLATDEV(rot).dev, &exynos_device_rotator.dev);
 #endif
@@ -2246,12 +2601,17 @@ static void __init exynos_sysmmu_init(void)
 	sysmmu_set_owner(&SYSMMU_PLATDEV(2d).dev, &s5p_device_fimg2d.dev);
 #endif
 #ifdef CONFIG_VIDEO_EXYNOS5_FIMC_IS
-/* TODO : after finish implementation of run-time PM, It will be enabled
-	ASSIGN_SYSMMU_POWERDOMAIN(is_isp, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_drc, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_fd, &exynos4_device_pd[PD_ISP].dev);
-	ASSIGN_SYSMMU_POWERDOMAIN(is_cpu, &exynos4_device_pd[PD_ISP].dev)
-*/
+	ASSIGN_SYSMMU_POWERDOMAIN(is_isp, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_drc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_fd, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_cpu, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_odc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_sclrc, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_sclrp, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_dis0, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_dis1, &exynos5_device_pd[PD_ISP].dev);
+	ASSIGN_SYSMMU_POWERDOMAIN(is_3dnr, &exynos5_device_pd[PD_ISP].dev);
+
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_isp).dev, &exynos5_device_fimc_is.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_drc).dev, &exynos5_device_fimc_is.dev);
 	sysmmu_set_owner(&SYSMMU_PLATDEV(is_fd).dev, &exynos5_device_fimc_is.dev);
@@ -2330,6 +2690,10 @@ static void __init smdk5250_machine_init(void)
 
 #ifdef CONFIG_S5P_DP
 	s5p_dp_set_platdata(&smdk5250_dp_data);
+#endif
+
+#ifdef CONFIG_FB_MIPI_DSIM
+        s5p_dsim_set_platdata(&dsim_platform_data);
 #endif
 
 #ifdef CONFIG_SAMSUNG_DEV_BACKLIGHT
@@ -2416,6 +2780,16 @@ static void __init smdk5250_machine_init(void)
 			sizeof(exynos_flite0_default_data), &exynos_device_flite0);
 	s3c_set_platdata(&exynos_flite1_default_data,
 			sizeof(exynos_flite1_default_data), &exynos_device_flite1);
+/* In EVT0, for using camclk, gscaler clock should be enabled */
+	dev_set_name(&exynos_device_flite0.dev, "exynos-gsc.0");
+	clk_add_alias("gscl", "exynos-fimc-lite.0", "gscl",
+			&exynos_device_flite0.dev);
+	dev_set_name(&exynos_device_flite0.dev, "exynos-fimc-lite.0");
+
+	dev_set_name(&exynos_device_flite1.dev, "exynos-gsc.0");
+	clk_add_alias("gscl", "exynos-fimc-lite.1", "gscl",
+			&exynos_device_flite1.dev);
+	dev_set_name(&exynos_device_flite1.dev, "exynos-fimc-lite.1");
 #endif
 #ifdef CONFIG_VIDEO_EXYNOS5_FIMC_IS
 	dev_set_name(&exynos5_device_fimc_is.dev, "s5p-mipi-csis.0");
@@ -2428,6 +2802,10 @@ static void __init smdk5250_machine_init(void)
 	dev_set_name(&exynos5_device_fimc_is.dev, "exynos5-fimc-is");
 
 	exynos5_fimc_is_set_platdata(NULL);
+#if defined(CONFIG_EXYNOS_DEV_PD)
+	exynos5_device_pd[PD_ISP].dev.parent = &exynos5_device_pd[PD_GSCL].dev;
+	exynos5_device_fimc_is.dev.parent = &exynos5_device_pd[PD_ISP].dev;
+#endif
 #endif
 #ifdef CONFIG_EXYNOS_SETUP_THERMAL
 	s5p_tmu_set_platdata(&exynos_tmu_data);
@@ -2448,7 +2826,7 @@ static void __init smdk5250_machine_init(void)
 	s3c_set_platdata(&exynos_gsc3_default_data, sizeof(exynos_gsc3_default_data),
 			&exynos5_device_gsc3);
 	exynos5_gsc_set_parent_clock("mout_aclk_300_gscl_mid", "mout_mpll_user");
-	exynos5_gsc_set_parent_clock("mout_aclk_300_gscl", "sclk_vpll");
+	exynos5_gsc_set_parent_clock("mout_aclk_300_gscl", "mout_aclk_300_gscl_mid");
 	exynos5_gsc_set_parent_clock("aclk_300_gscl", "dout_aclk_300_gscl");
 	exynos5_gsc_set_clock_rate("dout_aclk_300_gscl", 310000000);
 #endif
@@ -2456,9 +2834,6 @@ static void __init smdk5250_machine_init(void)
 	exynos_c2c_set_platdata(&smdk5250_c2c_pdata);
 #endif
 #ifdef CONFIG_VIDEO_JPEG_V2X
-#ifdef CONFIG_EXYNOS_DEV_PD
-	s5p_device_jpeg.dev.parent = &exynos5_device_pd[PD_GSCL].dev;
-#endif
 	exynos5_jpeg_setup_clock(&s5p_device_jpeg.dev, 150000000);
 #endif
 
@@ -2569,6 +2944,7 @@ static void __init smdk5250_machine_init(void)
 	ppmu_init(&exynos_ppmu[PPMU_DDR_C], &exynos5_busfreq.dev);
 	ppmu_init(&exynos_ppmu[PPMU_DDR_R1], &exynos5_busfreq.dev);
 	ppmu_init(&exynos_ppmu[PPMU_DDR_L], &exynos5_busfreq.dev);
+	ppmu_init(&exynos_ppmu[PPMU_RIGHT0_BUS], &exynos5_busfreq.dev
 #endif
 }
 

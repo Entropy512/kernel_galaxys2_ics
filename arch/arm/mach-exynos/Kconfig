@@ -514,6 +514,14 @@ config GPIO_MIDAS_02_BD
 	bool "GPIO configuration for Midas 02 BD"
 	depends on MACH_SLP_MIDAS
 
+config BUSFREQ_L2_160M
+	bool "Busfreq L2 level use 160MHz"
+	default n
+	help
+	Busfreq uses 160MHz for L2, not 133MHz. Optimize busfreq
+	dvfs level transition for LCD high resolution.
+	This enable 160MHz of L2 level. Q1 has high LCD resolution,
+	so uses busfreq dvfs L2 as 160MHz.
 
 config SEC_THERMISTOR
 	bool "Use external thermistor with ADC"
@@ -809,15 +817,8 @@ config PANEL_U1
 
 endchoice
 
-choice
-	prompt "LCD panel select"
-	depends on MACH_MIDAS
-	default PANEL_S2P
-
-config PANEL_S2P
-	bool "S2P default panel"
-
-endchoice
+config PANEL_S2PLUS
+	bool "s2plus panel"
 
 if MACH_U1 || MACH_C1 || MACH_C1VZW || MACH_M0
 source "arch/arm/mach-exynos/Kconfig.local"
@@ -957,6 +958,7 @@ config MACH_S2PLUS
 	bool "S2PLUS board"
 	select S3C_DEV_I2C4
 	select S3C_DEV_I2C5
+	select PANEL_S2PLUS
 
 config MACH_S2PLUS
 	bool "S2 Plus board"
@@ -1072,6 +1074,7 @@ config MACH_P11
 	select SAMSUNG_DEV_PWM
 	select EXYNOS4_SETUP_MFC
 	select EXYNOS_DEV_SS_UDC
+	select EXYNOS4_SETUP_THERMAL
 	help
 	  Machine support for Samsung P11 board
 
@@ -1102,6 +1105,18 @@ config MACH_P11_DP_01
 	bool "P11 DP 0.1(evt0.1)"
 
 endchoice
+choice
+        prompt "DP FrameRate of P11"
+        depends on MACH_P11
+        default DP_40HZ_P11
+
+config DP_40HZ_P11
+        bool "support 40HZ for DP of P11"
+
+config DP_60HZ_P11
+        bool "support 60HZ for DP of P11"
+
+endchoice
 
 config MACH_P10
 	bool "P10 board"
@@ -1112,6 +1127,7 @@ config MACH_P10
 	select S3C_DEV_HSMMC3
 	select S3C_DEV_I2C1
 	select S3C_DEV_I2C3
+	select S3C_DEV_I2C4
 	select S3C_DEV_I2C5
 	select S3C_DEV_I2C7
 	select S5P_GPIO_INT
@@ -1126,6 +1142,7 @@ config MACH_P10
 	select EXYNOS4_DEV_FIMC_LITE
 	select EXYNOS4_SETUP_I2C1
 	select EXYNOS4_SETUP_I2C3
+	select EXYNOS4_SETUP_I2C4
 	select EXYNOS4_SETUP_I2C5
 	select EXYNOS4_SETUP_I2C7
 	select EXYNOS4_SETUP_DP
@@ -1137,6 +1154,7 @@ config MACH_P10
 	select SAMSUNG_DEV_PWM
 	select EXYNOS4_SETUP_MFC
 	select EXYNOS_DEV_SS_UDC
+	select EXYNOS4_SETUP_THERMAL
 	help
 	  Machine support for Samsung P10 board
 
@@ -1147,6 +1165,9 @@ choice
 
 config MACH_P10_00_BD
 	bool "P10 Rev 0.0 board"
+
+config MACH_P10_LTE_00_BD
+	bool "P10 LTE Rev 0.0 board"
 
 endchoice
 choice
@@ -1161,7 +1182,18 @@ config MACH_P10_DP_01
 	bool "P10 DP 0.1(evt0.1)"
 
 endchoice
+choice
+        prompt "DP FrameRate of P10"
+        depends on MACH_P10
+        default DP_40HZ_P10
 
+config DP_40HZ_P10
+        bool "support 40HZ for DP of P10"
+
+config DP_60HZ_P10
+        bool "support 60HZ for DP of P10"
+
+endchoice
 endmenu
 
 menu "MMC/SD slot setup"
@@ -1319,6 +1351,17 @@ config SEC_DEBUG_IRQ_EXIT_LOG
 	help
 	  Verbose Logging for IRQ delay.
 
+config SEC_DEBUG_AUXILIARY_LOG
+	bool "Samsung Auxiliary Logging on noncached buf"
+	default n
+	help
+	  This option enables sec_auxiliary_log support.
+	  we can log repeated information insuitable for kernel log like DVFS
+	  or power domain control information.
+	  It can support non-cached auxiliary log in RAM dump and We don't
+	  need to concern cache flush status for analyzing sudden
+	  system hang issue.
+
 menuconfig SEC_WATCHDOG_RESET
 	bool "S5PV310 watchdog reset to exit from lockup"
 	depends on (CPU_EXYNOS4210 || CPU_EXYNOS4212 || CPU_EXYNOS4412)
@@ -1384,6 +1427,12 @@ config SEC_MODEM_M0
 	bool "M0 with xmm6262"
 	select UMTS_MODEM_XMM6262
 	select LINK_DEVICE_HSIC
+
+config SEC_MODEM_M0_CTC
+	bool "M0 CTC with MDM6600"
+	select CDMA_MODEM_MDM6600
+	select LINK_DEVICE_DPRAM
+	select USBHUB_USB3503
 
 config SEC_MODEM_M1
 	bool "M1 with cmc221"
@@ -1456,3 +1505,9 @@ config BT_BCM4334
 	help
 	  Adds BCM4334 RFKILL driver for Broadcom BCM4334 chipset
 endif
+
+ config TARGET_KOR_LGT_TCP
+	bool "TARGET_KOR_LGT_TCP"
+	default n
+	help
+	  KOR_LGT.

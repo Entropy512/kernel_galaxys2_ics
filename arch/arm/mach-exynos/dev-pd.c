@@ -84,7 +84,6 @@ int exynos_pd_disable(struct device *dev)
 	u32 timeout;
 	u32 tmp = 0;
 
-#ifndef CONFIG_SLP
 	static int boot_lcd0 = 1;
 	if (boot_lcd0) {
 		struct platform_device *pdev = to_platform_device(dev);
@@ -94,7 +93,6 @@ int exynos_pd_disable(struct device *dev)
 			return 0;
 		}
 	}
-#endif
 
 	/*  save clock source register */
 	if (data->clksrc_base)

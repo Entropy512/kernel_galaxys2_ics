@@ -53,9 +53,6 @@
 #include <linux/v4l2-mediabus.h>
 #include <linux/memblock.h>
 #include <linux/delay.h>
-#ifdef CONFIG_ANDROID_PMEM
-#include <linux/android_pmem.h>
-#endif
 #include <linux/bootmem.h>
 
 #include <asm/mach/arch.h>
@@ -690,7 +687,11 @@ static struct lcd_platform_data ld9040_platform_data = {
 	.gpio_cfg_earlysuspend = lcd_gpio_cfg_earlysuspend,
 	.gpio_cfg_lateresume = lcd_gpio_cfg_lateresume,
 	/* it indicates whether lcd panel is enabled from u-boot. */
+#if defined(CONFIG_MACH_S2PLUS)
+	.lcd_enabled = 1,
+#else
 	.lcd_enabled = 0,
+#endif
 	.reset_delay = 20,	/* 20ms */
 	.power_on_delay = 20,	/* 20ms */
 	.power_off_delay = 200,	/* 200ms */
@@ -780,16 +781,18 @@ struct spi_ops ops = {
 
 static void __init ld9040_fb_init(void)
 {
+	struct ld9040_panel_data *pdata;
+
 	strcpy(spi_board_info[0].modalias, "ld9040");
-	spi_board_info[0].platform_data =
-	(void *)&ld9040_platform_data;
+	spi_board_info[0].platform_data = (void *)&ld9040_platform_data;
 
 	pdata = ld9040_platform_data.pdata;
 	pdata->ops = &ops;
 
 	spi_register_board_info(spi_board_info, ARRAY_SIZE(spi_board_info));
 
-	lcd_cfg_gpio();
+	if (!ld9040_platform_data.lcd_enabled)
+		lcd_cfg_gpio();
 	s3cfb_set_platdata(&fb_platform_data);
 }
 #endif
@@ -858,15 +861,15 @@ static struct s3cfb_lcd s6e8aa0 = {
 	},
 
 	.timing = {
-		.h_fp = 10,
-		.h_bp = 10,
+		.h_fp = 5,
+		.h_bp = 5,
 		.h_sw = 5,
 		.v_fp = 13,
 		.v_fpe = 1,
 		.v_bp = 1,
 		.v_bpe = 1,
 		.v_sw = 2,
-		.cmd_allow_len = 11,	/*v_fp=stable_vfp + cmd_allow_len */
+		.cmd_allow_len = 11,	/* v_fp=stable_vfp + cmd_allow_len */
 		.stable_vfp = 2,
 	},
 
@@ -998,8 +1001,7 @@ static void lcd_cfg_gpio(void)
 	s3c_gpio_setpull(GPIO_MLCD_RST, S3C_GPIO_PULL_NONE);
 
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	/* LCD_EN */
 	s3c_gpio_cfgpin(GPIO_LCD_22V_EN, S3C_GPIO_OUTPUT);
 	s3c_gpio_setpull(GPIO_LCD_22V_EN, S3C_GPIO_PULL_NONE);
@@ -1037,8 +1039,7 @@ static int lcd_power_on(void *ld, int enable)
 		return -EPERM;
 	}
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	err = gpio_request(GPIO_LCD_22V_EN, "LCD_EN");
 	if (err) {
 		printk(KERN_ERR "failed to request GPM4[4] for "
@@ -1055,8 +1056,7 @@ static int lcd_power_on(void *ld, int enable)
 
 	if (enable) {
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 		gpio_set_value(GPIO_LCD_22V_EN, GPIO_LEVEL_HIGH);
 		gpio_set_value(GPIO_LCD_22V_EN_00, GPIO_LEVEL_HIGH);
 
@@ -1080,8 +1080,7 @@ static int lcd_power_on(void *ld, int enable)
 			regulator_force_disable(regulator);
 		regulator_put(regulator);
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 		gpio_set_value(GPIO_LCD_22V_EN, GPIO_LEVEL_LOW);
 		gpio_set_value(GPIO_LCD_22V_EN_00, GPIO_LEVEL_LOW);
 #else
@@ -1099,8 +1098,7 @@ out:
 	/* Release GPIO */
 	gpio_free(GPIO_MLCD_RST);
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	gpio_free(GPIO_LCD_22V_EN);
 	gpio_free(GPIO_LCD_22V_EN_00);
 #endif
@@ -1144,14 +1142,14 @@ static void s5p_dsim_mipi_power_control(int enable)
 			if (IS_ERR(regulator))
 				goto out;
 			if (regulator_is_enabled(regulator))
-				regulator_force_disable(regulator);
+				regulator_disable(regulator);
 			regulator_put(regulator);
 
 			regulator = regulator_get(NULL, "vmipi_1.0v");
 			if (IS_ERR(regulator))
 				goto out;
 			if (regulator_is_enabled(regulator))
-				regulator_force_disable(regulator);
+				regulator_disable(regulator);
 			regulator_put(regulator);
 		}
 out:
@@ -1320,7 +1318,7 @@ static struct s3c_mshci_platdata exynos4_mshc_pdata __initdata = {
 	.max_width		= 8,
 	.host_caps		= MMC_CAP_8_BIT_DATA | MMC_CAP_1_8V_DDR |
 				  MMC_CAP_UHS_DDR50 | MMC_CAP_CMD23,
-	.host_caps2		= MMC_CAP2_PACKED_CMD | MMC_CAP2_CACHE_CTRL,
+	.host_caps2		= MMC_CAP2_PACKED_CMD,
 #elif defined(CONFIG_EXYNOS4_MSHC_8BIT)
 	.max_width		= 8,
 	.host_caps		= MMC_CAP_8_BIT_DATA | MMC_CAP_CMD23,
@@ -1602,7 +1600,7 @@ static struct wm8994_pdata wm1811_pdata = {
 	.micd_lvl_sel = 0xFF,
 
 	.ldo_ena_always_driven = true,
-	.ldo_ena_delay = 50000,
+	.ldo_ena_delay = 30000,
 
 	.lineout1fb = 1,
 	.lineout2fb = 1,
@@ -1650,8 +1648,7 @@ static struct i2c_board_info i2c_devs5[] __initdata = {
 static struct i2c_board_info i2c_devs7[] __initdata = {
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 #if defined(CONFIG_REGULATOR_MAX77686) /* max77686 on i2c7 with M1 board */
 	{
 		I2C_BOARD_INFO("max77686", (0x12 >> 1)),
@@ -1713,15 +1710,27 @@ static struct i2c_board_info i2c_devs11_emul[] __initdata = {
 
 /* I2C12 */
 #if defined(CONFIG_PN65N_NFC) && !defined(CONFIG_MACH_C1) \
-	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3) \
-	&& !defined(CONFIG_MACH_C1CTC)
+	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3)
 static struct i2c_board_info i2c_devs12_emul[] __initdata = {
 };
 #endif
 
+#if defined(CONFIG_MACH_S2PLUS)
+static struct i2c_gpio_platform_data gpio_i2c_data13 = {
+	.sda_pin = GPIO_VT_CAM_SDA_18V,
+	.scl_pin = GPIO_VT_CAM_SCL_18V,
+};
+
+struct platform_device s3c_device_i2c13 = {
+	.name = "i2c-gpio",
+	.id = 13,
+	.dev.platform_data = &gpio_i2c_data13,
+};
+
 /* I2C13 */
 static struct i2c_board_info i2c_devs13_emul[] __initdata = {
 };
+#endif
 
 #ifdef CONFIG_BATTERY_MAX17047_FUELGAUGE
 static struct i2c_gpio_platform_data gpio_i2c_data14 = {
@@ -1784,8 +1793,7 @@ static struct i2c_board_info i2c_devs16_emul[] __initdata = {
 
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 static struct i2c_gpio_platform_data gpio_i2c_data17 = {
 	.sda_pin = GPIO_IF_PMIC_SDA,
 	.scl_pin = GPIO_IF_PMIC_SCL,
@@ -1810,8 +1818,7 @@ static struct i2c_board_info i2c_devs17_emul[] __initdata = {
 
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 static struct i2c_gpio_platform_data i2c18_platdata = {
 	.sda_pin		= GPIO_8M_CAM_SDA_18V,
 	.scl_pin		= GPIO_8M_CAM_SCL_18V,
@@ -1929,48 +1936,6 @@ static int __init setup_ram_console_mem(char *str)
 __setup("ram_console=", setup_ram_console_mem);
 #endif
 
-#ifdef CONFIG_ANDROID_PMEM
-static struct android_pmem_platform_data pmem_pdata = {
-	.name		= "pmem",
-	.no_allocator	= 1,
-	.cached		= 0,
-	.start		= 0,
-	.size		= 0
-};
-
-static struct android_pmem_platform_data pmem_cam_pdata = {
-	.name		= "pmem_cam",
-	.no_allocator	= 1,
-	.cached		= 1,
-	.start		= 0,
-	.size		= 0,
-};
-
-static struct platform_device pmem_device = {
-	.name	= "android_pmem",
-	.id	= 0,
-	.dev	= {
-		.platform_data = &pmem_pdata
-	},
-};
-
-static struct platform_device pmem_cam_device = {
-	.name	= "android_pmem",
-	.id	= 2,
-	.dev	= {
-		.platform_data = &pmem_cam_pdata
-	},
-};
-
-static void __init android_pmem_set_platdata(void)
-{
-#if defined(CONFIG_CMA)
-	pmem_pdata.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K;
-	pmem_cam_pdata.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_CAM * SZ_1K;
-#endif
-}
-#endif
-
 #if defined(CONFIG_BATTERY_SAMSUNG) || defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
 static struct samsung_battery_platform_data samsung_battery_pdata = {
 	.charger_name	= "max77693-charger",
@@ -1981,7 +1946,11 @@ static struct samsung_battery_platform_data samsung_battery_pdata = {
 	.use_sub_charger = true,
 #endif
 #endif
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	.voltage_max = 4200,
+#else
 	.voltage_max = 4350,
+#endif
 	.voltage_min = 3400,
 
 	.chng_interval = 30,
@@ -1990,12 +1959,16 @@ static struct samsung_battery_platform_data samsung_battery_pdata = {
 	.norm_susp_interval = 600,
 	.emer_interval = 10,
 
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	.recharge_voltage = 4150,
+#else
 	.recharge_voltage = 4300,	/* it will be cacaluated in probe */
+#endif
 	.abstimer_charge_duration = 6 * 60 * 60,
 	.abstimer_recharge_duration = 1.5 * 60 * 60,
 
-	.overheat_stop_temp = 650,
-	.overheat_recovery_temp = 430,
+	.overheat_stop_temp = 600,
+	.overheat_recovery_temp = 400,
 	.freeze_stop_temp = -50,
 	.freeze_recovery_temp = 0,
 
@@ -2010,7 +1983,7 @@ static struct samsung_battery_platform_data samsung_battery_pdata = {
 
 	.suspend_chging = true,
 
-	.led_indicator = true,
+	.led_indicator = false,
 };
 
 static struct platform_device samsung_device_battery = {
@@ -2055,8 +2028,7 @@ static struct platform_device midas_keypad = {
 
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 struct gpio_keys_button m0_buttons[] = {
 	GPIO_KEYS(KEY_VOLUMEUP, GPIO_VOL_UP_00,
 		  1, 1, sec_debug_check_crash_key),
@@ -2143,8 +2115,7 @@ static struct platform_device s3c_device_i2c9 = {
 #if (defined(CONFIG_SENSORS_GP2A) || defined(CONFIG_SENSORS_CM36651))\
 	&& (defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_C1) ||\
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_C1VZW)) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_C1VZW)) || defined(CONFIG_MACH_M3)
 static struct i2c_gpio_platform_data i2c9_platdata_rgb = {
 	.sda_pin	= GPIO_RGB_SDA_1_8V,
 	.scl_pin	= GPIO_RGB_SCL_1_8V,
@@ -2196,8 +2167,7 @@ static struct platform_device s3c_device_i2c11 = {
 #endif
 
 #if defined(CONFIG_PN65N_NFC) && !defined(CONFIG_MACH_C1) \
-	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3) \
-	&& !defined(CONFIG_MACH_C1CTC)
+	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3)
 static struct i2c_gpio_platform_data i2c12_platdata = {
 	.sda_pin		= GPIO_NFC_SDA_18V,
 	.scl_pin		= GPIO_NFC_SCL_18V,
@@ -2244,10 +2214,6 @@ static struct platform_device *midas_devices[] __initdata = {
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
 	&ram_console_device,
 #endif
-#ifdef CONFIG_ANDROID_PMEM
-	&pmem_device,
-	&pmem_cam_device,
-#endif
 	/* Samsung Power Domain */
 	&exynos4_device_pd[PD_MFC],
 	&exynos4_device_pd[PD_G3D],
@@ -2264,9 +2230,6 @@ static struct platform_device *midas_devices[] __initdata = {
 	&s3c_device_fb,
 #ifdef CONFIG_FB_S5P_LMS501KF03
 	&s3c_device_spi_gpio,
-#endif
-#ifdef CONFIG_FB_S5P_LD9040
-	&ld9040_spi_gpio,
 #endif
 #endif
 
@@ -2305,7 +2268,9 @@ static struct platform_device *midas_devices[] __initdata = {
 	&s3c_device_i2c11,
 #endif
 	/* &s3c_device_i2c12, */
-	/* &s3c_device_i2c13, */
+#if defined(CONFIG_MACH_S2PLUS)
+	&s3c_device_i2c13,
+#endif
 #ifdef CONFIG_BATTERY_MAX17047_FUELGAUGE
 	&s3c_device_i2c14,	/* max17047-fuelgauge */
 #endif
@@ -2316,8 +2281,7 @@ static struct platform_device *midas_devices[] __initdata = {
 #endif
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	&s3c_device_i2c17,
 	&s3c_device_i2c18,
 #endif
@@ -2533,13 +2497,6 @@ static void __init exynos4_reserve_mem(void)
 			.start = 0
 		},
 #endif
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM
-		{
-			.name = "pmem",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K,
-			.start = 0,
-		},
-#endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMD
 		{
 			.name = "fimd",
@@ -2555,14 +2512,6 @@ static void __init exynos4_reserve_mem(void)
 		},
 #endif
 #if !defined(CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION) && \
-	defined CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC2
-		{
-			.name = "fimc2",
-			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC2 * SZ_1K,
-			.start = 0
-		},
-#endif
-#if !defined(CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION) && \
 	defined(CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC0)
 		{
 			.name = "mfc0",
@@ -2571,6 +2520,13 @@ static void __init exynos4_reserve_mem(void)
 				.alignment = 1 << 17,
 			},
 			.start = 0,
+		},
+#endif
+#if !defined(CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION) && \
+	defined(CONFIG_ION_EXYNOS_CONTIGHEAP_SIZE)
+		{
+			.name	= "ion",
+			.size	= CONFIG_ION_EXYNOS_CONTIGHEAP_SIZE * SZ_1K,
 		},
 #endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC
@@ -2622,26 +2578,26 @@ static void __init exynos4_reserve_mem(void)
 			.start = 0
 		},
 #endif
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_CAM
-		{
-			.name = "pmem_cam",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM_CAM * SZ_1K,
-			.start = 0,
-		},
-#endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC1
 		{
 			.name = "fimc1",
 			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC1 * SZ_1K,
+			{
+				.alignment = 1 << 23,
+			},
 			.start = 0
 		},
 #endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC1
 		{
+#ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
+			.name = "mfc-normal",
+#else
 			.name = "mfc1",
+#endif
 			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC1 * SZ_1K,
 			{
-				.alignment = 1 << 17,
+				.alignment = 1 << 26,
 			},
 			.start = 0,
 		},
@@ -2652,15 +2608,15 @@ static void __init exynos4_reserve_mem(void)
 	};
 #ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
 	static struct cma_region regions_secure[] = {
-#ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC2
+#ifdef CONFIG_ION_EXYNOS_CONTIGHEAP_SIZE
 		{
-			.name = "fimc2",
-			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC2 * SZ_1K,
+			.name	= "ion",
+			.size	= CONFIG_ION_EXYNOS_CONTIGHEAP_SIZE * SZ_1K,
 		},
 #endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC0
 		{
-			.name = "mfc0",
+			.name = "mfc-secure",
 			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC0 * SZ_1K,
 		},
 #endif
@@ -2680,15 +2636,16 @@ static void __init exynos4_reserve_mem(void)
 #ifdef CONFIG_EXYNOS_C2C
 		"samsung-c2c=c2c_shdmem;"
 #endif
-		"android_pmem.0=pmem;android_pmem.2=pmem_cam;"
 		"s3cfb.0=fimd;exynos4-fb.0=fimd;"
 		"s3c-fimc.0=fimc0;s3c-fimc.1=fimc1;s3c-fimc.2=fimc2;s3c-fimc.3=fimc3;"
 		"exynos4210-fimc.0=fimc0;exynos4210-fimc.1=fimc1;exynos4210-fimc.2=fimc2;exynos4210-fimc.3=fimc3;"
 #ifdef CONFIG_ION_EXYNOS
-		"ion-exynos=fimc2;"
+		"ion-exynos=ion;"
 #endif
 #ifdef CONFIG_VIDEO_MFC5X
-		"s3c-mfc=mfc,mfc0,mfc1;"
+		"s3c-mfc/A=mfc0,mfc-secure;"
+		"s3c-mfc/B=mfc1,mfc-normal;"
+		"s3c-mfc/AB=mfc;"
 #endif
 #ifdef CONFIG_VIDEO_SAMSUNG_S5P_MFC
 		"s5p-mfc/f=fw;"
@@ -2702,12 +2659,11 @@ static void __init exynos4_reserve_mem(void)
 #endif
 		"s5p-fimg2d=fimg2d;"
 #ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
-		"s5p-smem/video=video;"
 		"s5p-smem/sectbl=sectbl;"
 #endif
-		"s5p-smem/mfc=mfc0;"
-		"s5p-smem/fimc=fimc2;"
-		"s5p-smem/mfc-shm=mfc1;";
+		"s5p-smem/mfc=mfc-secure;"
+		"s5p-smem/fimc=ion;"
+		"s5p-smem/mfc-shm=mfc-normal;";
 
 		s5p_cma_region_reserve(regions, regions_secure, SZ_64M, map);
 }
@@ -2838,8 +2794,7 @@ void __init s3cfb_extdsp_set_platdata(struct s3c_platform_fb *pd)
 static inline int need_i2c5(void)
 {
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC) || defined(CONFIG_MACH_S2PLUS)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	return system_rev != 3;
 #elif defined(CONFIG_MACH_JENGA)
 	return 0;
@@ -2854,8 +2809,7 @@ static inline int need_rgb(void)
 {
 #if defined(CONFIG_MACH_C1) ||	\
 	defined(CONFIG_MACH_JENGA) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	return (system_rev != 3 && system_rev != 0);
 #elif defined(CONFIG_MACH_C1VZW)
 	return 1;
@@ -2902,6 +2856,7 @@ static void __init midas_machine_init(void)
 
 	s3c_i2c3_set_platdata(NULL);
 	midas_tsp_init();
+	midas_tsp_set_lcdtype(lcdtype);
 
 #ifdef CONFIG_LEDS_AAT1290A
 	platform_device_register(&s3c_device_aat1290a_led);
@@ -2950,10 +2905,14 @@ static void __init midas_machine_init(void)
 				ARRAY_SIZE(i2c_devs11_emul));
 
 #if defined(CONFIG_PN65N_NFC) && !defined(CONFIG_MACH_C1) \
-	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3) \
-	&& !defined(CONFIG_MACH_C1CTC)
+	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3)
 	i2c_register_board_info(12, i2c_devs12_emul,
 				ARRAY_SIZE(i2c_devs12_emul));
+#endif
+
+#if defined(CONFIG_MACH_S2PLUS)
+	i2c_register_board_info(13, i2c_devs13_emul,
+				ARRAY_SIZE(i2c_devs13_emul));
 #endif
 
 #ifdef CONFIG_BATTERY_MAX17047_FUELGAUGE
@@ -2971,8 +2930,7 @@ static void __init midas_machine_init(void)
 #endif
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	i2c_register_board_info(17, i2c_devs17_emul,
 				ARRAY_SIZE(i2c_devs17_emul));
 #endif
@@ -2987,13 +2945,8 @@ static void __init midas_machine_init(void)
 				ARRAY_SIZE(i2c_devs21_emul));
 #endif
 
-#ifdef CONFIG_ANDROID_PMEM
-	android_pmem_set_platdata();
-#endif
-
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	gpio_request(GPIO_OLED_DET, "OLED_DET");
 	s5p_register_gpio_interrupt(GPIO_OLED_DET);
 	gpio_free(GPIO_OLED_DET);
@@ -3119,15 +3072,15 @@ static void __init midas_machine_init(void)
 #ifdef CONFIG_SEC_THERMISTOR
 	platform_device_register(&sec_device_thermistor);
 #endif
-#if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
+#if defined(CONFIG_MACH_M0_CTC)
+	platform_device_register(&m0_keypad);
+#elif defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_JENGA) || defined(CONFIG_MACH_S2PLUS) || \
 	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3)
 	if (system_rev != 3 && system_rev >= 1)
 		platform_device_register(&m0_keypad);
 	else
 		platform_device_register(&midas_keypad);
-#elif defined(CONFIG_MACH_C1CTC)
-	platform_device_register(&m0_keypad);
 #endif
 
 #if defined(CONFIG_S3C_DEV_I2C5)
@@ -3139,8 +3092,7 @@ static void __init midas_machine_init(void)
 	defined(CONFIG_SENSORS_CM3663)
 #if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_C1) ||\
 	defined(CONFIG_MACH_JENGA) || \
-	defined(CONFIG_MACH_C1VZW) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_C1VZW) || defined(CONFIG_MACH_M3)
 	if (need_rgb())
 		platform_device_register(&s3c_device_i2c9_rgb);
 	else
@@ -3149,8 +3101,7 @@ static void __init midas_machine_init(void)
 #endif
 
 #if defined(CONFIG_PN65N_NFC) && !defined(CONFIG_MACH_C1) \
-	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3) \
-	&& !defined(CONFIG_MACH_C1CTC)
+	&& !defined(CONFIG_MACH_C1VZW) && !defined(CONFIG_MACH_M3)
 	platform_device_register(&s3c_device_i2c12);
 #endif
 

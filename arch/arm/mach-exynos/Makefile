@@ -32,11 +32,13 @@ obj-$(CONFIG_EXYNOS4_CPUIDLE)	+= cpuidle-exynos4.o idle-exynos4.o
 obj-$(CONFIG_EXYNOS5_CPUIDLE)	+= cpuidle-exynos5.o idle-exynos5.o
 
 obj-$(CONFIG_BUSFREQ)		+= busfreq.o
-obj-$(CONFIG_BUSFREQ_OPP)	+= busfreq_opp.o dev.o
+obj-$(CONFIG_BUSFREQ_OPP)	+= dev.o
 ifeq ($(CONFIG_BUSFREQ_OPP),y)
-obj-$(CONFIG_ARCH_EXYNOS4)	+= busfreq_opp_4x12.o
-obj-$(CONFIG_ARCH_EXYNOS5)	+= busfreq_opp_5250.o
+obj-$(CONFIG_ARCH_EXYNOS4)	+= busfreq_opp_exynos4.o busfreq_opp_4x12.o
+obj-$(CONFIG_ARCH_EXYNOS5)	+= busfreq_opp_exynos5.o busfreq_opp_5250.o
 endif
+obj-$(CONFIG_BUSFREQ_LOCK_WRAPPER)	+= dev-slp.o
+
 obj-$(CONFIG_SMP)		+= platsmp.o headsmp.o
 
 obj-$(CONFIG_EXYNOS_MCT)	+= mct.o
@@ -83,7 +85,7 @@ obj-$(CONFIG_MIDAS_COMMON)		+= midas-gpio.o sec-common.o midas-gps.o \
 					   midas-mhl.o
 
 obj-$(CONFIG_NAPLES_COMMON)		+= naples-gpio.o sec-common.o midas-gps.o \
-					   naples-power.o board-midas-wlan.o \
+					   naples-power.o naples-tsp.o board-midas-wlan.o \
 					   midas-thermistor.o \
 					   midas-mhl.o
 
@@ -156,10 +158,11 @@ obj-$(CONFIG_EXYNOS_C2C)		+= setup-c2c.o
 obj-$(CONFIG_SEC_MODEM_M0_C2C)		+= board-midas-modems.o
 obj-$(CONFIG_SEC_MODEM_M0)		+= board-m0-modems.o
 obj-$(CONFIG_SEC_MODEM_M0_TD)           += board-m0-td-modems.o
+obj-$(CONFIG_SEC_MODEM_M0_CTC)		+= board-m0ctc-modems.o
 #obj-$(CONFIG_SEC_MODEM_M1)		+= board-m1-modems.o
 obj-$(CONFIG_SEC_MODEM_M1)		+= board-c1-modems.o
 obj-$(CONFIG_SEC_MODEM_C1)		+= board-c1-modems.o
-obj-$(CONFIG_SEC_MODEM_C1_VZW)		+= board-c1-modems.o
+obj-$(CONFIG_SEC_MODEM_C1_VZW)		+= board-c1vzw-modems.o
 obj-$(CONFIG_SEC_MODEM_C1_CTC)		+= board-c1ctc-modems.o
 obj-$(CONFIG_SEC_MODEM_U1)		+= board-u1-modems.o
 obj-$(CONFIG_SEC_MODEM_JENGA)		+= board-jenga-modems.o

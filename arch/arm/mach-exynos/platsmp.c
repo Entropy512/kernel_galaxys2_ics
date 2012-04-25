@@ -278,7 +278,7 @@ void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 		else
 			cpu_boot_info[i].boot_base = S5P_VA_SYSRAM;
 #endif
-		if (soc_is_exynos4212() || soc_is_exynos4412())
+		if (soc_is_exynos4412())
 			cpu_boot_info[i].boot_base += (0x4 * i);
 		cpu_boot_info[i].power_base = S5P_ARM_CORE_CONFIGURATION(i);
 	}

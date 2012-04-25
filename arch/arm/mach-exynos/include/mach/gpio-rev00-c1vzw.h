@@ -30,7 +30,7 @@ extern void midas_config_sleep_gpio_table(void);
 #define GPIO_CAM_SPI_MOSI	EXYNOS4_GPB(7)
 
 #define GPIO_CAM_MCLK		EXYNOS4212_GPJ1(3)
-#define GPIO_VTCAM_MCLK		EXYNOS4212_GPJ1(3)
+#define GPIO_VTCAM_MCLK		EXYNOS4212_GPM2(2)
 
 #define GPIO_ISP_STANDBY	EXYNOS4212_GPM0(1)
 #define GPIO_CAM_IO_EN		EXYNOS4212_GPM0(2)
@@ -295,14 +295,4 @@ extern void midas_config_sleep_gpio_table(void);
 
 #define GPIO_CBP_BOOT_SEL	EXYNOS4212_GPM0(5)
 
-#if defined(CONFIG_TDMB) || defined(CONFIG_TDMB_MODULE)
-#define GPIO_TDMB_EN		EXYNOS4_GPC0(0)
-#define GPIO_TDMB_INT		EXYNOS4_GPC0(4)
-#define GPIO_TDMB_IRQ		gpio_to_irq(GPIO_TDMB_INT)
-#define GPIO_TDMB_INT_AF	0xf
-#define GPIO_TDMB_SPI_CLK	EXYNOS4_GPC1(1)
-#define GPIO_TDMB_SPI_CS	EXYNOS4_GPC1(2)
-#define GPIO_TDMB_SPI_MISO	EXYNOS4_GPC1(3)
-#define GPIO_TDMB_SPI_MOSI	EXYNOS4_GPC1(4)
-#endif
 #endif /* __MACH_GPIO_C1VZW_H */

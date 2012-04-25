@@ -151,6 +151,9 @@ config MACH_SLP_PQ_DEVS
 	select S3C64XX_DEV_SPI
 	select CONFIG_VIDEO_FIMC_MIPI
 	select CHARGER_MANAGER
+	select S3C_ADC
+	select SAMSUNG_DEV_ADC
+	select SENSORS_NTC_THERMISTOR
 	select EXYNOS_SYSREG_PM
 	select BATTERY_MAX17047_FUELGAUGE
 	select MFD_MAX77693
@@ -210,6 +213,8 @@ config MACH_SLP_PQ_LTE_DEVS
 	select S3C64XX_DEV_SPI
 	select CONFIG_VIDEO_FIMC_MIPI
 	select CHARGER_MANAGER
+	select S3C_ADC
+	select SAMSUNG_DEV_ADC
 	select EXYNOS_SYSREG_PM
 	select BATTERY_MAX17047_FUELGAUGE
 	select MFD_MAX77693
@@ -292,7 +297,6 @@ config MACH_SLP_NAPLES
 	select EXYNOS_SYSREG_PM
 	select BATTERY_MAX17047_FUELGAUGE
 	select MFD_MAX77693
-	select MFD_MAX77686
 	select EXYNOS4_DEV_FIMC_LITE
 	select UART_SELECT
 	select CPU_FREQ_GOV_ONDEMAND_FLEXRATE if CPU_FREQ_GOV_ONDEMAND
@@ -320,4 +324,15 @@ config EXYNOS4_DEV_TMU
 	  enables compilation hwmon base TMU driver and also allows compilation
 	  of the platform device files. The platform data in this case is trip
 	  temperature and some tmu h/w configurations related parameter.
+
+config BUSFREQ_LOCK_WRAPPER
+	bool "BUSFREQ_LOCK Wrapper support for legacy kernel hack"
+	depends on ARM_EXYNOS4_BUS_DEVFREQ && SLP
+	default y
+	help
+	  busfreq_lock() and busfreq_lock_free() are not supported in
+	  busfreq with devfreq framework. However, enabling this adds
+	  wrappers to support these two legacy kernel hack to sustain
+	  minimum bus/memory frequency.
+	  In addition, this supports dev_lock/unlock for memory bus.
 

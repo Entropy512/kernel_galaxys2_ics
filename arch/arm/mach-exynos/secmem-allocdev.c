@@ -14,6 +14,11 @@
 #include <linux/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pm_runtime.h>
+#include <linux/slab.h>
+#include <linux/mm.h>
+
+#include <asm/memory.h>
+#include <asm/cacheflush.h>
 
 #include <plat/devs.h>
 #include <plat/pd.h>
@@ -28,11 +33,31 @@ static char *secmem_info[] = {
 	"fimc",		/* 1 */
 	"mfc-shm",	/* 2 */
 	"sectbl",	/* 3 */
-	"video",	/* 4 */
 	NULL
 };
 
 static bool drm_onoff = false;
+
+#define SECMEM_IS_PAGE_ALIGNED(addr) (!((addr) & (~PAGE_MASK)))
+
+static int secmem_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	unsigned long size = vma->vm_end - vma->vm_start;
+
+	BUG_ON(!SECMEM_IS_PAGE_ALIGNED(vma->vm_start));
+	BUG_ON(!SECMEM_IS_PAGE_ALIGNED(vma->vm_end));
+
+	vma->vm_flags |= VM_RESERVED;
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+				size, vma->vm_page_prot)) {
+		printk(KERN_ERR "%s : remap_pfn_range() failed!\n", __func__);
+		return -EAGAIN;
+	}
+
+	return 0;
+}
 
 static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -121,6 +146,41 @@ static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return crypto_driver->release();
 		break;
 	}
+	case SECMEM_IOC_GET_ADDR:
+	{
+		struct secmem_region region;
+
+		if (copy_from_user(&region, (void __user *)arg,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+
+		region.virt_addr = kmalloc(region.len, GFP_KERNEL | GFP_DMA);
+		if (!region.virt_addr) {
+			printk(KERN_ERR "%s: Get memory address failed. [size : %ld]\n", __func__, region.len);
+			return -EFAULT;
+		}
+		region.phys_addr = virt_to_phys(region.virt_addr);
+
+		dmac_map_area(region.virt_addr, region.len / sizeof(unsigned long), 2);
+
+		if (copy_to_user((void __user *)arg, &region,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+		break;
+	}
+	case SECMEM_IOC_RELEASE_ADDR:
+	{
+		struct secmem_region region;
+
+		if (copy_from_user(&region, (void __user *)arg,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+
+		dmac_unmap_area(region.virt_addr, region.len, 2);
+
+		kfree(region.virt_addr);
+		break;
+	}
 	default:
 		return -ENOTTY;
 	}
@@ -142,6 +202,7 @@ EXPORT_SYMBOL(secmem_crypto_deregister);
 
 static struct file_operations secmem_fops = {
 	.unlocked_ioctl = &secmem_ioctl,
+	.mmap		= secmem_mmap,
 };
 
 static int __init secmem_init(void)

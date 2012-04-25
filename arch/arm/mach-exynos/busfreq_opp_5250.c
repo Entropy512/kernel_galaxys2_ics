@@ -28,7 +28,7 @@
 #include <linux/slab.h>
 #include <linux/opp.h>
 #include <linux/clk.h>
-#include <mach/busfreq.h>
+#include <mach/busfreq_exynos5.h>
 
 #include <asm/mach-types.h>
 
@@ -53,87 +53,117 @@
 #define MAX_CPU_THRESHOLD	20
 #define CPU_SLOPE_SIZE		7
 
+#define INT_RBB		6	/* +300mV */
+
+static struct device busfreq_for_int;
+
 /* To save/restore DMC_PAUSE_CTRL register */
 static unsigned int dmc_pause_ctrl;
-
-enum busfreq_level_idx {
-	LV_0,
-	LV_1,
-	LV_2,
-	LV_3,
-	LV_4,
-	LV_5,
-	LV_END
-};
-
-static struct busfreq_table *exynos5_busfreq_table;
 
 static struct busfreq_table exynos5_busfreq_table_for800[] = {
 	{LV_0, 800000, 1000000, 0, 0, 0},
 	{LV_1, 400000, 1000000, 0, 0, 0},
-	{LV_2, 267000, 1000000, 0, 0, 0},
-	{LV_3, 200000, 1000000, 0, 0, 0},
-	{LV_4, 100000, 1000000, 0, 0, 0},
-	{LV_5, 100000, 1000000, 0, 0, 0},
+	{LV_2, 100000, 1000000, 0, 0, 0},
 };
 
 static struct busfreq_table exynos5_busfreq_table_for667[] = {
 	{LV_0, 667000, 1000000, 0, 0, 0},
 	{LV_1, 334000, 1000000, 0, 0, 0},
-	{LV_2, 222000, 1000000, 0, 0, 0},
-	{LV_3, 167000, 1000000, 0, 0, 0},
-	{LV_4, 133000, 1000000, 0, 0, 0},
-	{LV_5, 133000, 1000000, 0, 0, 0},
+	{LV_2, 111000, 1000000, 0, 0, 0},
 };
 
 static struct busfreq_table exynos5_busfreq_table_for533[] = {
 	{LV_0, 533000, 1000000, 0, 0, 0},
 	{LV_1, 267000, 1000000, 0, 0, 0},
-	{LV_2, 178000, 1000000, 0, 0, 0},
-	{LV_3, 133000, 1000000, 0, 0, 0},
-	{LV_4, 107000, 1000000, 0, 0, 0},
-	{LV_5, 67000, 1000000, 0, 0, 0},
+	{LV_2, 107000, 1000000, 0, 0, 0},
 };
 
 static struct busfreq_table exynos5_busfreq_table_for400[] = {
 	{LV_0, 400000, 1000000, 0, 0, 0},
 	{LV_1, 267000, 1000000, 0, 0, 0},
-	{LV_2, 200000, 1000000, 0, 0, 0},
-	{LV_3, 160000, 1000000, 0, 0, 0},
-	{LV_4, 130000, 1000000, 0, 0, 0},
-	{LV_5, 100000, 1000000, 0, 0, 0},
+	{LV_2, 100000, 1000000, 0, 0, 0},
 };
 #define ASV_GROUP	9
 static unsigned int asv_group_index;
 
-static unsigned int exynos5_asv_volt[ASV_GROUP][LV_END] = {
-	/* 800      400      267      200      160      100 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV0 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV1 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV2 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV3 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV4 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV5 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV6 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV7 */
-	{1200000, 1200000, 1200000, 1200000, 1200000, 1200000}, /* ASV8 */
+static unsigned int exynos5_mif_volt_for800[ASV_GROUP][LV_MIF_END] = {
+	/* L0	     L1	     L2 */
+	{1100000, 950000, 950000}, /* ASV0 */
+	{1100000, 950000, 950000}, /* ASV1 */
+	{1100000, 950000, 950000}, /* ASV2 */
+	{1100000, 950000, 950000}, /* ASV3 */
+	{1100000, 950000, 950000}, /* ASV4 */
+	{1100000, 950000, 950000}, /* ASV5 */
+	{1100000, 950000, 950000}, /* ASV6 */
+	{1100000, 950000, 950000}, /* ASV7 */
+	{1100000, 950000, 950000}, /* ASV8 */
 };
 
-static unsigned int exynos5250_int_volt[ASV_GROUP][LV_END] = {
-	/* 400      400      267      200      160      100 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV0 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV1 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV2 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV3 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV4 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV5 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV6 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV7 */
-	{1150000, 1150000, 1150000, 1150000, 1150000, 11500000}, /* ASV8 */
+static unsigned int exynos5_mif_volt_for667[ASV_GROUP][LV_MIF_END] = {
+	/* L0	     L1	     L2 */
+	{1100000, 950000, 950000}, /* ASV0 */
+	{1100000, 950000, 950000}, /* ASV1 */
+	{1100000, 950000, 950000}, /* ASV2 */
+	{1100000, 950000, 950000}, /* ASV3 */
+	{1100000, 950000, 950000}, /* ASV4 */
+	{1100000, 950000, 950000}, /* ASV5 */
+	{1100000, 950000, 950000}, /* ASV6 */
+	{1100000, 950000, 950000}, /* ASV7 */
+	{1100000, 950000, 950000}, /* ASV8 */
+};
+
+static unsigned int exynos5_mif_volt_for533[ASV_GROUP][LV_MIF_END] = {
+	/* L0	     L1	     L2 */
+	{1050000, 950000, 950000}, /* ASV0 */
+	{1050000, 950000, 950000}, /* ASV1 */
+	{1050000, 950000, 950000}, /* ASV2 */
+	{1050000, 950000, 950000}, /* ASV3 */
+	{1050000, 950000, 950000}, /* ASV4 */
+	{1050000, 950000, 950000}, /* ASV5 */
+	{1050000, 950000, 950000}, /* ASV6 */
+	{1050000, 950000, 950000}, /* ASV7 */
+	{1050000, 950000, 950000}, /* ASV8 */
+};
+
+static unsigned int exynos5_mif_volt_for400[ASV_GROUP][LV_MIF_END] = {
+	/* L0	     L1	     L2 */
+	{1000000, 950000, 950000}, /* ASV0 */
+	{1000000, 950000, 950000}, /* ASV1 */
+	{1000000, 950000, 950000}, /* ASV2 */
+	{1000000, 950000, 950000}, /* ASV3 */
+	{1000000, 950000, 950000}, /* ASV4 */
+	{1000000, 950000, 950000}, /* ASV5 */
+	{1000000, 950000, 950000}, /* ASV6 */
+	{1000000, 950000, 950000}, /* ASV7 */
+	{1000000, 950000, 950000}, /* ASV8 */
+};
+
+static struct busfreq_table *exynos5_busfreq_table_mif;
+
+static unsigned int (*exynos5_mif_volt)[LV_MIF_END];
+
+static struct busfreq_table exynos5_busfreq_table_int[] = {
+	{LV_0, 267000, 1000000, 0, 0, 0},
+	{LV_1, 200000, 1000000, 0, 0, 0},
+	{LV_2, 160000, 1000000, 0, 0, 0},
+	{LV_3, 133000, 1000000, 0, 0, 0},
+};
+
+static unsigned int exynos5_int_volt[ASV_GROUP][LV_INT_END] = {
+	/* L0	     L1	      L2       L3 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV0 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV1 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV2 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV3 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV4 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV5 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV6 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV7 */
+	{1050000, 1050000, 1050000, 1050000}, /* ASV8 */
 };
 
 /* For CMU_LEX */
-static unsigned int clkdiv_lex[LV_END][2] = {
+static unsigned int clkdiv_lex[LV_INT_END][2] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVATCLK_LEX, DIVPCLK_LEX }
@@ -142,24 +172,18 @@ static unsigned int clkdiv_lex[LV_END][2] = {
 	/* ATCLK_LEX L0 : 200MHz */
 	{0, 1},
 
-	/* ATCLK_LEX L1 : 200MHz */
+	/* ATCLK_LEX L1 : 166MHz */
 	{0, 1},
 
-	/* ATCLK_LEX L2 : 166MHz */
+	/* ATCLK_LEX L2 : 133MHz */
 	{0, 1},
 
-	/* ATCLK_LEX L3 : 133MHz */
-	{0, 1},
-
-	/* ATCLK_LEX L4 : 114MHz */
-	{0, 1},
-
-	/* ATCLK_LEX L5 : 100MHz */
+	/* ATCLK_LEX L3 : 114MHz */
 	{0, 1},
 };
 
 /* For CMU_R0X */
-static unsigned int clkdiv_r0x[LV_END][1] = {
+static unsigned int clkdiv_r0x[LV_INT_END][1] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVPCLK_R0X }
@@ -168,24 +192,18 @@ static unsigned int clkdiv_r0x[LV_END][1] = {
 	/* ACLK_PR0X L0 : 133MHz */
 	{1},
 
-	/* ACLK_PR0X L1 : 133MHz */
+	/* ACLK_DR0X L1 : 100MHz */
 	{1},
 
-	/* ACLK_DR0X L2 : 100MHz */
+	/* ACLK_PR0X L2 : 80MHz */
 	{1},
 
-	/* ACLK_PR0X L3 : 80MHz */
-	{1},
-
-	/* ACLK_PR0X L4 : 67MHz */
-	{1},
-
-	/* ACLK_PR0X L5 : 50MHz */
+	/* ACLK_PR0X L3 : 67MHz */
 	{1},
 };
 
 /* For CMU_R1X */
-static unsigned int clkdiv_r1x[LV_END][1] = {
+static unsigned int clkdiv_r1x[LV_INT_END][1] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVPCLK_R1X }
@@ -194,24 +212,18 @@ static unsigned int clkdiv_r1x[LV_END][1] = {
 	/* ACLK_PR1X L0 : 133MHz */
 	{1},
 
-	/* ACLK_PR1X L1 : 133MHz */
+	/* ACLK_DR1X L1 : 100MHz */
 	{1},
 
-	/* ACLK_DR1X L2 : 100MHz */
+	/* ACLK_PR1X L2 : 80MHz */
 	{1},
 
-	/* ACLK_PR1X L3 : 80MHz */
-	{1},
-
-	/* ACLK_PR1X L4 : 67MHz */
-	{1},
-
-	/* ACLK_PR1X L5 : 50MHz */
+	/* ACLK_PR1X L3 : 67MHz */
 	{1},
 };
 
 /* For CMU_TOP */
-static unsigned int clkdiv_top[LV_END][10] = {
+static unsigned int clkdiv_top[LV_INT_END][10] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVACLK400_ISP, DIVACLK400_IOP, DIVACLK266, DIVACLK_200, DIVACLK_66_PRE,
@@ -221,24 +233,18 @@ static unsigned int clkdiv_top[LV_END][10] = {
 	/* ACLK_400_ISP L0 : 400MHz */
 	{1, 1, 2, 3, 1, 5, 0, 1, 2, 2},
 
-	/* ACLK_400_ISP L1 : 400MHz */
-	{1, 1, 2, 3, 1, 5, 0, 1, 2, 2},
-
-	/* ACLK_400_ISP L2 : 267MHz */
+	/* ACLK_400_ISP L1 : 267MHz */
 	{2, 3, 3, 4, 1, 5, 1, 2, 2, 2},
 
-	/* ACLK_400_ISP L3 : 200MHz */
+	/* ACLK_400_ISP L2 : 200MHz */
 	{3, 3, 4, 5, 1, 5, 2, 3, 2, 2},
 
-	/* ACLK_400_ISP L4 : 160MHz */
+	/* ACLK_400_ISP L3 : 160MHz */
 	{4, 4, 5, 6, 1, 5, 3, 4, 5, 5},
-
-	/* ACLK_400_ISP L5 : 100MHz */
-	{7, 7, 7, 7, 1, 5, 7, 7, 7, 7},
 };
 
 /* For CMU_CDREX */
-static unsigned int __maybe_unused clkdiv_cdrex_for800[LV_END][9] = {
+static unsigned int __maybe_unused clkdiv_cdrex_for800[LV_MIF_END][9] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVMCLK_DPHY, DIVMCLK_CDREX2, DIVACLK_CDREX, DIVMCLK_CDREX,
@@ -251,20 +257,11 @@ static unsigned int __maybe_unused clkdiv_cdrex_for800[LV_END][9] = {
 	/* MCLK_CDREX L1: 400MHz */
 	{0, 1, 1, 1, 5, 2, 1, 5, 1},
 
-	/* MCLK_CDREX L2: 267MHz */
-	{0, 2, 1, 2, 5, 3, 1, 6, 1},
-
-	/* MCLK_CDREX L3: 200MHz */
-	{0, 3, 1, 3, 5, 4, 1, 7, 1},
-
-	/* MCLK_CDREX L4: 100MHz */
-	{0, 7, 1, 5, 7, 7, 1, 15, 1},
-
-	/* MCLK_CDREX L5: 100MHz */
-	{0, 7, 1, 5, 7, 7, 1, 15, 1},
+	/* MCLK_CDREX L2: 100MHz */
+	{0, 7, 1, 2, 7, 7, 1, 15, 1},
 };
 
-static unsigned int __maybe_unused clkdiv_cdrex_for667[LV_END][9] = {
+static unsigned int __maybe_unused clkdiv_cdrex_for667[LV_MIF_END][9] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVMCLK_DPHY, DIVMCLK_CDREX2, DIVACLK_CDREX, DIVMCLK_CDREX,
@@ -277,20 +274,11 @@ static unsigned int __maybe_unused clkdiv_cdrex_for667[LV_END][9] = {
 	/* MCLK_CDREX L1: 334MHz */
 	{0, 1, 1, 1, 4, 2, 1, 5, 1},
 
-	/* MCLK_CDREX L2: 222MHz */
-	{0, 2, 1, 2, 4, 3, 1, 6, 1},
-
-	/* MCLK_CDREX L3: 167MHz */
-	{0, 3, 1, 3, 4, 4, 1, 7, 1},
-
-	/* MCLK_CDREX L4: 133MHz */
-	{0, 4, 1, 4, 4, 5, 1, 8, 1},
-
-	/* MCLK_CDREX L5: 133MHz */
-	{0, 4, 1, 4, 4, 5, 1, 8, 1},
+	/* MCLK_CDREX L2: 111MHz */
+	{0, 5, 1, 4, 4, 5, 1, 8, 1},
 };
 
-static unsigned int clkdiv_cdrex_for533[LV_END][9] = {
+static unsigned int clkdiv_cdrex_for533[LV_MIF_END][9] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVMCLK_DPHY, DIVMCLK_CDREX2, DIVACLK_CDREX, DIVMCLK_CDREX,
@@ -303,20 +291,11 @@ static unsigned int clkdiv_cdrex_for533[LV_END][9] = {
 	/* MCLK_CDREX L1: 267MHz */
 	{0, 1, 1, 1, 3, 2, 1, 5, 1},
 
-	/* MCLK_CDREX L2: 178MHz */
-	{0, 2, 1, 2, 3, 3, 1, 6, 1},
-
-	/* MCLK_CDREX L3: 133MHz */
-	{0, 3, 1, 3, 3, 4, 1, 7, 1},
-
-	/* MCLK_CDREX L4: 107MHz */
+	/* MCLK_CDREX L2: 107MHz */
 	{0, 4, 1, 4, 3, 5, 1, 8, 1},
-
-	/* MCLK_CDREX L5: 67MHz */
-	{0, 7, 1, 3, 7, 7, 1, 15, 1},
 };
 
-static unsigned int __maybe_unused clkdiv_cdrex_for400[LV_END][9] = {
+static unsigned int __maybe_unused clkdiv_cdrex_for400[LV_MIF_END][9] = {
 	/*
 	 * Clock divider value for following
 	 * { DIVMCLK_DPHY, DIVMCLK_CDREX2, DIVACLK_CDREX, DIVMCLK_CDREX,
@@ -329,16 +308,7 @@ static unsigned int __maybe_unused clkdiv_cdrex_for400[LV_END][9] = {
 	/* MCLK_CDREX L1: 267MHz */
 	{1, 2, 1, 2, 2, 2, 1, 5, 1},
 
-	/* MCLK_CDREX L2: 200MHz */
-	{1, 3, 1, 3, 2, 3, 1, 6, 1},
-
-	/* MCLK_CDREX L3: 160MHz */
-	{1, 4, 1, 4, 2, 4, 1, 7, 1},
-
-	/* MCLK_CDREX L4: 133MHz */
-	{1, 5, 1, 5, 2, 5, 1, 8, 1},
-
-	/* MCLK_CDREX L5: 100MHz */
+	/* MCLK_CDREX L2: 100MHz */
 	{1, 7, 1, 2, 7, 7, 1, 15, 1},
 };
 
@@ -355,17 +325,19 @@ static void exynos5250_set_bus_volt(void)
 
 	printk(KERN_INFO "DVFS : VDD_INT Voltage table set with %d Group\n", asv_group_index);
 
-	for (i = 0 ; i < LV_END ; i++)
-		exynos5_busfreq_table[i].volt =
-			exynos5_asv_volt[asv_group_index][i];
+	for (i = LV_0; i < LV_MIF_END; i++)
+		exynos5_busfreq_table_mif[i].volt =
+			exynos5_mif_volt[asv_group_index][i];
 
+	for (i = LV_0; i < LV_INT_END; i++)
+		exynos5_busfreq_table_int[i].volt =
+			exynos5_int_volt[asv_group_index][i];
 	return;
 }
 
-unsigned int exynos5250_target(unsigned int div_index)
+static void exynos5250_target_for_mif(int div_index)
 {
 	unsigned int tmp;
-	unsigned int tmp2;
 
 	/* Change Divider - CDREX */
 	tmp = __raw_readl(EXYNOS5_CLKDIV_CDREX);
@@ -405,6 +377,12 @@ unsigned int exynos5250_target(unsigned int div_index)
 	do {
 		tmp = __raw_readl(EXYNOS5_CLKDIV_STAT_CDREX2);
 	} while (tmp & 0x1);
+}
+
+static void exynos5250_target_for_int(int div_index)
+{
+	unsigned int tmp;
+	unsigned int tmp2;
 
 	/* Change Divider - TOP */
 	tmp = __raw_readl(EXYNOS5_CLKDIV_TOP0);
@@ -487,39 +465,45 @@ unsigned int exynos5250_target(unsigned int div_index)
 	do {
 		tmp = __raw_readl(EXYNOS5_CLKDIV_STAT_R1X);
 	} while (tmp & 0x10);
-
-	return div_index;
 }
 
-unsigned int exynos5250_get_table_index(struct opp *opp)
+static void exynos5250_target(enum ppmu_type type, int index)
 {
-	unsigned int index;
-
-	for (index = LV_0; index < LV_END; index++)
-		if (opp_get_freq(opp) == exynos5_busfreq_table[index].mem_clk)
-			break;
-
-	return index;
+	if (type == PPMU_MIF)
+		exynos5250_target_for_mif(index);
+	else
+		exynos5250_target_for_int(index);
 }
 
-void exynos5250_suspend(void)
+static int exynos5250_get_table_index(unsigned long freq, enum ppmu_type type)
+{
+	int index;
+
+	if (type == PPMU_MIF) {
+		for (index = LV_0; index < LV_MIF_END; index++)
+			if (freq == exynos5_busfreq_table_mif[index].mem_clk)
+				return index;
+	} else {
+		for (index = LV_0; index < LV_INT_END; index++)
+			if (freq == exynos5_busfreq_table_int[index].mem_clk)
+				return index;
+	}
+	return -EINVAL;
+}
+
+static void exynos5250_suspend(void)
 {
 	/* Nothing to do */
 }
 
-void exynos5250_resume(void)
+static void exynos5250_resume(void)
 {
 	__raw_writel(dmc_pause_ctrl, EXYNOS5_DMC_PAUSE_CTRL);
 }
 
-unsigned int exynos5250_get_int_volt(unsigned long index)
+static void exynos5250_monitor(struct busfreq_data *data,
+			struct opp **mif_opp, struct opp **int_opp)
 {
-	return exynos5250_int_volt[asv_group_index][index];
-}
-
-struct opp *exynos5250_monitor(struct busfreq_data *data)
-{
-	struct opp *opp = data->curr_opp;
 	int i;
 	unsigned int cpu_load_average = 0;
 	unsigned int dmc_c_load_average = 0;
@@ -529,22 +513,21 @@ struct opp *exynos5250_monitor(struct busfreq_data *data)
 	unsigned long cpufreq = 0;
 	unsigned long lockfreq;
 	unsigned long dmcfreq;
-	unsigned long newfreq;
-	unsigned long currfreq = opp_get_freq(data->curr_opp) / 1000;
-	unsigned long maxfreq = opp_get_freq(data->max_opp) / 1000;
 	unsigned long cpu_load;
 	unsigned long dmc_load;
 	unsigned long dmc_c_load;
 	unsigned long dmc_r1_load;
 	unsigned long dmc_l_load;
+	struct opp *opp[PPMU_TYPE_END];
+	unsigned long newfreq[PPMU_TYPE_END];
 
-	ppmu_update(data->dev, 3);
+	ppmu_update(data->dev[PPMU_MIF], 3);
 
 	/* Convert from base xxx to base maxfreq */
-	cpu_load = div64_u64(ppmu_load[PPMU_CPU] * currfreq, maxfreq);
-	dmc_c_load = div64_u64(ppmu_load[PPMU_DDR_C] * currfreq, maxfreq);
-	dmc_r1_load = div64_u64(ppmu_load[PPMU_DDR_R1] * currfreq, maxfreq);
-	dmc_l_load = div64_u64(ppmu_load[PPMU_DDR_L] * currfreq, maxfreq);
+	cpu_load = div64_u64(ppmu_load[PPMU_CPU] * data->curr_freq[PPMU_MIF], data->max_freq[PPMU_MIF]);
+	dmc_c_load = div64_u64(ppmu_load[PPMU_DDR_C] * data->curr_freq[PPMU_MIF], data->max_freq[PPMU_MIF]);
+	dmc_r1_load = div64_u64(ppmu_load[PPMU_DDR_R1] * data->curr_freq[PPMU_MIF], data->max_freq[PPMU_MIF]);
+	dmc_l_load = div64_u64(ppmu_load[PPMU_DDR_L] * data->curr_freq[PPMU_MIF], data->max_freq[PPMU_MIF]);
 
 	data->load_history[PPMU_CPU][data->index] = cpu_load;
 	data->load_history[PPMU_DDR_C][data->index] = dmc_c_load;
@@ -581,29 +564,47 @@ struct opp *exynos5250_monitor(struct busfreq_data *data)
 	}
 
 	if (dmc_load >= DMC_MAX_THRESHOLD) {
-		dmcfreq = opp_get_freq(data->max_opp);
+		dmcfreq = data->max_freq[PPMU_MIF];
 	} else if (dmc_load < IDLE_THRESHOLD) {
 		if (dmc_load_average < IDLE_THRESHOLD)
-			opp = step_down(data, 1);
+			dmcfreq = step_down(data, PPMU_MIF, 1);
 		else
-			opp = data->curr_opp;
-		dmcfreq = opp_get_freq(opp);
+			dmcfreq = data->curr_freq[PPMU_MIF];
 	} else {
 		if (dmc_load < dmc_load_average) {
 			dmc_load = dmc_load_average;
 			if (dmc_load >= DMC_MAX_THRESHOLD)
 				dmc_load = DMC_MAX_THRESHOLD;
 		}
-		dmcfreq = div64_u64(maxfreq * dmc_load * 1000, DMC_MAX_THRESHOLD);
+		dmcfreq = div64_u64(data->max_freq[PPMU_MIF] * dmc_load, DMC_MAX_THRESHOLD);
 	}
 
-	lockfreq = dev_max_freq(data->dev);
+	lockfreq = dev_max_freq(data->dev[PPMU_MIF]);
 
-	newfreq = max3(lockfreq, dmcfreq, cpufreq);
+	newfreq[PPMU_MIF] = max3(lockfreq, dmcfreq, cpufreq);
+	opp[PPMU_MIF] = opp_find_freq_ceil(data->dev[PPMU_MIF], &newfreq[PPMU_MIF]);
+	opp[PPMU_INT] = opp_find_freq_ceil(data->dev[PPMU_INT], &data->max_freq[PPMU_INT]);
 
-	opp = opp_find_freq_ceil(data->dev, &newfreq);
+	*mif_opp = opp[PPMU_MIF];
+	/* temporary */
+	*int_opp = opp[PPMU_INT];
+}
 
-	return opp;
+static void busfreq_early_suspend(struct early_suspend *h)
+{
+	unsigned long freq;
+	struct busfreq_data *data = container_of(h, struct busfreq_data,
+			busfreq_early_suspend_handler);
+	freq = data->min_freq[PPMU_MIF] + data->min_freq[PPMU_INT] / 1000;
+	dev_lock(data->dev[PPMU_MIF], data->dev[PPMU_MIF], freq);
+}
+
+static void busfreq_late_resume(struct early_suspend *h)
+{
+	struct busfreq_data *data = container_of(h, struct busfreq_data,
+			busfreq_early_suspend_handler);
+	/* Request min 300MHz */
+	dev_lock(data->dev[PPMU_MIF], data->dev[PPMU_MIF], 300000);
 }
 
 int exynos5250_init(struct device *dev, struct busfreq_data *data)
@@ -612,6 +613,7 @@ int exynos5250_init(struct device *dev, struct busfreq_data *data)
 	unsigned long maxfreq = ULONG_MAX;
 	unsigned long minfreq = 0;
 	unsigned long cdrexfreq;
+	unsigned long lrbusfreq;
 	struct clk *clk;
 	int ret;
 
@@ -627,21 +629,33 @@ int exynos5250_init(struct device *dev, struct busfreq_data *data)
 		return ret;
 	}
 	cdrexfreq = clk_get_rate(clk) / 1000;
+	clk_put(clk);
 
+	clk = clk_get(NULL, "aclk_266");
+	if (IS_ERR(clk)) {
+		dev_err(dev, "Fail to get aclk_266 clock");
+		ret = PTR_ERR(clk);
+		return ret;
+	}
+	lrbusfreq = clk_get_rate(clk) / 1000;
 	clk_put(clk);
 
 	if (cdrexfreq == 800000) {
 		clkdiv_cdrex = clkdiv_cdrex_for800;
-		exynos5_busfreq_table = exynos5_busfreq_table_for800;
-	} else if (cdrexfreq == 667000) {
+		exynos5_busfreq_table_mif = exynos5_busfreq_table_for800;
+		exynos5_mif_volt = exynos5_mif_volt_for800;
+	} else if (cdrexfreq == 666857) {
 		clkdiv_cdrex = clkdiv_cdrex_for667;
-		exynos5_busfreq_table = exynos5_busfreq_table_for667;
+		exynos5_busfreq_table_mif = exynos5_busfreq_table_for667;
+		exynos5_mif_volt = exynos5_mif_volt_for667;
 	} else if (cdrexfreq == 533000) {
 		clkdiv_cdrex = clkdiv_cdrex_for533;
-		exynos5_busfreq_table = exynos5_busfreq_table_for533;
+		exynos5_busfreq_table_mif = exynos5_busfreq_table_for533;
+		exynos5_mif_volt = exynos5_mif_volt_for533;
 	} else if (cdrexfreq == 400000) {
 		clkdiv_cdrex = clkdiv_cdrex_for400;
-		exynos5_busfreq_table = exynos5_busfreq_table_for400;
+		exynos5_busfreq_table_mif = exynos5_busfreq_table_for400;
+		exynos5_mif_volt = exynos5_mif_volt_for400;
 	} else {
 		dev_err(dev, "Don't support cdrex table\n");
 		return -EINVAL;
@@ -649,38 +663,81 @@ int exynos5250_init(struct device *dev, struct busfreq_data *data)
 
 	exynos5250_set_bus_volt();
 
-	for (i = 0; i < LV_END; i++) {
-		ret = opp_add(dev, exynos5_busfreq_table[i].mem_clk,
-				exynos5_busfreq_table[i].volt);
+	data->dev[PPMU_MIF] = dev;
+	data->dev[PPMU_INT] = &busfreq_for_int;
+
+	for (i = LV_0; i < LV_MIF_END; i++) {
+		ret = opp_add(data->dev[PPMU_MIF], exynos5_busfreq_table_mif[i].mem_clk,
+				exynos5_busfreq_table_mif[i].volt);
 		if (ret) {
 			dev_err(dev, "Fail to add opp entries.\n");
 			return ret;
 		}
 	}
 
-	opp_disable(dev, 107000);
-	opp_disable(dev, 67000);
+	opp_disable(data->dev[PPMU_MIF], 107000);
 
-	data->table = exynos5_busfreq_table;
-	data->table_size = LV_END;
+	for (i = LV_0; i < LV_INT_END; i++) {
+		ret = opp_add(data->dev[PPMU_INT], exynos5_busfreq_table_int[i].mem_clk,
+				exynos5_busfreq_table_int[i].volt);
+		if (ret) {
+			dev_err(dev, "Fail to add opp entries.\n");
+			return ret;
+		}
+	}
 
-	/* Find max frequency */
-	data->max_opp = opp_find_freq_floor(dev, &maxfreq);
-	data->min_opp = opp_find_freq_ceil(dev, &minfreq);
-	data->curr_opp = opp_find_freq_ceil(dev, &cdrexfreq);
+	data->target = exynos5250_target;
+	data->get_table_index = exynos5250_get_table_index;
+	data->monitor = exynos5250_monitor;
+	data->busfreq_suspend = exynos5250_suspend;
+	data->busfreq_resume = exynos5250_resume;
+	data->sampling_rate = usecs_to_jiffies(100000);
 
-	data->vdd_int = regulator_get(NULL, "vdd_int");
-	if (IS_ERR(data->vdd_int)) {
+	data->table[PPMU_MIF] = exynos5_busfreq_table_mif;
+	data->table[PPMU_INT] = exynos5_busfreq_table_int;
+
+	/* Find max frequency for mif */
+	data->max_freq[PPMU_MIF] =
+			opp_get_freq(opp_find_freq_floor(data->dev[PPMU_MIF], &maxfreq));
+	data->min_freq[PPMU_MIF] =
+			opp_get_freq(opp_find_freq_ceil(data->dev[PPMU_MIF], &minfreq));
+	data->curr_freq[PPMU_MIF] =
+			opp_get_freq(opp_find_freq_ceil(data->dev[PPMU_MIF], &cdrexfreq));
+	/* Find max frequency for int */
+	maxfreq = ULONG_MAX;
+	minfreq = 0;
+	data->max_freq[PPMU_INT] =
+			opp_get_freq(opp_find_freq_floor(data->dev[PPMU_INT], &maxfreq));
+	data->min_freq[PPMU_INT] =
+			opp_get_freq(opp_find_freq_ceil(data->dev[PPMU_INT], &minfreq));
+	data->curr_freq[PPMU_INT] =
+			opp_get_freq(opp_find_freq_ceil(data->dev[PPMU_INT], &lrbusfreq));
+
+	data->vdd_reg[PPMU_INT] = regulator_get(NULL, "vdd_int");
+	if (IS_ERR(data->vdd_reg[PPMU_INT])) {
 		pr_err("failed to get resource %s\n", "vdd_int");
 		return -ENODEV;
 	}
 
-	data->vdd_mif = regulator_get(NULL, "vdd_mif");
-	if (IS_ERR(data->vdd_mif)) {
+	data->vdd_reg[PPMU_MIF] = regulator_get(NULL, "vdd_mif");
+	if (IS_ERR(data->vdd_reg[PPMU_MIF])) {
 		pr_err("failed to get resource %s\n", "vdd_mif");
-		regulator_put(data->vdd_int);
+		regulator_put(data->vdd_reg[PPMU_INT]);
 		return -ENODEV;
 	}
+
+        data->busfreq_early_suspend_handler.suspend = &busfreq_early_suspend;
+	data->busfreq_early_suspend_handler.resume = &busfreq_late_resume;
+
+	/* Request min 300MHz */
+	dev_lock(dev, dev, 300000);
+
+	register_early_suspend(&data->busfreq_early_suspend_handler);
+
+	tmp = __raw_readl(EXYNOS5_ABBG_INT_CONTROL);
+	tmp &= ~(0x1f | (1 << 31) | (1 << 7));
+	tmp |= ((8 + INT_RBB) | (1 << 31) | (1 << 7));
+	__raw_writel(tmp, EXYNOS5_ABBG_INT_CONTROL);
 
 	return 0;
 }

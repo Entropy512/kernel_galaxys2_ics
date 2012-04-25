@@ -13,6 +13,8 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/power/charger-manager.h>
+#include <linux/hwmon.h>
+#include <linux/platform_data/ntc_thermistor.h>
 
 #include <plat/adc.h>
 #include <plat/pm.h>
@@ -30,12 +32,95 @@
 #define SECBATTSPEC_TEMP_LOW		(-5 * 1000)
 #define SECBATTSPEC_TEMP_LOW_REC	(0 * 1000)
 
-/* TODO actually read temperature from ADC */
-static int __read_thermistor_mC(void)
+#ifdef CONFIG_SENSORS_NTC_THERMISTOR
+struct platform_device midas_ncp15wb473_thermistor;
+static int ntc_adc_num = -EINVAL; /* Uninitialized */
+static struct s3c_adc_client *ntc_adc;
+
+int __init adc_ntc_init(int port)
 {
-	return 25000; /* 25 mili-Centigrade */
+	int err = 0;
+
+	if (port < 0 || port > 9)
+		return -EINVAL;
+	ntc_adc_num = port;
+
+	ntc_adc = s3c_adc_register(&midas_ncp15wb473_thermistor,
+			NULL, NULL, 0);
+	if (IS_ERR(ntc_adc)) {
+		err = PTR_ERR(ntc_adc);
+		ntc_adc = NULL;
+		return err;
+	}
+
+	return 0;
 }
 
+static int read_thermistor_uV(void)
+{
+	int val;
+	s64 converted;
+
+	WARN(ntc_adc == NULL || ntc_adc_num < 0,
+	     "NTC-ADC is not initialized for %s.\n", __func__);
+
+	val = s3c_adc_read(ntc_adc, ntc_adc_num);
+
+	/* Multiplied by maximum input voltage */
+	converted = 1800000LL * (s64) val;
+	/* Divided by resolution */
+	converted >>= 12;
+
+	return converted;
+}
+
+static struct ntc_thermistor_platform_data ncp15wb473_pdata = {
+	.read_uV	= read_thermistor_uV,
+	.pullup_uV	= 1800000, /* VCC_1.8V_AP */
+	.pullup_ohm	= 100000, /* 100K */
+	.pulldown_ohm	= 100000, /* 100K */
+	.connect	= NTC_CONNECTED_GROUND,
+};
+
+static int __read_thermistor_mC(int *mC)
+{
+	int ret;
+	static struct device *hwmon;
+	static struct hwmon_property *entry;
+
+	if (ntc_adc_num == -EINVAL)
+		return -ENODEV;
+
+	if (hwmon == NULL)
+		hwmon = hwmon_find_device(&midas_ncp15wb473_thermistor.dev);
+
+	if (IS_ERR_OR_NULL(hwmon)) {
+		hwmon = NULL;
+		return -ENODEV;
+	}
+
+	if (entry == NULL)
+		entry = hwmon_get_property(hwmon, "temp1_input");
+	if (IS_ERR_OR_NULL(entry)) {
+		entry = NULL;
+		return -ENODEV;
+	}
+
+	ret = hwmon_get_value(hwmon, entry, mC);
+	if (ret < 0) {
+		entry = NULL;
+		return ret;
+	}
+
+	return 0;
+}
+#else
+static int __read_thermistor_mC(int *mC)
+{
+	*mC = 25000;
+	return 0;
+}
+#endif
 
 enum temp_stat { TEMP_OK = 0, TEMP_HOT = 1, TEMP_COLD = -1 };
 
@@ -43,7 +128,8 @@ static int midas_thermistor_ck(int *mC)
 {
 	static enum temp_stat state = TEMP_OK;
 
-	*mC = __read_thermistor_mC();
+	 __read_thermistor_mC(mC);
+
 	switch (state) {
 	case TEMP_OK:
 		if (*mC >= SECBATTSPEC_TEMP_HIGH)
@@ -120,3 +206,13 @@ struct platform_device midas_charger_manager = {
 		.platform_data = &midas_charger_desc,
 	},
 };
+
+#ifdef CONFIG_SENSORS_NTC_THERMISTOR
+struct platform_device midas_ncp15wb473_thermistor = {
+	.name			= "ncp15wb473",
+	.dev			= {
+		.platform_data = &ncp15wb473_pdata,
+	},
+};
+#endif
+

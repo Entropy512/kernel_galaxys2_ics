@@ -38,8 +38,8 @@
 #include <mach/regs-irq.h>
 
 #if defined(CONFIG_MACH_P11) || defined(CONFIG_MACH_P10)
-#define TRANS_LOAD_H0 30
-#define TRANS_LOAD_L1 20
+#define TRANS_LOAD_H0 40
+#define TRANS_LOAD_L1 30
 #define TRANS_LOAD_H1 100
 #endif
 
@@ -183,6 +183,54 @@ standalone_hotplug(unsigned int load, unsigned long nr_rq_min, unsigned int cpu_
 	return HOTPLUG_NOP;
 }
 
+#if defined(CONFIG_TARGET_LOCALE_KOR) && defined(CONFIG_STAND_ALONE_POLICY) // test -0221
+static unsigned int dvfs_cpu1_lock = 0;
+
+static void dvfs_hotplug_callback(struct work_struct *unused)
+{
+	mutex_lock(&hotplug_lock);
+	dvfs_cpu1_lock = 1;
+	if (NR_CPUS == 2 && !cpu_online(1))
+	{
+		DBG_PRINT("cpu%d turning on!\n", 1);
+		cpu_up(1);
+		DBG_PRINT("cpu%d on\n", 1);
+	}
+	mutex_unlock(&hotplug_lock);
+}
+static DECLARE_WORK(dvfs_hotplug_work, dvfs_hotplug_callback);
+
+void unlock_cpu1_up(void)
+{
+	mutex_lock(&hotplug_lock);
+	dvfs_cpu1_lock = 0;
+	mutex_unlock(&hotplug_lock);
+}
+void lock_cpu1_up(void)
+{
+#if 1 // direct call
+	mutex_lock(&hotplug_lock);
+	dvfs_cpu1_lock = 1;
+	if (NR_CPUS == 2 && !cpu_online(1))
+	{
+		DBG_PRINT("cpu%d turning on!\n", 1);
+		cpu_up(1);
+		DBG_PRINT("cpu%d on\n", 1);
+	}
+	mutex_unlock(&hotplug_lock);
+#else // defered queue
+	mutex_lock(&hotplug_lock);
+	dvfs_cpu1_lock = 1;
+	mutex_unlock(&hotplug_lock);
+	
+	if (NR_CPUS == 2 && !cpu_online(1))
+	{
+		schedule_work_on(0, &dvfs_hotplug_work);
+	}
+#endif
+}
+#endif
+
 static void hotplug_timer(struct work_struct *work)
 {
 	struct cpu_hotplug_info tmp_hotplug_info[4];
@@ -197,6 +245,11 @@ static void hotplug_timer(struct work_struct *work)
 
 	if (user_lock == 1)
 		goto no_hotplug;
+
+#if defined(CONFIG_TARGET_LOCALE_KOR) && defined(CONFIG_STAND_ALONE_POLICY) // test -0221
+	if (dvfs_cpu1_lock == 1)
+		goto no_hotplug;
+#endif
 
 	for_each_online_cpu(i) {
 		struct cpu_time_info *tmp_info;

@@ -208,6 +208,8 @@ static struct exynos4_pmu_conf exynos4412_pmu_config[] = {
 	{ S5P_ARM_CORE2_SYS,			{ 0, 0, 2 } },
 	{ S5P_ARM_CORE3_SYS,			{ 0, 0, 2 } },
 	{ S5P_ISP_ARM_SYS,			{ 1, 0, 0 } },
+	{ S5P_DIS_IRQ_ISP_ARM_LOCAL_SYS,	{ 0, 0, 0 } },
+	{ S5P_DIS_IRQ_ISP_ARM_CENTRAL_SYS,	{ 1, 0, 0 } },
 	{ S5P_ARM_COMMON_SYS,			{ 0, 0, 2 } },
 	{ S5P_ARM_L2_0_SYS,			{ 0, 0, 3 } },
 	{ S5P_ARM_L2_0_OPTION,			{ 0x10, 0x10, 0 } },
@@ -324,10 +326,6 @@ static struct exynos4_c2c_pmu_conf exynos4_config_for_c2c[] = {
 #endif
 };
 
-static void __iomem *exynos4_pmu_init_zero[] = {
-	S5P_CMU_RESET_ISP_SYS,
-};
-
 void exynos4_sys_powerdown_conf(enum sys_powerdown mode)
 {
 	unsigned int count = entry_cnt;
@@ -387,14 +385,6 @@ static int __init exynos4_pmu_init(void)
 
 	if(!soc_is_exynos4210())
 		exynos4_reset_assert_ctrl(1);
-
-	/*
-	 * on exynos4x12, CMU reset system power register should to be set 0x0
-	 */
-	if (!soc_is_exynos4210()) {
-		for (i = 0; i < ARRAY_SIZE(exynos4_pmu_init_zero); i++)
-			__raw_writel(0x0, exynos4_pmu_init_zero[i]);
-	}
 
 	if (soc_is_exynos4210()) {
 		exynos4_pmu_config = exynos4210_pmu_config;

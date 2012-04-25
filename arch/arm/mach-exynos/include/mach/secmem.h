@@ -28,6 +28,12 @@ struct secmem_crypto_driver_ftn {
 	int (*release) (void);
 };
 
+struct secmem_region {
+	char		*virt_addr;
+	unsigned long	phys_addr;
+	unsigned long	len;
+};
+
 #if defined(CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION)
 void secmem_crypto_register(struct secmem_crypto_driver_ftn *ftn);
 void secmem_crypto_deregister(void);
@@ -41,5 +47,7 @@ void secmem_crypto_deregister(void);
 #define SECMEM_IOC_GET_DRM_ONOFF	_IOWR('S', 3, int)
 #define SECMEM_IOC_GET_CRYPTO_LOCK	_IOR('S', 4, int)
 #define SECMEM_IOC_RELEASE_CRYPTO_LOCK	_IOR('S', 5, int)
+#define SECMEM_IOC_GET_ADDR		_IOWR('S', 6, int)
+#define SECMEM_IOC_RELEASE_ADDR		_IOWR('S', 7, int)
 
 #endif /* __ASM_ARCH_SECMEM_H */

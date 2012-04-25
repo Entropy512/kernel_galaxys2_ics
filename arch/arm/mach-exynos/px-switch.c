@@ -10,7 +10,7 @@
 #include <mach/gpio.h>
 #include <mach/usb_switch.h>
 
-static struct device *sec_switch_dev;
+struct device *sec_switch_dev;
 
 enum usb_path_t current_path = USB_PATH_NONE;
 
@@ -19,81 +19,88 @@ static struct semaphore usb_switch_sem;
 static ssize_t show_usb_sel(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	/* 1 for AP, 0 for CP */
-	return sprintf(buf, "%d", current_path & USB_PATH_CP ? 0 : 1);
+	const char *mode;
+
+	if (current_path & USB_PATH_CP) {
+		/* CP */
+		mode = "MODEM";
+	} else {
+		/* AP */
+		mode = "PDA";
+	}
+
+	pr_err("%s: %s\n", __func__, mode);
+
+	return sprintf(buf, "%s\n", mode);
 }
 
 static ssize_t store_usb_sel(struct device *dev,
 			     struct device_attribute *attr,
 			     const char *buf, size_t count)
 {
-	int ret, usb_sel;
-	ret = sscanf(buf, "%d", &usb_sel);
+	pr_err("%s: %s\n", __func__, buf);
 
-	if (ret != 1)
-		return -EINVAL;
-
-	pr_err("%s: %d\n", __func__, usb_sel);
-	/* 1 for AP, 0 for CP */
-	if (usb_sel == 1)
+	if (!strncasecmp(buf, "PDA", 3)) {
 		usb_switch_clr_path(USB_PATH_CP);
-	else if (usb_sel == 0)
+	} else if (!strncasecmp(buf, "MODEM", 5)) {
 		usb_switch_set_path(USB_PATH_CP);
+	} else {
+		pr_err("%s: wrong usb_sel value(%s)!!\n", __func__, buf);
+		return -EINVAL;
+	}
 
 	return count;
 }
 
-static DEVICE_ATTR(usb_sel, 0644, show_usb_sel, store_usb_sel);
-
 static ssize_t show_uart_sel(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-#ifdef CONFIG_MACH_P8LTE
-	/* 2 for LTE, 1 for AP, 0 for CP */
-	int val_sel1, val_sel2;
-	val_sel1 = gpio_get_value(GPIO_UART_SEL1);
-	val_sel2 = gpio_get_value(GPIO_UART_SEL2);
-	return sprintf(buf, "%d", val_sel1 << (1 - val_sel2));
-#else
-	/* 1 for AP, 0 for CP */
-	return sprintf(buf, "%d", gpio_get_value(GPIO_UART_SEL));
-#endif
+	int val_sel;
+	const char *mode;
+
+	val_sel = gpio_get_value(GPIO_UART_SEL);
+
+	if (val_sel == 0) {
+		/* CP */
+		mode = "CP";
+	} else {
+		/* AP */
+		mode = "AP";
+	}
+
+	pr_err("%s: %s\n", __func__, mode);
+
+	return sprintf(buf, "%s\n", mode);
 }
 
 static ssize_t store_uart_sel(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	int ret, uart_sel;
-	ret = sscanf(buf, "%d", &uart_sel);
+	int uart_sel = -1;
 
-	if (ret != 1)
+	pr_err("%s: %s\n", __func__, buf);
+
+	if (!strncasecmp(buf, "AP", 2)) {
+		uart_sel = 1;
+	} else if (!strncasecmp(buf, "CP", 2)) {
+		uart_sel = 0;
+	} else {
+		pr_err("%s: wrong usb_sel value(%s)!!\n", __func__, buf);
 		return -EINVAL;
+	}
 
-	pr_err("%s: %d\n", __func__, uart_sel);
-
-#ifdef CONFIG_MACH_P8LTE
-	/* 2 for LTE, 1 for AP, 0 for CP */
-	int set_val1, set_val2;
-
-	set_val1 = (uart_sel > 0) ? 1 : 0;
-	set_val2 = uart_sel & 0x0001;
-
-	gpio_set_value(GPIO_UART_SEL1, set_val1);
-	gpio_set_value(GPIO_UART_SEL2, set_val2);
-
-#else
 	/* 1 for AP, 0 for CP */
 	if (uart_sel == 1)
 		gpio_set_value(GPIO_UART_SEL, 1);
 	else if (uart_sel == 0)
 		gpio_set_value(GPIO_UART_SEL, 0);
-#endif
 
 	return count;
 }
 
-static DEVICE_ATTR(uart_sel, 0644, show_uart_sel, store_uart_sel);
+static DEVICE_ATTR(usb_sel, 0664, show_usb_sel, store_usb_sel);
+static DEVICE_ATTR(uart_sel, 0664, show_uart_sel, store_uart_sel);
 
 static void pmic_safeout2(int onoff)
 {
@@ -133,9 +140,6 @@ static void usb_apply_path(enum usb_path_t path)
 		gpio_set_value(GPIO_USB_SEL1, 0);
 		gpio_set_value(GPIO_USB_SEL2, 1);
 		/* don't care SEL3 */
-#if defined(CONFIG_MACH_P8LTE)  || defined(CONFIG_MACH_P8)
-		gpio_set_value(GPIO_USB_SEL3, 1);
-#endif
 		goto out_nochange;
 	}
 	if (path & USB_PATH_TA) {
@@ -149,9 +153,6 @@ static void usb_apply_path(enum usb_path_t path)
 		gpio_set_value(GPIO_USB_SEL1, 0);
 		gpio_set_value(GPIO_USB_SEL2, 0);
 		/* don't care SEL3 */
-#ifdef CONFIG_MACH_P8LTE
-		gpio_set_value(GPIO_USB_SEL3, 1);
-#endif
 		mdelay(3);
 		goto out_cp;
 	}
@@ -162,9 +163,6 @@ static void usb_apply_path(enum usb_path_t path)
 		goto out_ap;
 	}
 	if (path & USB_PATH_HOST) {
-#ifndef CONFIG_MACH_P8LTE
-		gpio_set_value(GPIO_USB_SEL1, 1);
-#endif
 		/* don't care SEL2 */
 		gpio_set_value(GPIO_USB_SEL3, 0);
 		goto out_ap;
@@ -172,25 +170,25 @@ static void usb_apply_path(enum usb_path_t path)
 
 	/* default */
 	gpio_set_value(GPIO_USB_SEL1, 1);
-#ifdef CONFIG_MACH_P8LTE
-	gpio_set_value(GPIO_USB_SEL2, 1);
-#else
 	gpio_set_value(GPIO_USB_SEL2, 0);
-#endif
 	gpio_set_value(GPIO_USB_SEL3, 1);
 
 out_ap:
 	pr_err("%s: %x safeout2 off\n", __func__, path);
 	pmic_safeout2(0);
-	return;
+	goto sysfs_noti;
 
 out_cp:
 	pr_err("%s: %x safeout2 on\n", __func__, path);
 	pmic_safeout2(1);
-	return;
+	goto sysfs_noti;
 
 out_nochange:
 	pr_err("%s: %x safeout2 no change\n", __func__, path);
+	return;
+
+sysfs_noti:
+	sysfs_notify(&sec_switch_dev->kobj, NULL, "usb_sel");
 	return;
 }
 
@@ -242,36 +240,21 @@ static int __init usb_switch_init(void)
 	gpio_request(GPIO_USB_SEL1, "GPIO_USB_SEL1");
 	gpio_request(GPIO_USB_SEL2, "GPIO_USB_SEL2");
 	gpio_request(GPIO_USB_SEL3, "GPIO_USB_SEL3");
-#ifdef CONFIG_MACH_P8LTE
-	gpio_request(GPIO_UART_SEL1, "GPIO_UART_SEL1");
-	gpio_request(GPIO_UART_SEL2, "GPIO_UART_SEL2");
-#else
 	gpio_request(GPIO_UART_SEL, "GPIO_UART_SEL");
-#endif
 
 	gpio_export(GPIO_USB_SEL1, 1);
 	gpio_export(GPIO_USB_SEL2, 1);
 	gpio_export(GPIO_USB_SEL3, 1);
-#ifdef CONFIG_MACH_P8LTE
-	gpio_export(GPIO_UART_SEL1, 1);
-	gpio_export(GPIO_UART_SEL2, 1);
-#else
 	gpio_export(GPIO_UART_SEL, 1);
-#endif
 
 	BUG_ON(!sec_class);
-	sec_switch_dev = device_create(sec_class, NULL, 0, NULL, "sec_switch");
+	sec_switch_dev = device_create(sec_class, NULL, 0, NULL, "switch");
 
 	BUG_ON(!sec_switch_dev);
 	gpio_export_link(sec_switch_dev, "GPIO_USB_SEL1", GPIO_USB_SEL1);
 	gpio_export_link(sec_switch_dev, "GPIO_USB_SEL2", GPIO_USB_SEL2);
 	gpio_export_link(sec_switch_dev, "GPIO_USB_SEL3", GPIO_USB_SEL3);
-#ifdef CONFIG_MACH_P8LTE
-	gpio_export_link(sec_switch_dev, "GPIO_UART_SEL1", GPIO_UART_SEL1);
-	gpio_export_link(sec_switch_dev, "GPIO_UART_SEL2", GPIO_UART_SEL2);
-#else
 	gpio_export_link(sec_switch_dev, "GPIO_UART_SEL", GPIO_UART_SEL);
-#endif
 
 	/*init_MUTEX(&usb_switch_sem);*/
 	sema_init(&usb_switch_sem, 1);

@@ -20,6 +20,7 @@
 #include <mach/regs-clock.h>
 #include <mach/cpufreq.h>
 #include <mach/asv.h>
+#include <mach/sec_debug.h>
 
 #include <plat/clock.h>
 
@@ -251,6 +252,10 @@ static void exynos4210_set_frequency(unsigned int old_index,
 				  unsigned int new_index)
 {
 	unsigned int tmp;
+
+	sec_debug_aux_log(SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+			"%s: old_index=%d, new_index=%d.",
+			__func__, old_index, new_index);
 
 	if (old_index > new_index) {
 		if (!exynos4210_pms_change(old_index, new_index)) {

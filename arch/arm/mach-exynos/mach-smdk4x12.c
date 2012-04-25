@@ -29,9 +29,6 @@
 #include <linux/v4l2-mediabus.h>
 #include <linux/memblock.h>
 #include <linux/delay.h>
-#ifdef CONFIG_ANDROID_PMEM
-#include <linux/android_pmem.h>
-#endif
 #include <linux/smsc911x.h>
 
 #include <asm/mach/arch.h>
@@ -74,6 +71,10 @@
 #include <plat/regs-srom.h>
 #include <plat/sysmmu.h>
 #include <plat/tv-core.h>
+#if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC) || defined(CONFIG_VIDEO_MFC5X)
+#include <plat/s5p-mfc.h>
+#endif
+
 #include <media/s5k4ba_platform.h>
 #include <media/s5k4ea_platform.h>
 #include <media/exynos_flite.h>
@@ -96,10 +97,6 @@
 #ifdef CONFIG_EXYNOS_C2C
 #include <mach/c2c.h>
 #endif
-#if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC) || defined(CONFIG_VIDEO_MFC5X)
-#include <plat/s5p-mfc.h>
-#endif
-
 #ifdef CONFIG_FB_S5P_MIPI_DSIM
 #include <mach/mipi_ddi.h>
 #include <mach/dsim.h>
@@ -118,10 +115,6 @@ struct s3cfb_extdsp_lcd {
 #ifdef CONFIG_VIDEO_SAMSUNG_S5P_FIMC
 #include <plat/fimc-core.h>
 #include <media/s5p_fimc.h>
-#endif
-
-#if defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC)
-#include <plat/s5p-mfc.h>
 #endif
 
 #ifdef CONFIG_VIDEO_JPEG_V2X
@@ -583,7 +576,7 @@ static struct s3c_platform_camera s5k6a3 = {
 		.height	= 1080,
 	},
 	.srclk_name	= "xusbxti",
-	.clk_rate	= 12000000,
+	.clk_rate	= 24000000,
 	.mipi_lanes	= 1,
 	.mipi_settle	= 12,
 	.mipi_align	= 24,
@@ -1707,6 +1700,7 @@ static struct dw_mci_board exynos_dwmci_pdata __initdata = {
 	.bus_hz			= 100 * 1000 * 1000,
 	.caps			= MMC_CAP_UHS_DDR50 | MMC_CAP_1_8V_DDR |
 				MMC_CAP_8_BIT_DATA | MMC_CAP_CMD23,
+	.fifo_depth		= 0x80,
 	.detect_delay_ms	= 200,
 	.hclk_name		= "dwmci",
 	.cclk_name		= "sclk_dwmci",
@@ -2289,6 +2283,15 @@ static struct max77686_regulator_data max77686_regulators[] = {
 	{MAX77686_LDO14, &max77686_ldo14_data,},
 };
 
+struct max77686_opmode_data max77686_opmode_data[MAX77686_REG_MAX] = {
+	[MAX77686_LDO11] = {MAX77686_LDO11, MAX77686_OPMODE_STANDBY},
+	[MAX77686_LDO14] = {MAX77686_LDO14, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK1] = {MAX77686_BUCK1, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK2] = {MAX77686_BUCK2, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK3] = {MAX77686_BUCK3, MAX77686_OPMODE_STANDBY},
+	[MAX77686_BUCK4] = {MAX77686_BUCK4, MAX77686_OPMODE_STANDBY},
+};
+
 static struct max77686_platform_data exynos4_max77686_info = {
 	.num_regulators = ARRAY_SIZE(max77686_regulators),
 	.regulators = max77686_regulators,
@@ -2296,16 +2299,10 @@ static struct max77686_platform_data exynos4_max77686_info = {
 	.irq_base	= 0,
 	.wakeup		= 0,
 
-	.buck1_voltage[0] = 1050000,	/* 1.05V */
-	.buck1_voltage[1] = 1050000,	/* 1.05V */
-	.buck1_voltage[2] = 1050000,	/* 1.05V */
-	.buck1_voltage[3] = 1050000,	/* 1.05V */
-	.buck1_voltage[4] = 1050000,	/* 1.05V */
-	.buck1_voltage[5] = 1050000,	/* 1.05V */
-	.buck1_voltage[6] = 1000000,	/* 1.0V */
-	.buck1_voltage[7] = 950000,	/* 0.95V */
+	.opmode_data = max77686_opmode_data,
+	.ramp_rate = MAX77686_RAMP_RATE_27MV,
 
-	.buck2_voltage[0] = 1300000,	/* 1.0V */
+	.buck2_voltage[0] = 1300000,	/* 1.3V */
 	.buck2_voltage[1] = 1000000,	/* 1.0V */
 	.buck2_voltage[2] = 950000,	/* 0.95V */
 	.buck2_voltage[3] = 900000,	/* 0.9V */
@@ -2314,14 +2311,23 @@ static struct max77686_platform_data exynos4_max77686_info = {
 	.buck2_voltage[6] = 950000,	/* 0.95V */
 	.buck2_voltage[7] = 900000,	/* 0.9V */
 
-	.buck5_voltage[0] = 1100000,	/* 1.1V */
-	.buck5_voltage[1] = 1100000,	/* 1.1V */
-	.buck5_voltage[2] = 1100000,	/* 1.1V */
-	.buck5_voltage[3] = 1100000,	/* 1.1V */
-	.buck5_voltage[4] = 1100000,	/* 1.1V */
-	.buck5_voltage[5] = 1100000,	/* 1.1V */
-	.buck5_voltage[6] = 1100000,	/* 1.1V */
-	.buck5_voltage[7] = 1100000,	/* 1.1V */
+	.buck3_voltage[0] = 1037500,	/* 1.0375V */
+	.buck3_voltage[1] = 1000000,	/* 1.0V */
+	.buck3_voltage[2] = 950000,	/* 0.95V */
+	.buck3_voltage[3] = 900000,	/* 0.9V */
+	.buck3_voltage[4] = 1000000,	/* 1.0V */
+	.buck3_voltage[5] = 1000000,	/* 1.0V */
+	.buck3_voltage[6] = 950000,	/* 0.95V */
+	.buck3_voltage[7] = 900000,	/* 0.9V */
+
+	.buck4_voltage[0] = 1100000,	/* 1.1V */
+	.buck4_voltage[1] = 1000000,	/* 1.0V */
+	.buck4_voltage[2] = 950000,	/* 0.95V */
+	.buck4_voltage[3] = 900000,	/* 0.9V */
+	.buck4_voltage[4] = 1000000,	/* 1.0V */
+	.buck4_voltage[5] = 1000000,	/* 1.0V */
+	.buck4_voltage[6] = 950000,	/* 0.95V */
+	.buck4_voltage[7] = 900000,	/* 0.9V */
 };
 #ifdef CONFIG_REGULATOR_S5M8767
 /* S5M8767 Regulator */
@@ -2420,6 +2426,9 @@ static struct s5m_platform_data exynos4_s5m8767_pdata = {
 	.num_regulators		= ARRAY_SIZE(pegasus_regulators),
 	.regulators		= pegasus_regulators,
 	.cfg_pmic_irq		= s5m_cfg_irq,
+	.wakeup			= 1,
+	.opmode_data		= s5m8767_opmode_data,
+	.wtsr_smpl		= 1,
 
 	.buck2_voltage[0]	= 1250000,
 	.buck2_voltage[1]	= 1200000,
@@ -2687,31 +2696,6 @@ static struct i2c_board_info i2c_devs7[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_ANDROID_PMEM
-static struct android_pmem_platform_data pmem_pdata = {
-	.name		= "pmem",
-	.no_allocator	= 1,
-	.cached		= 0,
-	.start		= 0,
-	.size		= 0
-};
-
-static struct platform_device pmem_device = {
-	.name	= "android_pmem",
-	.id	= 0,
-	.dev	= {
-		.platform_data = &pmem_pdata
-	},
-};
-
-static void __init android_pmem_set_platdata(void)
-{
-#if defined(CONFIG_CMA)
-	pmem_pdata.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K;
-#endif
-}
-#endif
-
 #ifdef CONFIG_BATTERY_SAMSUNG
 static struct platform_device samsung_device_battery = {
 	.name	= "samsung-fake-battery",
@@ -2904,9 +2888,6 @@ static struct platform_device *smdk4412_devices[] __initdata = {
 };
 
 static struct platform_device *smdk4x12_devices[] __initdata = {
-#ifdef CONFIG_ANDROID_PMEM
-	&pmem_device,
-#endif
 	/* Samsung Power Domain */
 	&exynos4_device_pd[PD_MFC],
 	&exynos4_device_pd[PD_G3D],
@@ -3445,13 +3426,7 @@ static void __init smdk4x12_set_camera_flite_platdata(void)
 static void __init exynos4_reserve_mem(void)
 {
 	static struct cma_region regions[] = {
-#ifdef CONFIG_ANDROID_PMEM_MEMSIZE_PMEM
-		{
-			.name = "pmem",
-			.size = CONFIG_ANDROID_PMEM_MEMSIZE_PMEM * SZ_1K,
-			.start = 0,
-		},
-#endif
+#ifndef CONFIG_VIDEOBUF2_ION
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_TV
 		{
 			.name = "tv",
@@ -3554,6 +3529,13 @@ static void __init exynos4_reserve_mem(void)
 			},
 			.start = 0
 		},
+#ifdef CONFIG_VIDEO_EXYNOS_FIMC_IS_BAYER
+		{
+			.name = "fimc_is_isp",
+			.size = CONFIG_VIDEO_EXYNOS_MEMSIZE_FIMC_IS_ISP * SZ_1K,
+			.start = 0
+		},
+#endif
 #endif
 #if !defined(CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION) && \
 	defined(CONFIG_VIDEO_SAMSUNG_S5P_MFC)
@@ -3585,6 +3567,12 @@ static void __init exynos4_reserve_mem(void)
 			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC3 * SZ_1K,
 		},
 #endif
+#ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMD_VIDEO
+		{
+			.name = "video",
+			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMD_VIDEO * SZ_1K,
+		},
+#endif
 #ifdef CONFIG_VIDEO_SAMSUNG_MEMSIZE_MFC0
 		{
 			.name = "mfc0",
@@ -3606,7 +3594,6 @@ static void __init exynos4_reserve_mem(void)
 #ifdef CONFIG_EXYNOS_C2C
 		"samsung-c2c=c2c_shdmem;"
 #endif
-		"android_pmem.0=pmem;"
 		"s3cfb.0/fimd=fimd;exynos4-fb.0/fimd=fimd;"
 #ifdef CONFIG_EXYNOS4_CONTENT_PATH_PROTECTION
 		"s3cfb.0/video=video;exynos4-fb.0/video=video;"
@@ -3623,7 +3610,10 @@ static void __init exynos4_reserve_mem(void)
 #endif
 		"samsung-rp=srp;"
 		"s5p-jpeg=jpeg;"
-		"exynos4-fimc-is=fimc_is;"
+		"exynos4-fimc-is/f=fimc_is;"
+#ifdef CONFIG_VIDEO_EXYNOS_FIMC_IS_BAYER
+		"exynos4-fimc-is/i=fimc_is_isp;"
+#endif
 		"s5p-mixer=tv;"
 		"s5p-fimg2d=fimg2d;"
 #ifdef CONFIG_ION_EXYNOS
@@ -3897,9 +3887,6 @@ static void __init smdk4x12_machine_init(void)
 	i2c_devs7[0].irq = samsung_board_rev_is_0_0() ? IRQ_EINT(15) : IRQ_EINT(22);
 	i2c_register_board_info(7, i2c_devs7, ARRAY_SIZE(i2c_devs7));
 
-#ifdef CONFIG_ANDROID_PMEM
-	android_pmem_set_platdata();
-#endif
 #if defined(CONFIG_FB_S5P_MIPI_DSIM)
 	mipi_fb_init();
 #endif
@@ -4007,7 +3994,7 @@ static void __init smdk4x12_machine_init(void)
 #ifdef CONFIG_VIDEO_FIMC
 	s3c_fimc0_set_platdata(&fimc_plat);
 	s3c_fimc1_set_platdata(&fimc_plat);
-	s3c_fimc2_set_platdata(NULL);
+	s3c_fimc2_set_platdata(&fimc_plat);
 	s3c_fimc3_set_platdata(NULL);
 #ifdef CONFIG_EXYNOS_DEV_PD
 	s3c_device_fimc0.dev.parent = &exynos4_device_pd[PD_CAM].dev;

@@ -17,15 +17,18 @@
 #include "gpio-rev01-midas.h"
 #elif defined(CONFIG_MACH_MIDAS_02_BD) || defined(CONFIG_GPIO_MIDAS_02_BD)
 #include "gpio-rev02-midas.h"
+#elif defined(CONFIG_MACH_M0_CTC)
+#include "gpio-rev00-m0ctc.h"
 #elif defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_SLP_PQ)
 #include "gpio-rev00-m0.h"
 #elif defined(CONFIG_MACH_M3)
 #include "gpio-rev00-m3.h"
-#elif defined(CONFIG_MACH_C1)
+#elif defined(CONFIG_MACH_C1) && !defined(CONFIG_TARGET_LOCALE_KOR)
 #include "gpio-rev00-c1.h"
 #elif defined(CONFIG_MACH_C1CTC)
 #include "gpio-rev00-c1ctc.h"
-#elif defined(CONFIG_MACH_C1VZW) || defined(CONFIG_MACH_SLP_PQ_LTE)
+#elif (defined(CONFIG_MACH_C1VZW) || defined(CONFIG_MACH_SLP_PQ_LTE)) && \
+	!defined(CONFIG_TARGET_LOCALE_KOR)
 #include "gpio-rev00-c1vzw.h"
 #elif defined(CONFIG_MACH_JENGA)
 #include "gpio-rev00-jenga.h"
@@ -33,6 +36,9 @@
 #include "gpio-rev00-s2plus.h"
 #elif defined(CONFIG_GPIO_NAPLES_00_BD)
 #include "gpio-rev00-naples.h"
+#elif (defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW)) && \
+	defined(CONFIG_TARGET_LOCALE_KOR)
+#include "gpio-rev03-c1kor.h"
 #endif
 
 #endif /* __ASM_ARCH_GPIO_MIDAS_H */

@@ -94,15 +94,15 @@ resume_with_mmu:
 #ifdef CONFIG_CACHE_L2X0
 	/* Enable L2 cache */
 #ifdef CONFIG_ARM_TRUSTZONE
-	ldr	r0, =SMC_CMD_L2X0CTRL
-	mov	r1, #1
-	mov	r2, #0
-	mov	r3, #0
-	smc	0
+       ldr	r0, =SMC_CMD_L2X0CTRL
+       mov	r1, #1
+       mov	r2, #0
+       mov	r3, #0
+       smc	0
 #else
-	mov	r0, #1
-	ldr	r1, =S5P_VA_L2CC
-	str	r0, [r1, #0x100]
+      mov	r0, #1
+       ldr	r1, =S5P_VA_L2CC
+       str	r0, [r1, #0x100]
 #endif
 #endif
 	adr	r0, sleep_save_misc

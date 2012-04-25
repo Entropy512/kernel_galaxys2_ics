@@ -28,7 +28,7 @@
 #include <linux/slab.h>
 #include <linux/opp.h>
 #include <linux/clk.h>
-#include <mach/busfreq.h>
+#include <mach/busfreq_exynos4.h>
 
 #include <asm/mach-types.h>
 
@@ -82,12 +82,11 @@ static unsigned int exynos4_qos_value[LV_END][4] = {
 	{0x00, 0x00, 0x00, 0x00},
 	{0x00, 0x00, 0x00, 0x00},
 	{0x06, 0x03, 0x06, 0x0e},
-	{0x06, 0x03, 0x06, 0x0e},
+	{0x06, 0x03, 0x04, 0x0e},
 	{0x03, 0x0B, 0x00, 0x00},
 };
 
 #define ASV_GROUP	12
-#define BUSFREQ_VOL_COMP 50000
 
 static unsigned int asv_group_index;
 
@@ -315,17 +314,17 @@ static void exynos4x12_set_bus_volt(void)
 
 	for (i = 0 ; i < LV_END ; i++)
 		exynos4_busfreq_table[i].volt =
-			exynos4_mif_volt[asv_group_index][i] + BUSFREQ_VOL_COMP;
+			exynos4_mif_volt[asv_group_index][i];
 
 	return;
 }
 
-unsigned int exynos4x12_target(unsigned int div_index)
+void exynos4x12_target(int index)
 {
 	unsigned int tmp;
 
 	/* Change Divider - DMC0 */
-	tmp = exynos4_busfreq_table[div_index].clk_dmc0div;
+	tmp = exynos4_busfreq_table[index].clk_dmc0div;
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_DMC0);
 
@@ -340,9 +339,9 @@ unsigned int exynos4x12_target(unsigned int div_index)
 		EXYNOS4_CLKDIV_DMC1_C2C_MASK |
 		EXYNOS4_CLKDIV_DMC1_C2CACLK_MASK);
 
-	tmp |= ((clkdiv_dmc1[div_index][0] << EXYNOS4_CLKDIV_DMC1_G2D_ACP_SHIFT) |
-		(clkdiv_dmc1[div_index][1] << EXYNOS4_CLKDIV_DMC1_C2C_SHIFT) |
-		(clkdiv_dmc1[div_index][2] << EXYNOS4_CLKDIV_DMC1_C2CACLK_SHIFT));
+	tmp |= ((clkdiv_dmc1[index][0] << EXYNOS4_CLKDIV_DMC1_G2D_ACP_SHIFT) |
+		(clkdiv_dmc1[index][1] << EXYNOS4_CLKDIV_DMC1_C2C_SHIFT) |
+		(clkdiv_dmc1[index][2] << EXYNOS4_CLKDIV_DMC1_C2CACLK_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_DMC1);
 
@@ -359,11 +358,11 @@ unsigned int exynos4x12_target(unsigned int div_index)
 		EXYNOS4_CLKDIV_TOP_ACLK133_MASK |
 		EXYNOS4_CLKDIV_TOP_ONENAND_MASK);
 
-	tmp |= ((clkdiv_top[div_index][0] << EXYNOS4_CLKDIV_TOP_ACLK266_GPS_SHIFT) |
-		(clkdiv_top[div_index][1] << EXYNOS4_CLKDIV_TOP_ACLK100_SHIFT) |
-		(clkdiv_top[div_index][2] << EXYNOS4_CLKDIV_TOP_ACLK160_SHIFT) |
-		(clkdiv_top[div_index][3] << EXYNOS4_CLKDIV_TOP_ACLK133_SHIFT) |
-		(clkdiv_top[div_index][4] << EXYNOS4_CLKDIV_TOP_ONENAND_SHIFT));
+	tmp |= ((clkdiv_top[index][0] << EXYNOS4_CLKDIV_TOP_ACLK266_GPS_SHIFT) |
+		(clkdiv_top[index][1] << EXYNOS4_CLKDIV_TOP_ACLK100_SHIFT) |
+		(clkdiv_top[index][2] << EXYNOS4_CLKDIV_TOP_ACLK160_SHIFT) |
+		(clkdiv_top[index][3] << EXYNOS4_CLKDIV_TOP_ACLK133_SHIFT) |
+		(clkdiv_top[index][4] << EXYNOS4_CLKDIV_TOP_ONENAND_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_TOP);
 
@@ -376,8 +375,8 @@ unsigned int exynos4x12_target(unsigned int div_index)
 
 	tmp &= ~(EXYNOS4_CLKDIV_BUS_GDLR_MASK | EXYNOS4_CLKDIV_BUS_GPLR_MASK);
 
-	tmp |= ((clkdiv_lr_bus[div_index][0] << EXYNOS4_CLKDIV_BUS_GDLR_SHIFT) |
-		(clkdiv_lr_bus[div_index][1] << EXYNOS4_CLKDIV_BUS_GPLR_SHIFT));
+	tmp |= ((clkdiv_lr_bus[index][0] << EXYNOS4_CLKDIV_BUS_GDLR_SHIFT) |
+		(clkdiv_lr_bus[index][1] << EXYNOS4_CLKDIV_BUS_GPLR_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_LEFTBUS);
 
@@ -390,8 +389,8 @@ unsigned int exynos4x12_target(unsigned int div_index)
 
 	tmp &= ~(EXYNOS4_CLKDIV_BUS_GDLR_MASK | EXYNOS4_CLKDIV_BUS_GPLR_MASK);
 
-	tmp |= ((clkdiv_lr_bus[div_index][0] << EXYNOS4_CLKDIV_BUS_GDLR_SHIFT) |
-		(clkdiv_lr_bus[div_index][1] << EXYNOS4_CLKDIV_BUS_GPLR_SHIFT));
+	tmp |= ((clkdiv_lr_bus[index][0] << EXYNOS4_CLKDIV_BUS_GDLR_SHIFT) |
+		(clkdiv_lr_bus[index][1] << EXYNOS4_CLKDIV_BUS_GPLR_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_RIGHTBUS);
 
@@ -404,7 +403,7 @@ unsigned int exynos4x12_target(unsigned int div_index)
 
 	tmp &= ~(EXYNOS4_CLKDIV_MFC_MASK);
 
-	tmp |= ((clkdiv_sclkip[div_index][0] << EXYNOS4_CLKDIV_MFC_SHIFT));
+	tmp |= ((clkdiv_sclkip[index][0] << EXYNOS4_CLKDIV_MFC_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_MFC);
 
@@ -417,7 +416,7 @@ unsigned int exynos4x12_target(unsigned int div_index)
 
 	tmp &= ~(EXYNOS4_CLKDIV_CAM1_JPEG_MASK);
 
-	tmp |= ((clkdiv_sclkip[div_index][1] << EXYNOS4_CLKDIV_CAM1_JPEG_SHIFT));
+	tmp |= ((clkdiv_sclkip[index][1] << EXYNOS4_CLKDIV_CAM1_JPEG_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_CAM1);
 
@@ -431,18 +430,16 @@ unsigned int exynos4x12_target(unsigned int div_index)
 	tmp &= ~(EXYNOS4_CLKDIV_CAM_FIMC0_MASK | EXYNOS4_CLKDIV_CAM_FIMC1_MASK |
 		EXYNOS4_CLKDIV_CAM_FIMC2_MASK | EXYNOS4_CLKDIV_CAM_FIMC3_MASK);
 
-	tmp |= ((clkdiv_sclkip[div_index][2] << EXYNOS4_CLKDIV_CAM_FIMC0_SHIFT) |
-		(clkdiv_sclkip[div_index][2] << EXYNOS4_CLKDIV_CAM_FIMC1_SHIFT) |
-		(clkdiv_sclkip[div_index][2] << EXYNOS4_CLKDIV_CAM_FIMC2_SHIFT) |
-		(clkdiv_sclkip[div_index][2] << EXYNOS4_CLKDIV_CAM_FIMC3_SHIFT));
+	tmp |= ((clkdiv_sclkip[index][2] << EXYNOS4_CLKDIV_CAM_FIMC0_SHIFT) |
+		(clkdiv_sclkip[index][2] << EXYNOS4_CLKDIV_CAM_FIMC1_SHIFT) |
+		(clkdiv_sclkip[index][2] << EXYNOS4_CLKDIV_CAM_FIMC2_SHIFT) |
+		(clkdiv_sclkip[index][2] << EXYNOS4_CLKDIV_CAM_FIMC3_SHIFT));
 
 	__raw_writel(tmp, EXYNOS4_CLKDIV_CAM);
 
 	do {
 		tmp = __raw_readl(EXYNOS4_CLKDIV_STAT_CAM1);
 	} while (tmp & 0x1111);
-
-	return div_index;
 }
 
 unsigned int exynos4x12_get_table_index(struct opp *opp)
@@ -490,7 +487,7 @@ void exynos4x12_set_qos(unsigned int index)
 
 void exynos4x12_suspend(void)
 {
-	exynos4x12_post(LV_0);
+	/* Nothing to do */
 }
 
 void exynos4x12_resume(void)
@@ -500,7 +497,7 @@ void exynos4x12_resume(void)
 
 unsigned int exynos4x12_get_int_volt(unsigned long index)
 {
-	return exynos4_int_volt[asv_group_index][index] + BUSFREQ_VOL_COMP;
+	return exynos4_int_volt[asv_group_index][index];
 }
 
 struct opp *exynos4x12_monitor(struct busfreq_data *data)

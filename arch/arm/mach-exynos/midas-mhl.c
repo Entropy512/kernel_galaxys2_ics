@@ -150,7 +150,11 @@ static int __init midas_mhl_init(void)
 	i2c_add_devices(I2C_BUS_ID_MHL, i2c_devs_sii9234,
 			ARRAY_SIZE(i2c_devs_sii9234));
 
+#ifdef CONFIG_MACH_S2PLUS
+	sii9234_pdata.ddc_i2c_num = 5;
+#else
 	sii9234_pdata.ddc_i2c_num = (system_rev == 3 ? 16 : 5);
+#endif
 
 	i2c_add_devices(sii9234_pdata.ddc_i2c_num, &i2c_dev_hdmi_ddc, 1);
 

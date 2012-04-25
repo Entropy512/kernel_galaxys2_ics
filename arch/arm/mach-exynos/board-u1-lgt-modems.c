@@ -961,7 +961,7 @@ static int mdm_dload(void *arg, struct modemlink_dpram_control *dpctl)
 		}
 		msleep_interruptible(10);
 		count++;
-		if (count > 1000) {
+		if (count > 2000) {
 			pr_err("[LNK/E]<%s:%d>\n", __func__, __LINE__);
 			vfree(img);
 			kfree(data_param);

@@ -13,6 +13,8 @@
 #ifndef __ASM_ARCH_ASV_H
 #define __ASM_ARCH_ASV_H __FILE__
 
+#ifdef CONFIG_EXYNOS4_CPUFREQ
+
 #include <mach/regs-pmu.h>
 
 #define JUDGE_TABLE_END			NULL
@@ -87,5 +89,11 @@ struct samsung_asv {
 extern int exynos4210_asv_init(struct samsung_asv *asv_info);
 extern int exynos4x12_asv_init(struct samsung_asv *asv_info);
 void exynos4x12_set_abb_member(enum exynos4x12_abb_member abb_target, unsigned int abb_mode_value);
+
+#else
+
+/* left empty to invoke build errors */
+
+#endif
 
 #endif /* __ASM_ARCH_ASV_H */

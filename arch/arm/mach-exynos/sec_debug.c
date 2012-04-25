@@ -18,6 +18,7 @@
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/bootmem.h>
 #include <linux/kmsg_dump.h>
 
@@ -26,9 +27,15 @@
 #include <plat/map-base.h>
 #include <plat/map-s5p.h>
 #include <asm/mach/map.h>
+#include <plat/regs-watchdog.h>
+#include <linux/mfd/max8997.h> 
+
+
 
 #define SEC_DEBUG_MAGIC_PA S5P_PA_SDRAM
 #define SEC_DEBUG_MAGIC_VA phys_to_virt(SEC_DEBUG_MAGIC_PA)
+
+extern cable_type_t max8997_muic_get_attached_device(void);
 
 enum sec_debug_upload_cause_t {
 	UPLOAD_CAUSE_INIT = 0xCAFEBABE,
@@ -37,6 +44,14 @@ enum sec_debug_upload_cause_t {
 	UPLOAD_CAUSE_CP_ERROR_FATAL = 0x000000CC,
 	UPLOAD_CAUSE_USER_FAULT = 0x0000002F,
 	UPLOAD_CAUSE_HSIC_DISCONNECTED = 0x000000DD,
+};
+
+enum sec_debug_reset_reason_t {
+	RR_S = 1,
+	RR_W = 2,
+	RR_D = 3,
+	RR_N = 4,
+        RR_P = 5
 };
 
 struct sec_debug_mmu_reg_t {
@@ -136,9 +151,12 @@ static union {
 	u32 uint_val;
 } debug_level = { .en.kernel_fault = 1, };
 
+static unsigned reset_reason = RR_N;
+
 module_param_named(enable, debug_level.en.kernel_fault, ushort, 0644);
 module_param_named(enable_user, debug_level.en.user_fault, ushort, 0644);
 module_param_named(level, debug_level.uint_val, uint, 0644);
+module_param_named(reset_reason, reset_reason, uint, 0644);
 
 /* klaatu - schedule log */
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG
@@ -149,6 +167,12 @@ static struct sched_log (*gExcpTaskLogPtr)[NR_CPUS][SCHED_LOG_MAX]
 	= (&gExcpTaskLog);
 #ifdef CONFIG_SEC_DEBUG_IRQ_EXIT_LOG
 static unsigned long long gExcpIrqExitTime[NR_CPUS];
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+static struct auxiliary_log gExcpAuxLog	__cacheline_aligned;
+static struct auxiliary_log *gExcpAuxLogPtr;
+static atomic_t gExcpAuxCpuClockLogIdx = ATOMIC_INIT(-1);
 #endif
 
 static int checksum_sched_log(void)
@@ -178,6 +202,26 @@ static void map_noncached_sched_log_buf(void)
 		(((unsigned long)(&gExcpTaskLog))&0x000fffff));
 }
 #endif
+
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+static void map_noncached_aux_log_buf(void)
+{
+	struct map_desc auxlog_buf_iodesc[] = {
+		{
+			.virtual = (unsigned long)S3C_VA_AUXLOG_BUF,
+			.length = 0x100000,
+			.type = MT_DEVICE
+		}
+	};
+
+	auxlog_buf_iodesc[0].pfn = __phys_to_pfn
+		((unsigned long)((virt_to_phys(&gExcpAuxLog)&0xfff00000)));
+	iotable_init(auxlog_buf_iodesc, ARRAY_SIZE(auxlog_buf_iodesc));
+	gExcpAuxLogPtr = (void *)(S3C_VA_AUXLOG_BUF +
+		(((unsigned long)(&gExcpAuxLog))&0x000fffff));
+}
+#endif
+
 #else
 static int checksum_sched_log(void)
 {
@@ -423,15 +467,30 @@ static inline void sec_debug_hw_reset(void)
 	while (1) ;
 }
 
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+static inline void sec_debug_disable_watchdog(void)
+{
+	writel(0, S3C2410_WTCON);
+	pr_err("(%s) disable watchdog reset while printing log\n", __func__);
+}
+#endif
+
 static int sec_debug_panic_handler(struct notifier_block *nb,
 				   unsigned long l, void *buf)
 {
-	if (!debug_level.en.kernel_fault)
-		return -1;
+	cable_type_t  type = max8997_muic_get_attached_device();
+
+	if ((type != CABLE_TYPE_JIG_UART_OFF ||
+		type != CABLE_TYPE_JIG_UART_OFF_VB) && (strcmp(buf, "Commercial Dump"))) 
+    		if (!debug_level.en.kernel_fault)
+    			return -1;
 
 	sec_debug_set_upload_magic(0x66262564);
 
-	if (!strcmp(buf, "User Fault"))
+	if ((type == CABLE_TYPE_JIG_UART_OFF ||
+			type == CABLE_TYPE_JIG_UART_OFF_VB) && (!strcmp(buf, "Commercial Dump"))) 
+		sec_debug_set_upload_cause(UPLOAD_CAUSE_FORCED_UPLOAD);
+	else if (!strcmp(buf, "User Fault"))
 		sec_debug_set_upload_cause(UPLOAD_CAUSE_USER_FAULT);
 	else if (!strcmp(buf, "Crash Key"))
 		sec_debug_set_upload_cause(UPLOAD_CAUSE_FORCED_UPLOAD);
@@ -444,6 +503,9 @@ static int sec_debug_panic_handler(struct notifier_block *nb,
 
 	pr_err("(%s) checksum_sched_log: %x\n", __func__, checksum_sched_log());
 
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	sec_debug_disable_watchdog();
+#endif
 	show_state();
 
 	sec_debug_dump_stack();
@@ -452,14 +514,77 @@ static int sec_debug_panic_handler(struct notifier_block *nb,
 	return 0;
 }
 
+#define LOCKUP_FIRST_KEY KEY_VOLUMEUP
+#define LOCKUP_SECOND_KEY KEY_POWER
+#define LOCKUP_THIRD_KEY KEY_POWER
+#define LOCKUP_EXTRA_KEY KEY_VOLUMEDOWN
+
 void sec_debug_check_crash_key(unsigned int code, int value)
 {
+    	static enum { NONE, STEP1, STEP2, STEP3, STEP4, STEP5, STEP6, STEP7, STEP8, STEP9, STEP10} state = NONE;
 	static bool volup_p;
 	static bool voldown_p;
 	static int loopcount;
 
-	if (!debug_level.en.kernel_fault)
+	if (!debug_level.en.kernel_fault) {
+        switch (state) 
+		{
+		case NONE:
+			state = (code == LOCKUP_FIRST_KEY && value) ? STEP1 : NONE;
+			break;
+		case STEP1:
+			state = (code == LOCKUP_EXTRA_KEY && value) ? STEP2 : NONE;
+			break;
+		case STEP2:
+			state = (code == LOCKUP_FIRST_KEY && !value) ? STEP3 : NONE;
+			break;
+		case STEP3:
+			state = (code == LOCKUP_FIRST_KEY && value) ? STEP4 : NONE;
+			break;
+		case STEP4:
+			state = (code == LOCKUP_FIRST_KEY && !value) ? STEP5 : NONE;
+			break;
+		case STEP5:
+			state = (code == LOCKUP_FIRST_KEY && value) ? STEP6 : NONE;
+			break;
+		case STEP6:
+			state = (code == LOCKUP_EXTRA_KEY && !value) ? STEP7 : NONE;
+			break;
+		case STEP7:
+			state = (code == LOCKUP_EXTRA_KEY && value) ? STEP8 : NONE;
+			break;
+		case STEP8:
+			state = (code == LOCKUP_EXTRA_KEY && !value) ? STEP9 : NONE;
+			break;
+		case STEP9:
+			state = (code == LOCKUP_EXTRA_KEY && value) ? STEP10 : NONE;
+			break;
+		case STEP10:
+			if (code == LOCKUP_THIRD_KEY && value) 
+			{
+				
+				cable_type_t  type = max8997_muic_get_attached_device();
+				
+				if (type == CABLE_TYPE_JIG_UART_OFF ||
+					type == CABLE_TYPE_JIG_UART_OFF_VB) {
+					panic("Commercial Dump");
+				}
+			}					
+			else
+				state = NONE;
+
+			break;
+		default:
+			break;
+		}
 		return;
+    }
+
+	/* Must be deleted later */
+#if defined(CONFIG_MACH_MIDAS)
+	pr_info("%s:key code(%d) value(%d)\n",
+		__func__, code, value);
+#endif
 
 	/* Enter Force Upload
 	 *  Hold volume down key first
@@ -468,9 +593,15 @@ void sec_debug_check_crash_key(unsigned int code, int value)
 	 */
 	if (value) {
 		if (code == KEY_VOLUMEUP)
+		{
+			pr_info("Debug Checkup high1\n");
 			volup_p = true;
+		}
 		if (code == KEY_VOLUMEDOWN)
+		{
+			pr_info("Debug Checkup low1\n");
 			voldown_p = true;
+		}
 		if (!volup_p && voldown_p) {
 			if (code == KEY_POWER) {
 				pr_info
@@ -480,10 +611,17 @@ void sec_debug_check_crash_key(unsigned int code, int value)
 					panic("Crash Key");
 			}
 		}
-	} else {
+	} 
+	else 
+	{
 		if (code == KEY_VOLUMEUP)
+		{
+			pr_info("Debug Checkup high0\n");
 			volup_p = false;
-		if (code == KEY_VOLUMEDOWN) {
+		}
+		if (code == KEY_VOLUMEDOWN) 
+		{	
+			pr_info("Debug Checkup low0\n");
 			loopcount = 0;
 			voldown_p = false;
 		}
@@ -544,7 +682,12 @@ __init int sec_debug_init(void)
 	sec_debug_set_upload_cause(UPLOAD_CAUSE_INIT);
 
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG_NONCACHED
-	map_noncached_sched_log_buf();
+	if (debug_level.en.kernel_fault)
+		map_noncached_sched_log_buf();
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+	map_noncached_aux_log_buf();
 #endif
 
 	kmsg_dump_register(&sec_dumper);
@@ -565,8 +708,12 @@ int sec_debug_level(void)
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG
 void sec_debug_task_sched_log(int cpu, struct task_struct *task)
 {
-	unsigned i =
-	    atomic_inc_return(&gExcpTaskLogIdx[cpu]) & (SCHED_LOG_MAX - 1);
+	unsigned i = 0;
+
+	if (!debug_level.en.kernel_fault)
+		return;
+
+	i = atomic_inc_return(&gExcpTaskLogIdx[cpu]) & (SCHED_LOG_MAX - 1);
 	(*gExcpTaskLogPtr)[cpu][i].time = cpu_clock(cpu);
 	strcpy((*gExcpTaskLogPtr)[cpu][i].log.task.comm, task->comm);
 	(*gExcpTaskLogPtr)[cpu][i].log.task.pid = task->pid;
@@ -575,9 +722,15 @@ void sec_debug_task_sched_log(int cpu, struct task_struct *task)
 
 void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en)
 {
-	int cpu = smp_processor_id();
-	unsigned i =
-	    atomic_inc_return(&gExcpTaskLogIdx[cpu]) & (SCHED_LOG_MAX - 1);
+	int cpu = 0; 
+	unsigned i = 0;
+
+	if (!debug_level.en.kernel_fault)
+		return;
+
+	cpu = smp_processor_id();
+	i = atomic_inc_return(&gExcpTaskLogIdx[cpu]) & (SCHED_LOG_MAX - 1);
+	
 	(*gExcpTaskLogPtr)[cpu][i].time = cpu_clock(cpu);
 	(*gExcpTaskLogPtr)[cpu][i].log.irq.cpu = cpu;
 	(*gExcpTaskLogPtr)[cpu][i].log.irq.irq = irq;
@@ -588,11 +741,47 @@ void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en)
 #ifdef CONFIG_SEC_DEBUG_IRQ_EXIT_LOG
 void sec_debug_irq_last_exit_log(void)
 {
-	int cpu = smp_processor_id();
+	int cpu = 0; 
+
+	if (!debug_level.en.kernel_fault)
+		return;	
+	
+	cpu = smp_processor_id();
 	gExcpIrqExitTime[cpu] = cpu_clock(cpu);
 }
 #endif
 #endif /* CONFIG_SEC_DEBUG_SCHED_LOG */
+
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+void sec_debug_aux_log(int idx, char *fmt, ...)
+{
+	va_list args;
+	char buf[128];
+	unsigned i;
+	int cpu = raw_smp_processor_id();
+
+	if (!gExcpAuxLogPtr)
+		return;
+
+	va_start(args, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+
+	switch (idx) {
+	case SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE:
+		i = atomic_inc_return(&gExcpAuxCpuClockLogIdx)
+			& (AUX_LOG_CPU_CLOCK_MAX - 1);
+		(*gExcpAuxLogPtr).CpuClockLog[i].time = cpu_clock(cpu);
+		(*gExcpAuxLogPtr).CpuClockLog[i].cpu = cpu;
+		strncpy((*gExcpAuxLogPtr).CpuClockLog[i].log,
+			buf, AUX_LOG_LENGTH);
+		break;
+
+	default:
+		break;
+	}
+}
+#endif
 
 /* klaatu - semaphore log */
 #ifdef CONFIG_SEC_DEBUG_SEMAPHORE_LOG
@@ -786,6 +975,49 @@ static int __init sec_debug_user_fault_init(void)
 
 device_initcall(sec_debug_user_fault_init);
 #endif
+
+static int set_reset_reason_proc_show(struct seq_file *m, void *v)
+{
+	printk("%s : %d", __func__, reset_reason);
+	if (reset_reason == RR_S)
+		seq_printf(m, "SPON\n");
+	else if(reset_reason == RR_W)
+		seq_printf(m, "WPON\n");
+	else if(reset_reason == RR_D)
+		seq_printf(m, "DPON\n");
+        else if(reset_reason == RR_P)
+		seq_printf(m, "PPON\n");
+	else
+		seq_printf(m, "NPON\n");
+
+	return 0;
+}
+
+static int sec_reset_reason_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, set_reset_reason_proc_show, NULL);
+}
+
+static const struct file_operations sec_reset_reason_proc_fops = {
+	.open		= sec_reset_reason_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init sec_debug_reset_reason_init(void)
+{
+	struct proc_dir_entry *entry;
+
+	entry = proc_create("reset_reason", S_IWUGO, NULL,
+			    &sec_reset_reason_proc_fops);
+	if (!entry)
+		return -ENOMEM;
+
+	return 0;
+}
+
+device_initcall(sec_debug_reset_reason_init);
 
 int sec_debug_magic_init(void)
 {

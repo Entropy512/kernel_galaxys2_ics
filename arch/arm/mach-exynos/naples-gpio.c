@@ -153,7 +153,7 @@ static unsigned int exynos4_sleep_gpio_table_common[][3] = {
 	{EXYNOS4_GPF1(5),  S3C_GPIO_SLP_INPUT, S3C_GPIO_PULL_DOWN}, /* NC */
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
 	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M3) || \
-	defined(CONFIG_MACH_C1CTC) || defined(CONFIG_MACH_SLP_NAPLES)
+	defined(CONFIG_MACH_SLP_NAPLES)
 	/* GPF1(6) M0, C1 PDA_ACTIVE, let cp know AP sleep status*/
 	{EXYNOS4_GPF1(6),  S3C_GPIO_SLP_OUT0, S3C_GPIO_PULL_NONE},
 #else
@@ -788,7 +788,7 @@ static unsigned int m0_sleep_gpio_table[][3] = {
 	{EXYNOS4_GPF1(4),  S3C_GPIO_SLP_INPUT, S3C_GPIO_PULL_NONE}, /* NC */
 	{EXYNOS4_GPF1(5),  S3C_GPIO_SLP_INPUT, S3C_GPIO_PULL_NONE}, /* NC */
 #if defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_C1VZW) || \
-	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_C1CTC)
+	defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_SLP_NAPLES)
 	/* GPF1(6) M0, C1 PDA_ACTIVE, let cp know AP sleep status*/
 	{EXYNOS4_GPF1(6),  S3C_GPIO_SLP_OUT0, S3C_GPIO_PULL_NONE},
 #else
@@ -993,7 +993,7 @@ static unsigned int m0_sleep_gpio_table[][3] = {
 	{EXYNOS4212_GPM3(0),  S3C_GPIO_SLP_OUT0, S3C_GPIO_PULL_NONE}, /* NC */
 	{EXYNOS4212_GPM3(1),  S3C_GPIO_SLP_OUT0, S3C_GPIO_PULL_NONE}, /* NC */
 	{EXYNOS4212_GPM3(2),  S3C_GPIO_SLP_OUT0, S3C_GPIO_PULL_NONE}, /* NC */
-#if defined(CONFIG_MACH_M0)
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_SLP_NAPLES)
 	/* GPM3(3) M0, CP_RESET_REQ hold high */
 	{EXYNOS4212_GPM3(3),  S3C_GPIO_SLP_OUT1, S3C_GPIO_PULL_NONE},
 #else

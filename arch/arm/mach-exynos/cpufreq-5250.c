@@ -171,18 +171,23 @@ static const unsigned int asv_voltage[CPUFREQ_LEVEL_END][NUM_ASV_GROUP] = {
 	{ 1200000 },	/* L9 */
 	{ 1150000 },	/* L10 */
 	{ 1100000 },	/* L11 */
-	{ 1050000 },	/* L12 */
-	{ 1025000 },	/* L13 */
-	{ 1000000 },	/* L14 */
-	{ 950000 },	/* L15 */
-	{ 925000 },	/* L16 */
-	{ 875000 },	/* L17 */
-	{ 875000 },	/* L18 */
-	{ 850000 },	/* L19 */
-	{ 850000 },	/* L20 */
+	{ 1175000 },	/* L12 */
+	{ 1125000 },	/* L13 */
+	{ 1075000 },	/* L14 */
+	{ 1050000 },	/* L15 */
+	{ 1000000 },	/* L16 */
+	{ 950000 },	/* L17 */
+	{ 925000 },	/* L18 */
+	{ 925000 },	/* L19 */
+	{ 900000 },	/* L20 */
 };
 
-#define INT_VOLT	1100000	/* 1.10v */
+#if defined(CONFIG_EXYNOS5250_ABB_WA)
+#define ARM_RBB		6	/* +300mV */
+unsigned int exynos5250_arm_volt;
+
+#define INT_VOLT	1050000
+#endif
 
 static void set_clkdiv(unsigned int div_index)
 {
@@ -270,36 +275,41 @@ bool exynos5250_pms_change(unsigned int old_index, unsigned int new_index)
 	return (old_pm == new_pm) ? 0 : 1;
 }
 
-static void exynos5250_set_abbg(unsigned int new_index)
+#if defined(CONFIG_EXYNOS5250_ABB_WA)
+static DEFINE_SPINLOCK(abb_lock);
+void exynos5250_set_arm_abbg(unsigned int arm_volt, unsigned int int_volt)
 {
 	unsigned int setbits = 8;
-	unsigned int new_volt, diff_volt;
-	unsigned int tmp;
+	unsigned int tmp, diff_volt;
+	unsigned long flag;
 
-	new_volt = asv_voltage[new_index][0];
-
-	if (new_volt >= INT_VOLT) {
-		diff_volt = new_volt - INT_VOLT;
+	spin_lock_irqsave(&abb_lock, flag);
+	if (arm_volt >= int_volt) {
+		diff_volt = arm_volt - int_volt;
 		setbits += diff_volt / 50000;
 	} else {
-		diff_volt = INT_VOLT - new_volt;
+		diff_volt = int_volt - arm_volt;
 		setbits -= diff_volt / 50000;
 	}
-	pr_debug("%s: index:%d NEW_VOLT:%d, ABBG:%d\n", __func__,
-		new_index, new_volt, setbits);
-	tmp = __raw_readl(EXYNOS5_ABBG_CONTROL);
+	tmp = __raw_readl(EXYNOS5_ABBG_ARM_CONTROL);
 	tmp &= ~(0x1f | (1 << 31) | (1 << 7));
-	tmp |= (setbits | (1 << 31) | (1 << 7));
-	__raw_writel(tmp, EXYNOS5_ABBG_CONTROL);
+	tmp |= ((setbits + ARM_RBB) | (1 << 31) | (1 << 7));
+	__raw_writel(tmp, EXYNOS5_ABBG_ARM_CONTROL);
+	spin_unlock_irqrestore(&abb_lock, flag);
 }
+EXPORT_SYMBOL(exynos5250_set_arm_abbg);
+#endif
 
 static void exynos5250_set_frequency(unsigned int old_index,
 				  unsigned int new_index)
 {
 	unsigned int tmp;
+#if defined(CONFIG_EXYNOS5250_ABB_WA)
+	unsigned int voltage;
 
-	exynos5250_set_abbg(new_index);
-
+	voltage = asv_voltage[new_index][0];
+	exynos5250_set_arm_abbg(voltage, INT_VOLT);
+#endif
 	if (old_index > new_index) {
 		if (!exynos5250_pms_change(old_index, new_index)) {
 			/* 1. Change the system clock divider values */
@@ -445,7 +455,7 @@ int exynos5250_cpufreq_init(struct exynos_dvfs_info *info)
 
 #ifdef ENABLE_CLKOUT
 	tmp = __raw_readl(EXYNOS5_CLKOUT_CMU_CPU);
-	tmp &= ~0xffff;
+	p &= ~0xffff;
 	tmp |= 0x1904;
 	__raw_writel(tmp, EXYNOS5_CLKOUT_CMU_CPU);
 
@@ -455,7 +465,6 @@ int exynos5250_cpufreq_init(struct exynos_dvfs_info *info)
 	__raw_writel(tmp, S5P_PMU_DEBUG);
 
 #endif
-
 	return 0;
 
 err_mout_apll:
