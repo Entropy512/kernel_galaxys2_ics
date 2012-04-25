@@ -162,7 +162,6 @@ static int setdma_tx(struct s3c_ep *ep, struct s3c_request *req)
 		pktcnt = (length - 1)/(ep->ep.maxpacket) + 1;
 
 #ifdef DED_TX_FIFO
-
 	/* Write the FIFO number to be used for this endpoint */
 	ctrl = __raw_readl(udc->regs + S3C_UDC_OTG_DIEPCTL(ep_num));
 	ctrl &= ~DEPCTL_TXFNUM_MASK;;

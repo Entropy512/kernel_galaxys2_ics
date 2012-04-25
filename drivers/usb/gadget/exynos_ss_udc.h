@@ -39,10 +39,11 @@
 #define EXYNOS_USB3_U1_DEV_EXIT_LAT	0
 #define EXYNOS_USB3_U2_DEV_EXIT_LAT	0x20
 
-#define call_gadget(_udc, _entry)				\
+#define call_gadget(_udc, _entry)	do {			\
 	if ((_udc)->gadget.speed != USB_SPEED_UNKNOWN &&	\
 	    (_udc)->driver && (_udc)->driver->_entry)		\
-		(_udc)->driver->_entry(&(_udc)->gadget);
+		(_udc)->driver->_entry(&(_udc)->gadget);	\
+} while (0)
 
 /**
  * States of EP0
@@ -167,7 +168,7 @@ struct exynos_ss_udc_ep {
 	unsigned int		halted:1;
 	unsigned int		enabled:1;
 	unsigned int		wedged:1;
-	bool			not_ready;
+	unsigned int		not_ready:1;
 
 	char			name[10];
 };
@@ -178,7 +179,6 @@ struct exynos_ss_udc_ep {
  * @driver: USB gadget driver
  * @plat: The platform specific configuration data.
  * @regs: The memory area mapped for accessing registers.
- * @regs_res: The resource that was allocated when claiming register space.
  * @irq: The IRQ number we are using.
  * @clk: The clock we are using.
  * @release: The core release number.
@@ -202,7 +202,6 @@ struct exynos_ss_udc {
 	struct exynos_ss_udc_plat	*plat;
 
 	void __iomem		*regs;
-	struct resource		*regs_res;
 	int			irq;
 	struct clk		*clk;
 

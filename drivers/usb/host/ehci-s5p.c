@@ -439,8 +439,43 @@ exit:
 }
 static DEVICE_ATTR(ehci_power, 0664, show_ehci_power, store_ehci_power);
 
+#if defined(CONFIG_LINK_DEVICE_HSIC) || defined(CONFIG_LINK_DEVICE_USB)
+static ssize_t store_port_power(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct s5p_ehci_platdata *pdata = pdev->dev.platform_data;
+
+	int power_on, port;
+	int err;
+
+	err = sscanf(buf, "%d %d", &power_on, &port);
+	if (err < 2 || port < 0 || port > 3 || power_on < 0 || power_on > 1) {
+		pr_err("port power fail: port_power 1 2(port 2 enable 1)\n");
+		return count;
+	}
+
+	pr_debug("%s: Port:%d power: %d\n", __func__, port, power_on);
+	device_lock(dev);
+	s5p_ehci_port_control(pdev, port, power_on);
+
+	/*HSIC IPC control the ACTIVE_STATE*/
+	if (pdata && pdata->noti_host_states && port == CP_PORT)
+		pdata->noti_host_states(pdev, power_on ? S5P_HOST_ON :
+			S5P_HOST_OFF);
+	device_unlock(dev);
+	return count;
+}
+static DEVICE_ATTR(port_power, 0664, NULL, store_port_power);
+#endif
+
 static inline int create_ehci_sys_file(struct ehci_hcd *ehci)
 {
+#if defined(CONFIG_LINK_DEVICE_HSIC) || defined(CONFIG_LINK_DEVICE_USB)
+	BUG_ON(device_create_file(ehci_to_hcd(ehci)->self.controller,
+			&dev_attr_port_power));
+#endif
 	return device_create_file(ehci_to_hcd(ehci)->self.controller,
 			&dev_attr_ehci_power);
 }
@@ -449,6 +484,10 @@ static inline void remove_ehci_sys_file(struct ehci_hcd *ehci)
 {
 	device_remove_file(ehci_to_hcd(ehci)->self.controller,
 			&dev_attr_ehci_power);
+#if defined(CONFIG_LINK_DEVICE_HSIC) || defined(CONFIG_LINK_DEVICE_USB)
+	device_remove_file(ehci_to_hcd(ehci)->self.controller,
+			&dev_attr_port_power);
+#endif
 }
 
 static int __devinit s5p_ehci_probe(struct platform_device *pdev)

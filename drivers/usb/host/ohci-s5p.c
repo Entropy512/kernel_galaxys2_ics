@@ -110,6 +110,12 @@ static int ohci_hcd_s5p_drv_resume(struct device *dev)
 	if (pdata->phy_init)
 		pdata->phy_init(pdev, S5P_USB_PHY_HOST);
 
+	/* if OHCI was off, hcd was removed */
+	if (!s5p_ohci->power_on) {
+		dev_info(dev, "Nothing to do for the device (power off)\n");
+		return 0;
+	}
+
 	/* Mark hardware accessible again as we are out of D3 state by now */
 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 

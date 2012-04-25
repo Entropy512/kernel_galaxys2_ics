@@ -146,11 +146,14 @@ static int host_notifier_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 
-	dev_info(&pdev->dev, "notifier_prove\n");
-
-	ninfo.pdata = pdev->dev.platform_data;
-	if (!ninfo.pdata)
+	if (pdev && pdev->dev.platform_data)
+		ninfo.pdata = pdev->dev.platform_data;
+	else {
+		pr_err("host_notifier: platform_data is null.\n");
 		return -ENODEV;
+	}
+
+	dev_info(&pdev->dev, "notifier_prove\n");
 
 	if (ninfo.pdata->thread_enable) {
 		ret = gpio_request(ninfo.pdata->gpio, "host_notifier");
