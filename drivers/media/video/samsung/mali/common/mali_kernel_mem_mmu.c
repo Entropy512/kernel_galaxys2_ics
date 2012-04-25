@@ -1204,7 +1204,7 @@ static _mali_osk_errcode_t mali_kernel_memory_mmu_interrupt_handler_upper_half(v
 
 	MALI_DEBUG_ASSERT_POINTER(mmu);
 
-	/* Pointer to core holding this MMU */
+        /* Pointer to core holding this MMU */
 	core = (mali_core_renderunit *)mmu->core;
 	if(core && (CORE_OFF == core->state))
 	{
@@ -2649,8 +2649,8 @@ static void mali_address_manager_release(mali_memory_allocation * descriptor)
 		}
 		else
 		{
-			int j;
-
+			int j;			
+			
 			for (j = first_pte_idx; j <= last_pte_idx; j++)
 			{
 				_mali_osk_mem_iowrite32(session_data->page_entries_mapped[i], j * sizeof(u32), 0);

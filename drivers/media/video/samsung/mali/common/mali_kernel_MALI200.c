@@ -853,7 +853,7 @@ static int subsystem_mali200_irq_handler_bottom_half(struct mali_core_renderunit
 		_mali_osk_atomic_inc(&job->session->jobs_ended);
 #endif
 		
-		pr_debug("SPI_GPU_PP%u Idle\n", core->core_number);
+        	pr_debug("SPI_GPU_PP%u Idle\n", core->core_number);
              
 		return JOB_STATUS_END_SUCCESS; /* reschedule */
 	}

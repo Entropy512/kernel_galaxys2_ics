@@ -730,7 +730,7 @@ static _mali_osk_errcode_t subsystem_maligp_start_job(mali_core_job * job, mali_
 										startcmd);
 	_mali_osk_write_mem_barrier();
 
-	pr_debug("SPI_GPU_GP Start\n");
+	trace_printk("SPI_GPU_GP Start\n");
 #if MALI_TIMELINE_PROFILING_ENABLED
 	_mali_profiling_add_event(MALI_PROFILING_EVENT_TYPE_SINGLE | MALI_PROFILING_MAKE_EVENT_CHANNEL_GP(core->core_number) | MALI_PROFILING_EVENT_REASON_SINGLE_HW_FLUSH,
 	                          jobgp->user_input.frame_builder_id, jobgp->user_input.flush_id, 0, 0, 0);
@@ -949,7 +949,7 @@ static int subsystem_maligp_irq_handler_bottom_half(mali_core_renderunit* core)
 #if MALI_STATE_TRACKING
 		_mali_osk_atomic_inc(&job->session->jobs_ended);
 #endif
-		pr_debug("SPI_GPU_GP Idle\n");
+		trace_printk("SPI_GPU_GP Idle\n");  
 		return JOB_STATUS_END_SUCCESS; /* core idle */
 	}
 	/* sw watchdog timeout handling or time to do hang checking ? */

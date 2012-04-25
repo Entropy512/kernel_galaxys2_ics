@@ -1412,7 +1412,7 @@ _mali_osk_errcode_t mali_core_session_add_job(mali_core_session * session, mali_
 	/* Setting the default value; No job to return */
 	MALI_DEBUG_ASSERT_POINTER(job_return);
 	*job_return = NULL;
-
+	
 	if (mali_job_queue_empty(session))
 	{
 		/* Add session to the wait list only if it didn't already have a job waiting. */

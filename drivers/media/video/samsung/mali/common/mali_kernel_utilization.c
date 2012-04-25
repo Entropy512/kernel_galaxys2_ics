@@ -201,7 +201,7 @@ void mali_utilization_core_end(u64 time_now)
 			 */
 			time_now = work_start_time;
 		}
-
+			
 		accumulated_work_time += (time_now - work_start_time);
 		work_start_time = 0;
 
