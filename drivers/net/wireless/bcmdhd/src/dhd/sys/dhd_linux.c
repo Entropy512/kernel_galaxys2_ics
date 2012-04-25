@@ -540,7 +540,7 @@ static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long actio
 {
 	int ret = NOTIFY_DONE;
 
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39))
+//#if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39))
 	switch (action) {
 	case PM_HIBERNATION_PREPARE:
 	case PM_SUSPEND_PREPARE:
@@ -554,7 +554,7 @@ static int dhd_sleep_pm_callback(struct notifier_block *nfb, unsigned long actio
 		break;
 	}
 	smp_mb();
-#endif
+//#endif
 	return ret;
 }
 
@@ -3363,7 +3363,6 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef BCM43241_CHIP
 	int mimo_bw_cap = 1;
 #endif /* BCM43241_CHIP */
-
 	DHD_TRACE(("Enter %s\n", __FUNCTION__));
 	dhd->op_mode = 0;
 #ifdef GET_CUSTOM_MAC_ENABLE

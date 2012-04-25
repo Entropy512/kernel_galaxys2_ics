@@ -114,7 +114,7 @@ do {									\
 #define WL_SCAN_RETRY_MAX	3
 #define WL_NUM_PMKIDS_MAX	MAXPMKID
 #define WL_SCAN_BUF_MAX			(1024 * 8)
-#define WL_TLV_INFO_MAX			1024
+#define WL_TLV_INFO_MAX 	1500 /* customer want to large size IE, so increase ie length */
 #define WL_SCAN_IE_LEN_MAX      2048
 #define WL_BSS_INFO_MAX			2048
 #define WL_ASSOC_INFO_MAX	512

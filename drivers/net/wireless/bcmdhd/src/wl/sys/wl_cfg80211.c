@@ -441,6 +441,7 @@ void reset_roam_cache(void);
 void add_roam_cache(wl_bss_info_t *bi);
 int  get_roam_channel_list(int target_chan, chanspec_t *channels, const wlc_ssid_t *ssid);
 void print_roam_cache(void);
+void set_roam_band(int band);
 #endif
 #define CHECK_SYS_UP(wlpriv)							\
 do {									\
@@ -2699,6 +2700,12 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	if (chan) {
 #ifdef ROAM_CHANNEL_CACHE
 		wlc_ssid_t ssid;
+		int band;
+
+		err = wldev_get_band(dev, &band);
+		if (!err) {
+			set_roam_band(band);
+		}
 
 		wl->channel = ieee80211_frequency_to_channel(chan->center_freq);
 		memcpy(ssid.SSID, sme->ssid, sme->ssid_len);
@@ -4032,9 +4039,9 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 					add_len = customer_ie->len + sizeof(customer_ie->len)
 						+ sizeof(customer_ie->id);
 					customer_ie_len += add_len;
-					ptr += add_len;
+					ptr = (u8*)customer_ie + add_len;
 					remain_len -= add_len;
-					printf("Customer IE exist(len:%d)\n", add_len);
+                    WL_INFO(("Customer IE exist(len:%d)\n", add_len));
 				}
 				else
 					break;
@@ -4154,6 +4161,7 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 			wl->block_gon_req_tx_count--;
 			WL_ERR(("Drop gon req tx action frame: count %d\n", wl->block_gon_req_tx_count));
 			cfg80211_mgmt_tx_status(ndev, *cookie, buf, len, true, GFP_KERNEL);
+            kfree(af_params);
 			goto exit;
 		} else if (act_frm->subtype == P2P_PAF_GON_CONF) {
 			/* if go formation done, clear it */
@@ -5163,8 +5171,10 @@ static s32 wl_inform_single_bss(struct wl_priv *wl, struct wl_bss_info *bi)
 	else
 		band = wiphy->bands[IEEE80211_BAND_5GHZ];
 
-	if(band==NULL)
+	if(band==NULL) {
+		kfree(notif_bss_info);
 		return err;
+	}
 
 	notif_bss_info->rssi = dtoh16(bi->RSSI);
 	memcpy(mgmt->bssid, &bi->BSSID, ETHER_ADDR_LEN);
