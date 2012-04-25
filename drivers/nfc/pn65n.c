@@ -385,7 +385,13 @@ static int pn65n_probe(struct i2c_client *client,
 	dev_info(&pn65n_dev->client->dev, "%s : requesting IRQ %d\n", __func__,
 		 client->irq);
 	pn65n_dev->irq_enabled = true;
-	gpio_direction_input(pn65n_dev->irq_gpio);
+	ret = gpio_direction_input(pn65n_dev->irq_gpio);
+	if (ret) {
+		dev_err(&client->dev, "%s : gpio_direction_input failed. ret = %d\n",
+			__FILE__, ret);
+		goto err_request_irq_failed;
+	}
+
 	ret = request_irq(client->irq, pn65n_dev_irq_handler,
 			  IRQF_TRIGGER_RISING, "pn65n", pn65n_dev);
 	if (ret) {

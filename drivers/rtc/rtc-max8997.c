@@ -569,13 +569,16 @@ static void max8997_rtc_enable_wtsr(struct max8997_rtc_info *info, bool enable)
 			enable ? "enable" : "disable");
 
 	ret = max8997_update_reg(info->rtc, MAX8997_WTSR_SMPL_CNTL, val, mask);
+
 	if (ret < 0) {
 		dev_err(info->dev, "%s: fail to update WTSR reg(%d)\n",
 				__func__, ret);
 		return;
 	}
+	dev_info(info->dev, "%s: max8997_update_reg()\n", __func__);
 
 	max8997_rtc_set_update_reg(info);
+	dev_info(info->dev, "%s: max8997_rtc_set_update_reg()\n", __func__);
 }
 
 static void max8997_rtc_enable_smpl(struct max8997_rtc_info *info, bool enable)
@@ -657,8 +660,11 @@ static int __devinit max8997_rtc_probe(struct platform_device *pdev)
 		goto err_rtc;
 	}
 
-	max8997_rtc_enable_wtsr(info, true);
-	max8997_rtc_enable_smpl(info, true);
+    // disable wtsr fuction becuase of lockup issue - U1 KOR
+#if 0
+    max8997_rtc_enable_wtsr(info, true);
+#endif
+    max8997_rtc_enable_smpl(info, true);
 
 	device_init_wakeup(&pdev->dev, 1);
 
@@ -721,8 +727,11 @@ static void max8997_rtc_shutdown(struct platform_device *pdev)
 	int i;
 	u8 val = 0;
 
+    // disable wtsr fuction becuase of lockup issue - U1 KOR
+#if 0
 	for (i = 0; i < 3; i++) {
 		max8997_rtc_enable_wtsr(info, false);
+		pr_info("%s: max8997_rtc_enable_wtsr()\n", __func__);
 		max8997_read_reg(info->rtc, MAX8997_WTSR_SMPL_CNTL, &val);
 		pr_info("%s: WTSR_SMPL reg(0x%02x)\n", __func__, val);
 		if (val & WTSR_EN_MASK)
@@ -732,6 +741,10 @@ static void max8997_rtc_shutdown(struct platform_device *pdev)
 			break;
 		}
 	}
+	pr_info("%s: Done...\n", __func__);
+#else
+	pr_info("%s: no operation's here currently...\n", __func__);
+#endif
 }
 
 static const struct platform_device_id rtc_id[] = {

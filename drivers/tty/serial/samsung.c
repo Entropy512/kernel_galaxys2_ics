@@ -66,10 +66,16 @@
 /* flag to ignore all characters coming in */
 #define RXSTAT_DUMMY_READ (0x10000000)
 
-#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS)
+#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS) || \
+	defined(CONFIG_MACH_SLP_PQ)
 /* Devices	*/
 #define CONFIG_BT_S3C_UART	0
 #define CONFIG_GPS_S3C_UART	1
+#endif
+
+#ifdef CONFIG_SERIAL_SAMSUNG_CONSOLE_SWITCH
+static unsigned uart_debug; /* Initialized automatically with 0 by compiler */
+module_param_named(uart_debug, uart_debug, uint, 0644);
 #endif
 
 static inline struct s3c24xx_uart_port *to_ourport(struct uart_port *port)
@@ -358,7 +364,8 @@ static void s3c24xx_serial_set_mctrl(struct uart_port *port, unsigned int mctrl)
 {
 	/* todo - possibly remove AFC and do manual CTS */
 
-#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS)
+#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS) || \
+	defined(CONFIG_MACH_SLP_PQ)
 	unsigned int umcon = 0;
 	umcon = rd_regl(port, S3C2410_UMCON);
 
@@ -714,7 +721,8 @@ static void s3c24xx_serial_set_termios(struct uart_port *port,
 	/*
 	 * Ask the core to calculate the divisor for us.
 	 */
-#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS)
+#if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_MIDAS) || \
+	defined(CONFIG_MACH_SLP_PQ)
 	baud = uart_get_baud_rate(port, termios, old, 0, 4000000); // 4Mbps
 #else
 	baud = uart_get_baud_rate(port, termios, old, 0, 3000000);
@@ -934,7 +942,11 @@ static struct uart_driver s3c24xx_uart_drv = {
 	.owner		= THIS_MODULE,
 	.driver_name	= "s3c2410_serial",
 	.nr		= CONFIG_SERIAL_SAMSUNG_UARTS,
+#ifdef CONFIG_SERIAL_SAMSUNG_CONSOLE_SWITCH
+	.cons		= NULL,
+#else
 	.cons		= S3C24XX_SERIAL_CONSOLE,
+#endif
 	.dev_name	= S3C24XX_SERIAL_NAME,
 	.major		= S3C24XX_SERIAL_MAJOR,
 	.minor		= S3C24XX_SERIAL_MINOR,
@@ -1295,7 +1307,10 @@ EXPORT_SYMBOL_GPL(s3c24xx_serial_init);
 static int __init s3c24xx_serial_modinit(void)
 {
 	int ret;
-
+#ifdef CONFIG_SERIAL_SAMSUNG_CONSOLE_SWITCH
+	if (uart_debug)
+		s3c24xx_uart_drv.cons = S3C24XX_SERIAL_CONSOLE;
+#endif
 	ret = uart_register_driver(&s3c24xx_uart_drv);
 	if (ret < 0) {
 		printk(KERN_ERR "failed to register UART driver\n");

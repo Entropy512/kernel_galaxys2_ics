@@ -239,7 +239,7 @@ int max77693_irq_resume(struct max77693_dev *max77693)
 
 	dev_info(max77693->dev, "%s: irq_resume ret=%d", __func__, ret);
 
-	return ret;
+	return ret >= 0 ? 0 : ret;
 }
 
 int max77693_irq_init(struct max77693_dev *max77693)
