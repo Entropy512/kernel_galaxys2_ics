@@ -329,7 +329,7 @@ static int sdhci_s3c_platform_8bit_width(struct sdhci_host *host, int width)
 	return 0;
 }
 
-#ifdef CONFIG_MACH_MIDAS
+#ifdef CONFIG_MIDAS_COMMON
 /* midas board control the vdd for tflash by gpio,
    not regulator directly.
    so, code related vdd control should be added */
@@ -369,7 +369,7 @@ static struct sdhci_ops sdhci_s3c_ops = {
 	.set_clock		= sdhci_s3c_set_clock,
 	.get_min_clock		= sdhci_s3c_get_min_clock,
 	.platform_8bit_width	= sdhci_s3c_platform_8bit_width,
-#ifdef CONFIG_MACH_MIDAS
+#ifdef CONFIG_MIDAS_COMMON
 	.set_power		= sdhci_s3c_vtf_on_off,
 #endif
 };
@@ -656,6 +656,9 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 	sdhci_s3c_vtf_on_off(1);
 #endif
 
+	/* To turn on vmmc regulator only if sd card exists,
+	   GPIO pin for card detection should be initialized.
+	   Moved from sdhci_s3c_setup_card_detect_gpio() function */
 	if (pdata->cd_type == S3C_SDHCI_CD_GPIO &&
 	    gpio_is_valid(pdata->ext_cd_gpio)) {
 		if (gpio_request(pdata->ext_cd_gpio, "SDHCI EXT CD") == 0) {
@@ -688,6 +691,17 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 			dev_err(dev, "cannot request gpio for card detect\n");
 		}
 	}
+#ifdef CONFIG_MACH_PX
+	/*
+	 * sdhc which has S3C_SDHCI_CD_EXTERNAL flag means a wifi
+	 * on PX projects.
+	 */
+	if (pdata->cd_type == S3C_SDHCI_CD_EXTERNAL) {
+		/* w/a for h/w sdio interrupt */
+		host->quirks |= SDHCI_QUIRK_RESET_AFTER_REQUEST;
+	}
+#endif
+
 
 	ret = sdhci_add_host(host);
 	if (ret) {

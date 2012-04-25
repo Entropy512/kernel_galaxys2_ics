@@ -1458,6 +1458,10 @@ static void mshci_cmd_irq(struct mshci_host *host, u32 intmask)
 		/* to notify an error happend */
 		host->error_state = 1;
 		tasklet_schedule(&host->finish_tasklet);
+#ifdef CONFIG_MACH_M0	/* dh0421.hwang */
+		if (host->mmc && host->mmc->card)
+			mshci_dumpregs(host);
+#endif
 		return;
 	}
 
@@ -1536,6 +1540,10 @@ static void mshci_data_irq(struct mshci_host *host, u32 intmask, u8 intr_src)
 		/* to notify an error happend */
 		host->error_state = 1;
 		mshci_finish_data(host);
+#ifdef CONFIG_MACH_M0	/* dh0421.hwang */
+		if (host->mmc && host->mmc->card)
+			mshci_dumpregs(host);
+#endif
 	} else {
 		if (!(host->flags & MSHCI_REQ_USE_DMA) &&
 				(((host->data->flags & MMC_DATA_READ) &&
@@ -1629,7 +1637,7 @@ static irqreturn_t mshci_irq(int irq, void *dev_id)
 				& INTMSK_DTO))
 				; /* Nothing to do */
 			if (!timeout)
-				printk(KERN_ERR"*** %s time out for	CDONE intr\n",
+				printk(KERN_ERR"*** %s time out for	DTO intr\n",
 					mmc_hostname(host->mmc));
 			else
 				mshci_writel(host, INTMSK_DTO,
@@ -1870,7 +1878,7 @@ int mshci_add_host(struct mshci_host *host)
 	mmc->ops = &mshci_ops;
 	mmc->f_min = 400000;
 	mmc->f_max = host->max_clk;
-	mmc->caps |= MMC_CAP_SDIO_IRQ;
+	mmc->caps |= MMC_CAP_SDIO_IRQ | MMC_CAP_ERASE;
 
 	mmc->caps |= MMC_CAP_4_BIT_DATA;
 

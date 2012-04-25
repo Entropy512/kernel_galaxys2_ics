@@ -323,6 +323,7 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	if (card->ext_csd.rev >= 3) {
 		u8 sa_shift = ext_csd[EXT_CSD_S_A_TIMEOUT];
 		card->ext_csd.part_config = ext_csd[EXT_CSD_PART_CONFIG];
+		card->ext_csd.boot_part_prot = ext_csd[EXT_CSD_BOOT_CONFIG_PROT];
 
 		/* EXT_CSD value is in units of 10ms, but we store in ms */
 		card->ext_csd.part_time = 10 * ext_csd[EXT_CSD_PART_SWITCH_TIME];
@@ -828,6 +829,20 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	}
 
 	/*
+	 * Ensure eMMC boot config is protected.
+	 */
+	if (!(card->ext_csd.boot_part_prot & (0x1<<4)) &&
+		!(card->ext_csd.boot_part_prot & (0x1<<0))) {
+		card->ext_csd.boot_part_prot |= (0x1<<0);
+		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+				 EXT_CSD_BOOT_CONFIG_PROT,
+				 card->ext_csd.boot_part_prot,
+				 card->ext_csd.part_time);
+		if (err && err != -EBADMSG)
+			goto free_card;
+	}
+
+	/*
 	 * If the host supports the power_off_notify capability then
 	 * set the notification byte in the ext_csd register of device
 	 */
@@ -1093,6 +1108,14 @@ static void mmc_remove(struct mmc_host *host)
 }
 
 /*
+ * Card detection - card is alive.
+ */
+static int mmc_alive(struct mmc_host *host)
+{
+	return mmc_send_status(host->card, NULL);
+}
+
+/*
  * Card detection callback from host.
  */
 static void mmc_detect(struct mmc_host *host)
@@ -1107,7 +1130,7 @@ static void mmc_detect(struct mmc_host *host)
 	/*
 	 * Just check if our card has been removed.
 	 */
-	err = mmc_send_status(host->card, NULL);
+	err = _mmc_detect_card_removed(host);
 
 	mmc_release_host(host);
 
@@ -1208,6 +1231,7 @@ static const struct mmc_bus_ops mmc_ops = {
 	.suspend = NULL,
 	.resume = NULL,
 	.power_restore = mmc_power_restore,
+	.alive = mmc_alive,
 };
 
 static const struct mmc_bus_ops mmc_ops_unsafe = {
@@ -1218,6 +1242,7 @@ static const struct mmc_bus_ops mmc_ops_unsafe = {
 	.suspend = mmc_suspend,
 	.resume = mmc_resume,
 	.power_restore = mmc_power_restore,
+	.alive = mmc_alive,
 };
 
 static void mmc_attach_bus_ops(struct mmc_host *host)

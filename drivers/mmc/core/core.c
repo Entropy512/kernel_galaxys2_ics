@@ -101,7 +101,7 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 			cmd->retries = 0;
 	}
 
-	if (err && cmd->retries) {
+	if (err && cmd->retries && !mmc_card_removed(host->card)) {
 		pr_debug("%s: req failed (CMD%u): %d, retrying...\n",
 			mmc_hostname(host), cmd->opcode, err);
 
@@ -207,6 +207,12 @@ static void __mmc_start_req(struct mmc_host *host, struct mmc_request *mrq)
 	init_completion(&mrq->completion);
 	mrq->done = mmc_wait_done;
 
+	if (mmc_card_removed(host->card)) {
+		mrq->cmd->error = -ENOMEDIUM;
+		complete(&mrq->completion);
+		return;
+	}
+
 #if (defined(CONFIG_MIDAS_COMMON) && !defined(CONFIG_EXYNOS4_DEV_DWMCI)) || \
 	defined(CONFIG_MACH_U1)
 	if(mrq->sbc) {
@@ -246,6 +252,7 @@ static void mmc_power_up(struct mmc_host *host);
 static void mmc_wait_for_req_done(struct mmc_host *host,
 				  struct mmc_request *mrq)
 {
+	struct mmc_command *cmd;
 #if (defined(CONFIG_MIDAS_COMMON) && !defined(CONFIG_EXYNOS4_DEV_DWMCI))
 	if(mrq->sbc && mrq->sbc->error) {
 		/* if an sbc error exists, do not wait completion.
@@ -254,6 +261,11 @@ static void mmc_wait_for_req_done(struct mmc_host *host,
 	} else
 #endif
 		wait_for_completion(&mrq->completion);
+
+	cmd = mrq->cmd;
+	if (!cmd->error || !cmd->retries ||
+	    mmc_card_removed(host->card))
+		return;
 
 	/* if card is mmc type and nonremovable, and there are erros after
 	   issuing r/w command, then init eMMC and mshc */
@@ -359,13 +371,6 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 	int err = 0;
 	struct mmc_async_req *data = host->areq;
 
-	if (!host->card || (host && mmc_card_sd(host->card) &&
-			 !mmc_host_sd_present(host))) {
-		printk(KERN_DEBUG "mmc%d: SDcard removed. areq is %s.\n",
-				host->index, areq ? "not NULL" : "NULL");
-		goto sdcard_removed;
-	}
-
 	/* Prepare a new request */
 	if (areq)
 		mmc_pre_req(host, areq->mrq, !host->areq);
@@ -379,6 +384,26 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 				mmc_post_req(host, areq->mrq, -EINVAL);
 
 			host->areq = NULL;
+#ifdef CONFIG_MACH_M0	/* dh0421.hwang */
+			/*
+			 * dh0421.hwang
+			 * It's for Engineering DEBUGGING only
+			 * This has to be removed before PVR(guessing)
+			 * Please refer mshci reg dumps
+			 */
+			if (mmc_card_mmc(host->card) &&
+					err != 3) {
+				printk(KERN_ERR "[TEST] err means...\n");
+				printk(KERN_ERR "\t1: MMC_BLK_PARTIAL.\n");
+				printk(KERN_ERR "\t2: MMC_BLK_CMD_ERR.\n");
+				printk(KERN_ERR "\t3: MMC_BLK_RETRY.\n");
+				printk(KERN_ERR "\t4: MMC_BLK_ABORT.\n");
+				printk(KERN_ERR "\t5: MMC_BLK_DATA_ERR.\n");
+				printk(KERN_ERR "\t6: MMC_BLK_ECC_ERR.\n");
+				panic("[TEST] mmc%d, err_check returns %d.\n",
+						host->index, err);
+			}
+#endif
 			goto out;
 		}
 	}
@@ -394,8 +419,6 @@ struct mmc_async_req *mmc_start_req(struct mmc_host *host,
 	if (error)
 		*error = err;
 	return data;
- sdcard_removed:
-	return NULL;
 }
 EXPORT_SYMBOL(mmc_start_req);
 
@@ -1506,6 +1529,7 @@ void mmc_detect_change(struct mmc_host *host, unsigned long delay)
 	spin_unlock_irqrestore(&host->lock, flags);
 #endif
 
+	host->detect_change = 1;
 	wake_lock(&host->detect_wake_lock);
 	mmc_schedule_delayed_work(&host->detect, delay);
 }
@@ -2101,6 +2125,43 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 	return -EIO;
 }
 
+int _mmc_detect_card_removed(struct mmc_host *host)
+{
+	int ret;
+
+	if ((host->caps & MMC_CAP_NONREMOVABLE) || !host->bus_ops->alive)
+		return 0;
+
+	if (!host->card || mmc_card_removed(host->card))
+		return 1;
+
+	ret = host->bus_ops->alive(host);
+	if (ret) {
+		mmc_card_set_removed(host->card);
+		pr_debug("%s: card remove detected\n", mmc_hostname(host));
+	}
+
+	return ret;
+}
+
+int mmc_detect_card_removed(struct mmc_host *host)
+{
+	struct mmc_card *card = host->card;
+
+	WARN_ON(!host->claimed);
+	/*
+	 * The card will be considered unchanged unless we have been asked to
+	 * detect a change or host requires polling to provide card detection.
+	 */
+	if (card && !host->detect_change && !(host->caps & MMC_CAP_NEEDS_POLL))
+		return mmc_card_removed(card);
+
+	host->detect_change = 0;
+
+	return _mmc_detect_card_removed(host);
+}
+EXPORT_SYMBOL(mmc_detect_card_removed);
+
 void mmc_rescan(struct work_struct *work)
 {
 	static const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
@@ -2127,6 +2188,8 @@ void mmc_rescan(struct work_struct *work)
 	 * can respond */
 	if (host->bus_dead)
 		extend_wakelock = 1;
+
+	host->detect_change = 0;
 
 	/*
 	 * Let mmc_bus_put() free the bus/bus_ops if we've found that

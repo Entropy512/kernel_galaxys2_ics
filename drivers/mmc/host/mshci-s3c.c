@@ -503,7 +503,12 @@ static int __devinit mshci_s3c_probe(struct platform_device *pdev)
 	if (pdata->cd_type == S3C_MSHCI_CD_GPIO &&
 		gpio_is_valid(pdata->ext_cd_gpio)) {
 
-		gpio_request(pdata->ext_cd_gpio, "SDHCI EXT CD");
+		ret = gpio_request(pdata->ext_cd_gpio, "MSHCI EXT CD");
+		if (ret) {
+			dev_err(&pdev->dev, "cannot request gpio for card detect\n");
+			goto err_add_host;
+		}
+
 		sc->ext_cd_gpio = pdata->ext_cd_gpio;
 
 		sc->ext_cd_irq = gpio_to_irq(pdata->ext_cd_gpio);
