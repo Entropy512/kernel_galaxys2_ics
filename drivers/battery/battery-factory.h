@@ -19,8 +19,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/gpio.h>
-#include <linux/power_supply.h>
 #include <linux/battery/samsung_battery.h>
 
 #ifdef CONFIG_SYSFS

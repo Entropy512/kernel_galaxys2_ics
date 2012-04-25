@@ -19,7 +19,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -27,7 +26,6 @@
 #include <linux/reboot.h>
 #include <linux/jiffies.h>
 #include <linux/platform_device.h>
-#include <linux/power_supply.h>
 #include <linux/slab.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
@@ -65,6 +63,7 @@ EXPORT_SYMBOL(lpcharge);
 static int battery_get_temper(struct battery_info *info)
 {
 	union power_supply_propval value;
+	int cnt, adc, adc_max, adc_min, adc_total;
 	int temper = 0;
 	int retry_cnt = 0;
 	pr_debug("%s\n", __func__);
@@ -84,26 +83,46 @@ static int battery_get_temper(struct battery_info *info)
 		}
 #endif
 #if defined(CONFIG_S3C_ADC)
-		do {
-			info->battery_temp_adc =
-				s3c_adc_read(info->adc_client,
-					info->pdata->temper_ch);
-
-			if (info->battery_temp_adc < 0) {
-				pr_info("%s: adc read(%d), retry(%d)", __func__,
-					info->battery_temp_adc, retry_cnt);
-				retry_cnt++;
-				msleep(100);
-			}
-		} while ((info->battery_temp_adc < 0) && (retry_cnt <= 5));
-
-		if (info->battery_temp_adc < 0) {
-			pr_info("%s: adc read error(%d), temper set as 30.0",
-					__func__, info->battery_temp_adc);
-			temper = 300;
-		} else
-			temper = info->pdata->covert_adc(info->battery_temp_adc,
+		adc = adc_max = adc_min = adc_total = 0;
+		for (cnt = 0; cnt < CNT_ADC_SAMPLE; cnt++) {
+			do {
+				adc = s3c_adc_read(info->adc_client,
 							info->pdata->temper_ch);
+
+				if (adc < 0) {
+					pr_info("%s: adc read(%d), retry(%d)",
+						__func__, adc, retry_cnt);
+					retry_cnt++;
+					msleep(100);
+				}
+			} while ((adc < 0) && (retry_cnt <= 5));
+
+			if (cnt != 0) {
+				adc_max = MAX(adc, adc_max);
+				adc_min = MIN(adc, adc_min);
+			} else {
+				adc_max = adc_min = adc;
+			}
+
+			adc_total += adc;
+			pr_debug("%s: adc(%d), total(%d), max(%d), min(%d), "
+					"avg(%d), cnt(%d)\n", __func__,
+					adc, adc_total, adc_max, adc_min,
+					adc_total / (cnt + 1),  cnt + 1);
+		}
+
+		info->battery_temper_adc =
+			(adc_total - adc_max - adc_min) / (CNT_ADC_SAMPLE - 2);
+
+		if (info->battery_temper_adc < 0) {
+			pr_info("%s: adc read error(%d), temper set as 30.0",
+					__func__, info->battery_temper_adc);
+			temper = 300;
+		} else {
+			temper = info->pdata->covert_adc(
+					info->battery_temper_adc,
+					info->pdata->temper_ch);
+		}
 #endif
 		break;
 	case TEMPER_EXT_ADC:
@@ -225,12 +244,12 @@ void battery_update_info(struct battery_info *info)
 					  &value);
 	info->battery_vfocv = value.intval;
 
-	info->battery_temp = battery_get_temper(info);
+	info->battery_temper = battery_get_temper(info);
 
 update_finish:
 	switch (info->battery_error_test) {
 	case 0:
-		pr_debug("%s: error test: normal state\n", __func__);
+		pr_debug("%s: error test: not test modde\n", __func__);
 		break;
 	case 1:
 		pr_info("%s: error test: full charged\n", __func__);
@@ -240,11 +259,11 @@ update_finish:
 		break;
 	case 2:
 		pr_info("%s: error test: freezed\n", __func__);
-		info->battery_temp = info->pdata->freeze_stop_temp - 10;
+		info->battery_temper = info->pdata->freeze_stop_temp - 10;
 		break;
 	case 3:
 		pr_info("%s: error test: overheated\n", __func__);
-		info->battery_temp = info->pdata->overheat_stop_temp + 10;
+		info->battery_temper = info->pdata->overheat_stop_temp + 10;
 		break;
 	case 4:
 		pr_info("%s: error test: ovp\n", __func__);
@@ -267,7 +286,8 @@ update_finish:
 		 info->battery_health, info->battery_present,
 		 info->cable_type, info->charge_current,
 		 info->battery_soc, info->battery_raw_soc,
-		 info->battery_vcell, info->battery_vfocv, info->battery_temp);
+		 info->battery_vcell, info->battery_vfocv,
+		 info->battery_temper);
 }
 
 /* Control charger and fuelgauge */
@@ -365,7 +385,7 @@ static int samsung_battery_get_property(struct power_supply *ps,
 		val->intval = info->battery_soc;
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		val->intval = info->battery_temp;
+		val->intval = info->battery_temper;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -406,6 +426,7 @@ static int samsung_battery_set_property(struct power_supply *ps,
 		return -EINVAL;
 	}
 
+	cancel_work_sync(&info->monitor_work);
 	wake_lock(&info->monitor_wake_lock);
 	schedule_work(&info->monitor_work);
 
@@ -644,15 +665,15 @@ static bool battery_temp_cond(struct battery_info *info)
 
 		pr_debug("%s: check charging stop temp."
 			 "cond: %d ?? %d ~ %d\n", __func__,
-			 info->battery_temp,
+			 info->battery_temper,
 			 info->pdata->freeze_stop_temp,
 			 info->pdata->overheat_stop_temp);
 
-		if (info->battery_temp >=
+		if (info->battery_temper >=
 		    info->pdata->overheat_stop_temp) {
 			pr_info("%s: stop by overheated temp\n", __func__);
 			info->overheated_state = true;
-		} else if (info->battery_temp <=
+		} else if (info->battery_temper <=
 			   info->pdata->freeze_stop_temp) {
 			pr_info("%s: stop by freezed temp\n", __func__);
 			info->freezed_state = true;
@@ -661,18 +682,18 @@ static bool battery_temp_cond(struct battery_info *info)
 	} else {
 		pr_debug("%s: check charging recovery temp."
 			 "cond: %d ?? %d ~ %d\n", __func__,
-			 info->battery_temp,
+			 info->battery_temper,
 			 info->pdata->freeze_recovery_temp,
 			 info->pdata->overheat_recovery_temp);
 
 		if ((info->overheated_state == true) &&
-		    (info->battery_temp <=
+		    (info->battery_temper <=
 		     info->pdata->overheat_recovery_temp)) {
 			pr_info("%s: recovery from overheated\n",
 				__func__);
 			info->overheated_state = false;
 		} else if ((info->freezed_state == true) &&
-			   (info->battery_temp >=
+			   (info->battery_temper >=
 			    info->pdata->freeze_recovery_temp)) {
 			pr_info("%s: recovery from freezed\n",
 				__func__);
@@ -766,36 +787,34 @@ charge_state_control:
 				info->charge_current, info->charge_start_time);
 	}
 
-	info->charge_real_state =
+	info->charge_real_state = info->charge_virt_state =
 		battery_get_info(info, POWER_SUPPLY_PROP_STATUS);
 }
 
 /* charge state for UI(icon) */
 static void battery_indicator_icon(struct battery_info *info)
 {
-	if (info->full_charged_state == true) {
-		info->charge_virt_state = POWER_SUPPLY_STATUS_FULL;
-		info->battery_soc = 100;
-	} else if (info->abstimer_state == true) {
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
-	} else if (info->recharge_phase == true) {
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
-	}
 
 	if (info->cable_type != POWER_SUPPLY_TYPE_BATTERY) {
-		if (info->temperature_state == true)
+		if (info->full_charged_state == true) {
+			info->charge_virt_state =
+				POWER_SUPPLY_STATUS_FULL;
+			info->battery_soc = 100;
+		} else if (info->abstimer_state == true) {
+			info->charge_virt_state =
+				POWER_SUPPLY_STATUS_CHARGING;
+		} else if (info->recharge_phase == true) {
+			info->charge_virt_state =
+				POWER_SUPPLY_STATUS_CHARGING;
+		} else if (info->temperature_state == true) {
 			info->charge_virt_state =
 				POWER_SUPPLY_STATUS_NOT_CHARGING;
-
-		if (info->vf_state == true) {
+		} else if (info->vf_state == true) {
 			info->charge_virt_state =
 				POWER_SUPPLY_STATUS_NOT_CHARGING;
-			/* to be considered */
 			info->battery_health =
 				POWER_SUPPLY_HEALTH_UNSPEC_FAILURE;
-		}
-
-		if (info->health_state == true)
+		} else if (info->health_state == true)
 			info->charge_virt_state =
 				POWER_SUPPLY_STATUS_NOT_CHARGING;
 	}
@@ -808,25 +827,24 @@ static void battery_indicator_led(struct battery_info *info)
 	if (info->charge_virt_state ==
 			POWER_SUPPLY_STATUS_CHARGING) {
 		if (info->led_state != BATT_LED_CHARGING) {
-			an30259a_start_led_pattern(BATT_LED_PATT_CHG);
+			/* TODO: for kernel LED control: CHARGING */
 			info->led_state = BATT_LED_CHARGING;
 		}
 	} else if (info->charge_virt_state ==
 			POWER_SUPPLY_STATUS_NOT_CHARGING) {
 		if (info->led_state != BATT_LED_NOT_CHARGING) {
-			an30259a_start_led_pattern(BATT_LED_PATT_NOT_CHG);
+			/* TODO: for kernel LED control: NOT CHARGING */
 			info->led_state = BATT_LED_NOT_CHARGING;
 		}
 	} else if (info->charge_virt_state ==
 			POWER_SUPPLY_STATUS_FULL) {
 		if (info->led_state != BATT_LED_FULL) {
-			an30259a_start_led_pattern(BATT_LED_PATT_OFF);
-			an30259a_led(BATT_LED_GREEN, 20);
+			/* TODO: for kernel LED control: FULL */
 			info->led_state = BATT_LED_FULL;
 		}
 	} else {
 		if (info->led_state != BATT_LED_DISCHARGING) {
-			an30259a_start_led_pattern(BATT_LED_PATT_OFF);
+			/* TODO: for kernel LED control: DISCHARGING */
 			info->led_state = BATT_LED_DISCHARGING;
 		}
 	}
@@ -904,7 +922,6 @@ charge_ok:
 			wake_unlock(&info->charge_wake_lock);
 		battery_charge_control(info,
 				       CHARGE_DISABLE, CHARGER_OFF_CURRENT);
-		info->charge_virt_state = POWER_SUPPLY_STATUS_DISCHARGING;
 
 		/* clear charge scenario state */
 		info->overheated_state = false;
@@ -918,28 +935,24 @@ charge_ok:
 		if (!info->pdata->suspend_chging)
 			wake_lock(&info->charge_wake_lock);
 		battery_charge_control(info, CHARGE_ENABLE, CHARGER_AC_CURRENT);
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
 		break;
 	case POWER_SUPPLY_TYPE_USB:
 		if (!info->pdata->suspend_chging)
 			wake_lock(&info->charge_wake_lock);
 		battery_charge_control(info,
 				       CHARGE_ENABLE, CHARGER_USB_CURRENT);
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
 		break;
 	case POWER_SUPPLY_TYPE_USB_CDP:
 		if (!info->pdata->suspend_chging)
 			wake_lock(&info->charge_wake_lock);
 		battery_charge_control(info,
 				       CHARGE_ENABLE, CHARGER_CDP_CURRENT);
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
 		break;
 	case POWER_SUPPLY_TYPE_WIRELESS:
 		if (!info->pdata->suspend_chging)
 			wake_lock(&info->charge_wake_lock);
 		battery_charge_control(info,
 				       CHARGE_ENABLE, CHARGER_WPC_CURRENT);
-		info->charge_virt_state = POWER_SUPPLY_STATUS_CHARGING;
 		break;
 	default:
 		break;
@@ -949,7 +962,12 @@ monitor_finish:
 	battery_indicator_icon(info);
 
 	/* monitoring interval */
-	if (info->charge_virt_state == POWER_SUPPLY_STATUS_NOT_CHARGING) {
+	if (info->charge_virt_state ==
+				POWER_SUPPLY_STATUS_CHARGING) {
+		pr_debug("%s: charging state\n", __func__);
+		info->monitor_mode = MONITOR_CHNG;
+	} else if (info->charge_virt_state ==
+				POWER_SUPPLY_STATUS_NOT_CHARGING) {
 		pr_debug("%s: emergency(not charging) state\n", __func__);
 		info->monitor_mode = MONITOR_EMER;
 		wake_lock(&info->emer_wake_lock);
@@ -965,9 +983,9 @@ monitor_finish:
 		"abs(%d), f(%d), rch(%d), t(%d)\n",
 		info->battery_soc,
 		info->battery_vcell / 1000,
-		info->battery_vfocv,
+		info->battery_vfocv / 1000,
 		info->battery_present,
-		info->battery_temp / 10, info->battery_temp % 10,
+		info->battery_temper / 10, info->battery_temper % 10,
 		info->battery_health,
 		info->charge_real_state,
 		info->charge_virt_state,
@@ -976,18 +994,6 @@ monitor_finish:
 		info->abstimer_state,
 		info->full_charged_state,
 		info->recharge_phase, info->charge_start_time);
-
-	/*
-	 * WORKAROUND: Do not power off, if vell is over 3400mV
-	 */
-	if (info->battery_soc == 0) {
-		if (info->battery_vcell > info->pdata->voltage_min) {
-			pr_info("%s: soc 0%%, but vcell(%d) is over 3400mV, "
-							"do not power off\n",
-						__func__, info->battery_vcell);
-			info->battery_soc = 1;
-		}
-	}
 
 	power_supply_changed(&info->psy_bat);
 
@@ -1272,6 +1278,16 @@ static void samsung_battery_complete(struct device *dev)
 	info->monitor_mode = MONITOR_NORM;
 }
 
+static int samsung_battery_suspend(struct device *dev)
+{
+	struct battery_info *info = dev_get_drvdata(dev);
+	pr_info("%s\n", __func__);
+
+	cancel_work_sync(&info->monitor_work);
+
+	return 0;
+}
+
 static int samsung_battery_resume(struct device *dev)
 {
 	struct battery_info *info = dev_get_drvdata(dev);
@@ -1285,6 +1301,7 @@ static int samsung_battery_resume(struct device *dev)
 static const struct dev_pm_ops samsung_battery_pm_ops = {
 	.prepare = samsung_battery_prepare,
 	.complete = samsung_battery_complete,
+	.suspend = samsung_battery_suspend,
 	.resume = samsung_battery_resume,
 };
 #endif

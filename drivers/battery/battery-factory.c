@@ -47,7 +47,7 @@ static struct device_attribute battery_attrs[] = {
 	BATTERY_ATTR(test_mode),
 	BATTERY_ATTR(batt_error_test),
 	BATTERY_ATTR(siop_activated),
-	BATTERY_ATTR(wpc_pin_state),
+	BATTERY_ATTR(wc_status),
 
 	/* not use */
 	BATTERY_ATTR(batt_vol_adc),
@@ -73,7 +73,7 @@ enum {
 	TEST_MODE,
 	BATT_ERROR_TEST,
 	SIOP_ACTIVATED,
-	WPC_PIN_STATE,
+	WC_STATUS,
 
 	/* not use */
 	BATT_VOL_ADC,
@@ -90,6 +90,7 @@ static ssize_t battery_show_property(struct device *dev,
 {
 	struct battery_info *info = dev_get_drvdata(dev->parent);
 	int i;
+	int cnt;
 	int val;
 	const ptrdiff_t off = attr - battery_attrs;
 	pr_debug("%s: %s\n", __func__, battery_attrs[off].attr.name);
@@ -112,17 +113,31 @@ static ssize_t battery_show_property(struct device *dev,
 		break;
 	case BATT_TEMP_ADC:
 		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp_adc;
+		val = info->battery_temper_adc;
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_TEMP_AVER:
-		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp;
+		val = 0;
+		for (cnt = 0; cnt < CNT_TEMPER_AVG; cnt++) {
+			msleep(100);
+			battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
+			val += info->battery_temper_adc;
+			info->battery_temper_adc_avg = val / (cnt + 1);
+		}
+#ifdef CONFIG_S3C_ADC
+		info->battery_temper_avg = info->pdata->covert_adc(
+						info->battery_temper_adc_avg,
+						info->pdata->temper_ch);
+#else
+		info->battery_temper_avg = info->battery_temper;
+#endif
+		val = info->battery_temper_avg;
+		pr_info("%s: temper avg(%d)\n", __func__, val);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_TEMP_ADC_AVER:
-		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp_adc;
+		val = info->battery_temper_adc_avg;
+		pr_info("%s: temper adc avg(%d)\n", __func__, val);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_VFOCV:
@@ -152,7 +167,7 @@ static ssize_t battery_show_property(struct device *dev,
 		val = info->siop_state;
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
-	case WPC_PIN_STATE:
+	case WC_STATUS:
 #ifdef CONFIG_BATTERY_WPC_CHARGER
 		val = !gpio_get_value(GPIO_WPC_INT);
 #else

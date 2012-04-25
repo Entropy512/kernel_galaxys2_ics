@@ -163,7 +163,7 @@ static int max17047_get_vfocv(struct i2c_client *client)
 
 	pr_debug("%s: VFOCV(0x%02x%02x, %d)\n", __func__,
 		 data[1], data[0], vfocv);
-	return vfocv;
+	return vfocv * 1000;
 }
 
 static int max17047_get_vcell(struct i2c_client *client)
@@ -231,8 +231,13 @@ static int max17047_get_soc(struct i2c_client *client)
 
 	rawsoc = max17047_get_rawsoc(fuelgauge_data->client);
 
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	soc = fuelgauge_data->soc
+		= (rawsoc < 300) ? 0 : ((rawsoc - 300) * 100 / 9200) + 1;
+#else
 	/* Adjusted soc by adding 0.45 */
 	soc = fuelgauge_data->soc = min((rawsoc + 45) / 100, 100);
+#endif
 
 	pr_debug("%s: SOC(%d)\n", __func__, soc);
 	return soc;
@@ -311,7 +316,24 @@ static void max17047_reg_init(struct max17047_fuelgauge_data *fuelgauge_data)
 	u8 i2c_data[2];
 	pr_debug("%s\n", __func__);
 
-	/* Use MG1 */
+
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x00;
+	max17047_i2c_write(client, MAX17047_REG_CGAIN, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x03;
+	max17047_i2c_write(client, MAX17047_REG_MISCCFG, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x07;
+	max17047_i2c_write(client, MAX17047_REG_LEARNCFG, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x50;
+	max17047_i2c_write(client, MAX17047_REG_RCOMP, i2c_data);
+#else /* Use MG1 */
 	i2c_data[1] = 0x00;
 	i2c_data[0] = 0x00;
 	max17047_i2c_write(client, MAX17047_REG_CGAIN, i2c_data);
@@ -323,6 +345,7 @@ static void max17047_reg_init(struct max17047_fuelgauge_data *fuelgauge_data)
 	i2c_data[1] = 0x07;
 	i2c_data[0] = 0x00;
 	max17047_i2c_write(client, MAX17047_REG_LEARNCFG, i2c_data);
+#endif
 }
 
 #ifdef DEBUG_FUELGAUGE_POLLING
@@ -336,8 +359,8 @@ static void max17047_polling_work(struct work_struct *work)
 	u8 data[2];
 	u8 buf[512];
 
-	max17047_get_vfocv(fuelgauge_data->client);
 	max17047_get_vcell(fuelgauge_data->client);
+	max17047_get_vfocv(fuelgauge_data->client);
 	max17047_get_avgvcell(fuelgauge_data->client);
 	max17047_get_rawsoc(fuelgauge_data->client);
 	max17047_get_soc(fuelgauge_data->client);
@@ -472,11 +495,22 @@ static int max17047_set_property(struct power_supply *psy,
 static irqreturn_t max17047_fuelgauge_isr(int irq, void *data)
 {
 	struct max17047_fuelgauge_data *fuelgauge_data = data;
-	pr_info("%s: Fuelgauge alert.\n", __func__);
+	struct power_supply *battery_psy = power_supply_get_by_name("battery");
+	union power_supply_propval value;
+	pr_info("%s: fuelgauge alert\n", __func__);
 
 	max17047_test_read(fuelgauge_data);
 
-	return 1;
+	if (!battery_psy) {
+		pr_err("%s: fail to get battery power supply\n", __func__);
+		return IRQ_HANDLED;
+	}
+
+	battery_psy->set_property(battery_psy,
+				POWER_SUPPLY_PROP_STATUS,
+				&value);
+
+	return IRQ_HANDLED;
 }
 
 static int __devinit max17047_fuelgauge_i2c_probe(struct i2c_client *client,

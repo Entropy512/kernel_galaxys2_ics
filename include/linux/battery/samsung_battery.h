@@ -15,6 +15,9 @@
 #ifndef __MACH_SAMSUNG_BATTERY_H
 #define __MACH_SAMSUNG_BATTERY_H __FILE__
 
+#include <linux/gpio.h>
+#include <linux/delay.h>
+#include <linux/power_supply.h>
 #include <linux/android_alarm.h>
 
 struct battery_info {
@@ -59,8 +62,10 @@ struct battery_info {
 	unsigned int battery_vfocv;
 	unsigned int battery_soc;
 	unsigned int battery_raw_soc;
-	int battery_temp;
-	int battery_temp_adc;
+	int battery_temper;
+	int battery_temper_adc;
+	int battery_temper_avg;
+	int battery_temper_adc_avg;
 
 	unsigned int cable_type;
 
@@ -93,6 +98,11 @@ struct battery_info {
 
 /* jig state */
 extern bool is_jig_attached;
+
+/* macro */
+#define MAX(x, y)	((x) > (y) ? (x) : (y))
+#define MIN(x, y)	((x) < (y) ? (x) : (y))
+#define ABS(x)		((x) < 0 ? (-1 * (x)) : (x))
 
 /*
  * Use for charger
@@ -130,6 +140,13 @@ enum soc_type {
 #define VF_CHECK_COUNT		10
 #define VF_CHECK_DELAY		1000
 #define RESET_SOC_DIFF_TH	100000
+
+/* average count */
+#define CNT_VOLTAGE_AVG	5
+#define CNT_CURRENT_AVG	5
+#define CNT_TEMPER_AVG	5
+
+#define CNT_ADC_SAMPLE	6
 
 enum {
 	CHARGE_DISABLE = 0,

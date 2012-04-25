@@ -24,7 +24,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -32,7 +31,6 @@
 #include <linux/reboot.h>
 #include <linux/jiffies.h>
 #include <linux/platform_device.h>
-#include <linux/power_supply.h>
 #include <linux/slab.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
@@ -77,25 +75,32 @@ static int battery_get_temper(struct battery_info *info)
 	case TEMPER_AP_ADC:
 #if defined(CONFIG_S3C_ADC)
 		do {
-			info->battery_temp_adc =
+			info->battery_temper_adc =
 				s3c_adc_read(info->adc_client,
 					info->pdata->temper_ch);
 
-			if (info->battery_temp_adc < 0) {
+			if (info->battery_temper_adc < 0) {
 				pr_info("%s: adc read(%d), retry(%d)", __func__,
-					info->battery_temp_adc, retry_cnt);
+					info->battery_temper_adc, retry_cnt);
 				retry_cnt++;
 				msleep(100);
 			}
-		} while ((info->battery_temp_adc < 0) && (retry_cnt <= 5));
+		} while ((info->battery_temper_adc < 0) && (retry_cnt <= 5));
 
-		if (info->battery_temp_adc < 0) {
+		if (info->battery_temper_adc < 0) {
 			pr_info("%s: adc read error(%d), temper set as 30.0",
-					__func__, info->battery_temp_adc);
+					__func__, info->battery_temper_adc);
 			temper = 300;
-		} else
-			temper = info->pdata->covert_adc(info->battery_temp_adc,
-							info->pdata->temper_ch);
+		} else {
+			temper = info->pdata->covert_adc(
+					info->battery_temper_adc,
+					info->pdata->temper_ch);
+		}
+#endif
+		break;
+	case TEMPER_EXT_ADC:
+#if defined(CONFIG_STMPE811_ADC)
+		temper = stmpe811_get_adc_value(info->pdata->temper_ch);
 #endif
 		break;
 	case TEMPER_UNKNOWN:
@@ -232,7 +237,7 @@ void battery_update_info(struct battery_info *info)
 					  &value);
 	info->battery_vfocv = value.intval;
 
-	info->battery_temp = battery_get_temper(info);
+	info->battery_temper = battery_get_temper(info);
 
 update_finish:
 	switch (info->battery_error_test) {
@@ -247,11 +252,11 @@ update_finish:
 		break;
 	case 2:
 		pr_info("%s: error test: freezed\n", __func__);
-		info->battery_temp = info->pdata->freeze_stop_temp - 10;
+		info->battery_temper = info->pdata->freeze_stop_temp - 10;
 		break;
 	case 3:
 		pr_info("%s: error test: overheated\n", __func__);
-		info->battery_temp = info->pdata->overheat_stop_temp + 10;
+		info->battery_temper = info->pdata->overheat_stop_temp + 10;
 		break;
 	case 4:
 		pr_info("%s: error test: ovp\n", __func__);
@@ -274,7 +279,8 @@ update_finish:
 		 info->battery_health, info->battery_present,
 		 info->cable_type, info->charge_current,
 		 info->battery_soc, info->battery_raw_soc,
-		 info->battery_vcell, info->battery_vfocv, info->battery_temp);
+		 info->battery_vcell, info->battery_vfocv,
+		 info->battery_temper);
 }
 
 /* Control charger and fuelgauge */
@@ -360,7 +366,7 @@ static int samsung_battery_get_property(struct power_supply *ps,
 		val->intval = info->battery_soc;
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		val->intval = info->battery_temp;
+		val->intval = info->battery_temper;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -631,15 +637,15 @@ static bool battery_temp_cond(struct battery_info *info)
 
 		pr_debug("%s: check charging stop temp."
 			 "cond: %d ?? %d ~ %d\n", __func__,
-			 info->battery_temp,
+			 info->battery_temper,
 			 info->pdata->freeze_stop_temp,
 			 info->pdata->overheat_stop_temp);
 
-		if (info->battery_temp >=
+		if (info->battery_temper >=
 		    info->pdata->overheat_stop_temp) {
 			pr_info("%s: stop by overheated temp\n", __func__);
 			info->overheated_state = true;
-		} else if (info->battery_temp <=
+		} else if (info->battery_temper <=
 			   info->pdata->freeze_stop_temp) {
 			pr_info("%s: stop by freezed temp\n", __func__);
 			info->freezed_state = true;
@@ -648,18 +654,18 @@ static bool battery_temp_cond(struct battery_info *info)
 	} else {
 		pr_debug("%s: check charging recovery temp."
 			 "cond: %d ?? %d ~ %d\n", __func__,
-			 info->battery_temp,
+			 info->battery_temper,
 			 info->pdata->freeze_recovery_temp,
 			 info->pdata->overheat_recovery_temp);
 
 		if ((info->overheated_state == true) &&
-		    (info->battery_temp <=
+		    (info->battery_temper <=
 		     info->pdata->overheat_recovery_temp)) {
 			pr_info("%s: recovery from overheated\n",
 				__func__);
 			info->overheated_state = false;
 		} else if ((info->freezed_state == true) &&
-			   (info->battery_temp >=
+			   (info->battery_temper >=
 			    info->pdata->freeze_recovery_temp)) {
 			pr_info("%s: recovery from freezed\n",
 				__func__);
@@ -918,9 +924,9 @@ monitor_finish:
 		"abs(%d), f(%d), rch(%d), t(%d)\n",
 		info->battery_soc,
 		info->battery_vcell / 1000,
-		info->battery_vfocv,
+		info->battery_vfocv / 1000,
 		info->battery_present,
-		info->battery_temp / 10, info->battery_temp % 10,
+		info->battery_temper / 10, info->battery_temper % 10,
 		info->battery_health,
 		info->charge_real_state,
 		info->charge_virt_state,
