@@ -47,6 +47,8 @@ MODULE_DEVICE_TABLE(i2c, si4705_i2c_id);
 #define lsb(x)                  ((u8)((u16) x &  0x00FF))
 #define compose_u16(msb, lsb)	(((u16)msb << 8) | lsb)
 
+#define STATE_POWER_UP		1
+#define STATE_POWER_DOWN	0
 /**************************************************************************
  * Module Parameters
  **************************************************************************/
@@ -160,9 +162,15 @@ int si4705_power_up(struct si4705_device *radio)
 	if (radio->pdata->reset)
 		radio->pdata->reset(true);
 
-	if (si4705_send_command(radio, ARRAY_SIZE(cmd), &cmd[0],
-		    ARRAY_SIZE(reply), &reply[0]) < 0)
-		retval = -EIO;
+	if (STATE_POWER_DOWN == radio->power_state) {
+		/* the power up command is accepted only in power down mode */
+		if (si4705_send_command(radio, ARRAY_SIZE(cmd), &cmd[0],
+			    ARRAY_SIZE(reply), &reply[0]) < 0) {
+			pr_err("%s: send power up command failed", __func__);
+			retval = -EIO;
+		} else
+			radio->power_state = STATE_POWER_UP;
+	}
 
 	msleep(110);
 
@@ -178,9 +186,14 @@ int si4705_power_down(struct si4705_device *radio)
 	u8 reply[POWER_DOWN_NRESP];
 	int retval = 0;
 
-	if (si4705_send_command(radio, ARRAY_SIZE(cmd), &cmd[0],
-		    ARRAY_SIZE(reply), &reply[0]) < 0)
-		retval = -EIO;
+	if (STATE_POWER_UP == radio->power_state) {
+		/* the power down command is accepted only in power up mode */
+		if (si4705_send_command(radio, ARRAY_SIZE(cmd), &cmd[0],
+			    ARRAY_SIZE(reply), &reply[0]) < 0) {
+			retval = -EIO;
+		} else
+			radio->power_state = STATE_POWER_DOWN;
+	}
 
 	/* disable radio device gpio reset pin */
 	if (radio->pdata->reset)
@@ -728,6 +741,16 @@ static int __devinit si4705_i2c_probe(struct i2c_client *client,
 			sizeof(si4705_viddev_template));
 	video_set_drvdata(radio->videodev, radio);
 
+	/* set init. operational mode */
+	radio->op_mode = RADIO_OP_DEFAULT;
+
+	/* set init. power state */
+	/*
+	TODO: Need to make sure radio chip is really
+	      in power down state to support hibernation feature
+	*/
+	radio->power_state = STATE_POWER_DOWN;
+
 	/* power up */
 	if (si4705_power_up(radio) != 0) {
 		retval = -EIO;
@@ -825,9 +848,12 @@ static int si4705_i2c_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct si4705_device *radio = i2c_get_clientdata(client);
 
-	/* power down */
-	if (si4705_power_down(radio) < 0)
-		return -EIO;
+	if (RADIO_OP_RICH_MODE == radio->op_mode) {
+		radio->power_state_at_suspend = radio->power_state;
+		/* power down */
+		if (si4705_power_down(radio) < 0)
+			return -EIO;
+	}
 
 	return 0;
 }
@@ -840,9 +866,12 @@ static int si4705_i2c_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct si4705_device *radio = i2c_get_clientdata(client);
 
-	/* power up : need 110ms */
-	if (si4705_power_up(radio) < 0)
-		return -EIO;
+	if (RADIO_OP_RICH_MODE == radio->op_mode) {
+		/* power up if it was powered up at suspend: need 110ms */
+		if (radio->power_state_at_suspend == STATE_POWER_UP &&
+		    si4705_power_up(radio) < 0)
+			return -EIO;
+	}
 
 	return 0;
 }

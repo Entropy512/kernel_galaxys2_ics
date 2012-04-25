@@ -560,6 +560,9 @@ static int si4705_vidioc_g_ctrl(struct file *file, void *priv,
 
 		ctrl->value = (vol_mute == 0) ? 1 : 0;
 		break;
+	/*
+	 * TODO : need to support op_mode change lp_mode <-> rich_mode
+	 */
 	default:
 		retval = -EINVAL;
 	}
@@ -599,6 +602,9 @@ static int si4705_vidioc_s_ctrl(struct file *file, void *priv,
 			retval = si4705_set_property(radio, RX_HARD_MUTE, 0x00);
 
 		break;
+	/*
+	 * TODO : need to support op_mode change lp_mode <-> rich_mode
+	 */
 	default:
 		retval = -EINVAL;
 	}
@@ -706,9 +712,13 @@ static int si4705_vidioc_g_tuner(struct file *file, void *priv,
 
 	/* min is worst, max is best; signal:0..0xffff; rssi: 0..0xff */
 	/* measured in units of dbµV in 1 db increments (max at ~75 dbµV) */
-	tuner->signal = rssi;
+	if (rssi > 75)
+		tuner->signal = 75;
+	else
+		tuner->signal = rssi;
+
 	/* the ideal factor is 0xffff/75 = 873,8 */
-	tuner->signal = tuner->signal * (873 * 10 + 8) / 10;
+	tuner->signal = (tuner->signal * 873) + (8 * tuner->signal / 10);
 
 	/* automatic frequency control: -1: freq to low, 1 freq to high */
 	/* AFCRL does only indicate that freq. differs, not if too low/high */

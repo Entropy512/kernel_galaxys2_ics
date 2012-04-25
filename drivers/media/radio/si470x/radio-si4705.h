@@ -444,6 +444,13 @@
 /**************************************************************************
  * General Driver Definitions
  **************************************************************************/
+enum {
+	RADIO_OP_LP_MODE	= 0,
+	/* radio playback routed directly codec. default */
+	RADIO_OP_RICH_MODE,
+	/* radio playback routed via AP */
+	RADIO_OP_DEFAULT = RADIO_OP_LP_MODE
+};
 
 /*
  * si4705_device - private data
@@ -453,6 +460,9 @@ struct si4705_device {
 
 	/* driver management */
 	unsigned int users;
+	unsigned char op_mode;
+	unsigned char power_state;
+	unsigned char power_state_at_suspend;
 
 	/* si4705 int_status (0..7) */
 	unsigned char int_status;

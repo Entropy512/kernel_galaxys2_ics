@@ -602,11 +602,10 @@ U32 rtvTDMB_GetPER(void)
 
 	RTV_REG_MAP_SEL(FEC_PAGE);
 	rdata0 = RTV_REG_GET(0xD7);
-
 	rs_sync = (rdata0 & 0x08) >> 3;
 	if (rs_sync != 0x01) {
 		RTV_GUARD_FREE;
-		return 0;
+		return 700;
 	}
 
 	rdata1 = RTV_REG_GET(0xB4);
@@ -642,7 +641,7 @@ S32 rtvTDMB_GetRSSI(void)
 	case 0:
 		nRssi = -((RFAGC * (S32)(2.75*RTV_TDMB_RSSI_DIVIDER))
 			+ (GVBB * (S32)(0.36*RTV_TDMB_RSSI_DIVIDER))
-			- (S32)(11*RTV_TDMB_RSSI_DIVIDER));
+			- (S32)(12*RTV_TDMB_RSSI_DIVIDER));
 		break;
 
 	case 1:
@@ -654,13 +653,13 @@ S32 rtvTDMB_GetRSSI(void)
 	case 2:
 		nRssi = -((RFAGC * (S32)(3*RTV_TDMB_RSSI_DIVIDER))
 			+ (GVBB * (S32)(0.365*RTV_TDMB_RSSI_DIVIDER))
-			+ (S32)(4*RTV_TDMB_RSSI_DIVIDER));
+			+ (S32)(3*RTV_TDMB_RSSI_DIVIDER));
 		break;
 
 	case 3:
 		nRssi = -((RFAGC * (S32)(3*RTV_TDMB_RSSI_DIVIDER))
 			+ (GVBB * (S32)(0.5*RTV_TDMB_RSSI_DIVIDER))
-			+ (S32)(2.5*RTV_TDMB_RSSI_DIVIDER));
+			+ (S32)(0.5*RTV_TDMB_RSSI_DIVIDER));
 		break;
 
 	default:
@@ -668,7 +667,7 @@ S32 rtvTDMB_GetRSSI(void)
 	}
 
 	if (((RD00&0xC0) == 0x40) && (GVBB > 123))
-		nRssi -= (S32)(7*RTV_TDMB_RSSI_DIVIDER);
+		nRssi -= (S32)(0*RTV_TDMB_RSSI_DIVIDER);
 
 	return nRssi;
 }
@@ -709,15 +708,15 @@ U32 rtvTDMB_GetCNR(void)
 	return SNR;
 }
 
-/* MSC BER (0 ~ 14) */
+/* MSC BER (0 ~ 140) */
 U32 rtvTDMB_GetCER(void)
 {
 	U8 rcnt3 = 0, rcnt2 = 0, rcnt1 = 0, rcnt0 = 0;
-	U32 cer_cnt, cer_period_cnt;
+	U32 cer_cnt, cer_period_cnt, ret_val;
 
 	if (g_fRtvChannelChange) {
 		RTV_DBGMSG0("[rtvTDMB_GetBER] RTV Freqency change state!\n");
-		return 0;
+		return 2000;
 	}
 
 	RTV_GUARD_LOCK;
@@ -740,7 +739,7 @@ U32 rtvTDMB_GetCER(void)
 	RTV_GUARD_FREE;
 
 	if (cer_period_cnt == 0)
-		return 0; /* No service */
+		return 2000; /* No service */
 
 	cer_cnt = (rcnt3 << 24) | (rcnt2 << 16) | (rcnt1 << 8) | rcnt0;
 
@@ -748,10 +747,15 @@ U32 rtvTDMB_GetCER(void)
 		"cer_period_cnt: %u\n",
 		cer_cnt, cer_period_cnt);*/
 
-	/*return ((val / 1000)*25);*/
-	/*return val / 1000;*/
-
-	return (cer_cnt * 100) / cer_period_cnt;
+	if (cer_cnt <= 4000)
+		return 0;
+	else {
+		ret_val = ((cer_cnt * 1000)/cer_period_cnt) * 10;
+		if (ret_val <= 1200)
+			return ret_val;
+		else
+			return 2000;
+	}
 }
 
 /* Pre BER */
@@ -796,6 +800,36 @@ U32 rtvTDMB_GetBER(void)
 	else
 		return (val * (U32) RTV_TDMB_BER_DIVIDER) / cnt;
 }
+
+
+static UINT g_nTdmbPrevAntennaLevel;
+
+#define TDMB_MAX_NUM_ANTENNA_LEVEL	7
+
+UINT rtvTDMB_GetAntennaLevel(U32 dwCER)
+{
+	UINT nCurLevel = 0;
+	UINT nPrevLevel = g_nTdmbPrevAntennaLevel;
+	static const UINT aAntLvlTbl[TDMB_MAX_NUM_ANTENNA_LEVEL]
+		= {810, 700, 490, 400, 250, 180, 0};
+
+	do {
+		if (dwCER >= aAntLvlTbl[nCurLevel]) /* Use equal for CER 0 */
+			break;
+	} while (++nCurLevel != TDMB_MAX_NUM_ANTENNA_LEVEL);
+
+	if (nCurLevel != nPrevLevel) {
+		if (nCurLevel < nPrevLevel)
+			nPrevLevel--;
+		else
+			nPrevLevel++;
+
+		g_nTdmbPrevAntennaLevel = nPrevLevel;
+	}
+
+	return nPrevLevel;
+}
+
 
 /* Because that TDMB has the sub channel,
 we checks the freq which new or the same when the changsing of channel */
