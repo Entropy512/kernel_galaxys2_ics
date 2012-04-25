@@ -67,7 +67,12 @@ enum HDMI_3D_EXT_DATA {
 	 * information for Side-by-side(half) 3D structure */
 
 	/** Horizontal sub-sampleing */
-	HDMI_H_SUB_SAMPLE = 0x10
+	HDMI_H_SUB_SAMPLE = 0x1
+};
+
+enum HDMI_OUTPUT_FMT {
+	HDMI_OUTPUT_RGB888 = 0x0,
+	HDMI_OUTPUT_YUV444 = 0x2
 };
 
 enum HDMI_PACKET_TYPE {
@@ -277,6 +282,9 @@ struct hdmi_device {
 	int bits_per_sample;
 	/** current audio codec type */
 	enum HDMI_AUDIO_CODEC audio_codec;
+	/** HDMI output format */
+	enum HDMI_OUTPUT_FMT output_fmt;
+
 	/** HDCP information */
 	struct hdcp_info hdcp_info;
 	struct work_struct work;

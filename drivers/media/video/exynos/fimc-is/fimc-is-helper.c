@@ -38,24 +38,6 @@
 #include "fimc-is-param.h"
 #include "fimc-is-err.h"
 
-/*
-Default setting values
-*/
-#define DEFAULT_PREVIEW_STILL_WIDTH	640
-#define DEFAULT_PREVIEW_STILL_HEIGHT	480
-#define DEFAULT_CAPTURE_STILL_WIDTH	640
-#define DEFAULT_CAPTURE_STILL_HEIGHT	480
-#define DEFAULT_PREVIEW_VIDEO_WIDTH	640
-#define DEFAULT_PREVIEW_VIDEO_HEIGHT	480
-#define DEFAULT_CAPTURE_VIDEO_WIDTH	640
-#define DEFAULT_CAPTURE_VIDEO_HEIGHT	480
-
-
-#define DEFAULT_PREVIEW_STILL_FRAMERATE	30
-#define DEFAULT_CAPTURE_STILL_FRAMERATE	15
-#define DEFAULT_PREVIEW_VIDEO_FRAMERATE	30
-#define DEFAULT_CAPTURE_VIDEO_FRAMERATE	30
-
 static const struct sensor_param init_val_sensor_preview_still = {
 	.frame_rate = {
 		.frame_rate = DEFAULT_PREVIEW_STILL_FRAMERATE,
@@ -901,11 +883,9 @@ int fimc_is_hw_wait_intmsr0_intmsd0(struct fimc_is_dev *dev)
 	return 0;
 }
 
-int fimc_is_fw_clear_irq1(struct fimc_is_dev *dev)
+int fimc_is_fw_clear_irq1(struct fimc_is_dev *dev, unsigned int intr_pos)
 {
-	u32 cfg = readl(dev->regs + INTSR1);
-
-	writel(cfg, dev->regs + INTCR1);
+	writel((1<<intr_pos), dev->regs + INTCR1);
 	return 0;
 }
 
@@ -1105,20 +1085,7 @@ void fimc_is_hw_set_sensor_num(struct fimc_is_dev *dev)
 	cfg = dev->sensor_num;
 	writel(cfg, dev->regs + ISSR3);
 }
-#if 0
-void fimc_is_hw_set_load_setfile(struct fimc_is_dev *dev)
-{
-	u32 cfg;
-	writel(ISR_DONE, dev->regs + ISSR0);
-	cfg = dev->sensor.id;
-	writel(cfg, dev->regs + ISSR1);
-	/* param 1 */
-	writel(IHC_LOAD_SET_FILE, dev->regs + ISSR2);
-	/* param 2 */
-	cfg = dev->sensor_num;
-	writel(cfg, dev->regs + ISSR3);
-}
-#endif
+
 int fimc_is_hw_get_sensor_num(struct fimc_is_dev *dev)
 {
 	u32 cfg = readl(dev->regs + ISSR11);
@@ -1139,6 +1106,18 @@ int fimc_is_hw_set_param(struct fimc_is_dev *dev)
 	writel(atomic_read(&dev->p_region_num), dev->regs + ISSR3);
 	writel(dev->p_region_index1, dev->regs + ISSR4);
 	writel(dev->p_region_index2, dev->regs + ISSR5);
+	fimc_is_hw_set_intgr0_gd0(dev);
+	return 0;
+}
+
+int fimc_is_hw_set_tune(struct fimc_is_dev *dev)
+{
+	fimc_is_hw_wait_intmsr0_intmsd0(dev);
+	writel(HIC_SET_TUNE, dev->regs + ISSR0);
+	writel(dev->sensor.id, dev->regs + ISSR1);
+
+	writel(dev->h2i_cmd.entry_id, dev->regs + ISSR2);
+
 	fimc_is_hw_set_intgr0_gd0(dev);
 	return 0;
 }

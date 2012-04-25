@@ -498,7 +498,7 @@ static int gsc_capture_enum_input(struct file *file, void *priv,
 {
 	struct gsc_dev *gsc = video_drvdata(file);
 	struct exynos_platform_gscaler *pdata = gsc->pdata;
-	struct exynos_gscaler_isp_info *isp_info;
+	struct exynos_isp_info *isp_info;
 
 	if (i->index >= MAX_CAMIF_CLIENTS)
 		return -EINVAL;
@@ -548,6 +548,7 @@ void gsc_cap_pipeline_prepare(struct gsc_dev *gsc, struct media_entity *me)
 	media_entity_graph_walk_start(&graph, me);
 
 	while((me = media_entity_graph_walk_next(&graph))) {
+		gsc_info("me->name : %s", me->name);
 		if (media_entity_type(me) != MEDIA_ENT_T_V4L2_SUBDEV)
 			continue;
 		sd = media_entity_to_v4l2_subdev(me);
@@ -1276,7 +1277,7 @@ static int gsc_capture_link_setup(struct media_entity *entity,
 				cap->ctx->in_path = GSC_WRITEBACK;
 				cap->input |= GSC_IN_FIMD_WRITEBACK;
 			}
-			else if (remote->index == FLITE_PAD_SOURCE_PREVIEW)
+			else if (remote->index == FLITE_PAD_SOURCE_PREV)
 				cap->input |= GSC_IN_FLITE_PREVIEW;
 			else
 				cap->input |= GSC_IN_FLITE_CAMCORDING;
@@ -1344,10 +1345,10 @@ static int gsc_capture_create_link(struct gsc_dev *gsc)
 {
 	struct media_entity *source, *sink;
 	struct exynos_platform_gscaler *pdata = gsc->pdata;
-	struct exynos_gscaler_isp_info *isp_info;
+	struct exynos_isp_info *isp_info;
 	u32 num_clients = pdata->num_clients;
 	int ret, i;
-	enum gsc_cam_port id;
+	enum cam_port id;
 
 	/* GSC-SUBDEV ------> GSC-VIDEO (Always link enable) */
 	source = &gsc->cap.sd_cap->entity;
@@ -1361,62 +1362,21 @@ static int gsc_capture_create_link(struct gsc_dev *gsc)
 			return ret;
 		}
 	}
-	/* link sensor to mipi-csis */
 	for (i = 0; i < num_clients; i++) {
 		isp_info = pdata->isp_info[i];
 		id = isp_info->cam_port;
-		switch (isp_info->bus_type) {
-		case GSC_ITU_601:
-			/*	SENSOR ------> FIMC-LITE	*/
-			source = &gsc->cap.sensor[i].sd->entity;
-			sink = &gsc->cap.sd_flite[id]->entity;
-			if (source && sink) {
-				ret = media_entity_create_link(source, 0,
-					      sink, FLITE_PAD_SINK, 0);
-				if (ret) {
-					gsc_err("failed link sensor to csis\n");
-					return ret;
-				}
-			}
-			break;
-		case GSC_MIPI_CSI2:
-			/*	SENSOR ------> MIPI-CSI2	*/
-			source = &gsc->cap.sensor[i].sd->entity;
-			sink = &gsc->cap.sd_csis[id]->entity;
-			if (source && sink) {
-				ret = media_entity_create_link(source, 0,
-					      sink, CSIS_PAD_SINK,0);
-				if (ret) {
-					gsc_err("failed link sensor to csis\n");
-					return ret;
-				}
-			}
-			/*	MIPI-CSI2 ------> FIMC-LITE	*/
-			source = &gsc->cap.sd_csis[id]->entity;
-			sink = &gsc->cap.sd_flite[id]->entity;
-			if (source && sink) {
-				ret = media_entity_create_link(source,
-						CSIS_PAD_SOURCE,
-						sink, FLITE_PAD_SINK,0);
-				if (ret) {
-					gsc_err("failed link csis to flite\n");
-					return ret;
-				}
-			}
-			break;
-		}
 		/* FIMC-LITE ------> GSC-SUBDEV (ITU & MIPI common) */
 		source = &gsc->cap.sd_flite[id]->entity;
 		sink = &gsc->cap.sd_cap->entity;
 		if (source && sink) {
 			if (pdata->cam_preview)
 				ret = media_entity_create_link(source,
-						FLITE_PAD_SOURCE_PREVIEW,
-					sink, GSC_PAD_SINK, 0);
+						FLITE_PAD_SOURCE_PREV,
+						sink, GSC_PAD_SINK, 0);
 			if (!ret && pdata->cam_camcording)
 				ret = media_entity_create_link(source,
-						FLITE_PAD_SOURCE_CAMCORDING,
-					sink, GSC_PAD_SINK, 0);
+						FLITE_PAD_SOURCE_CAMCORD,
+						sink, GSC_PAD_SINK, 0);
 			if (ret) {
 				gsc_err("failed link flite to gsc\n");
 				return ret;
@@ -1427,58 +1387,16 @@ static int gsc_capture_create_link(struct gsc_dev *gsc)
 	return 0;
 }
 
-static int csis_register_callback(struct device *dev, void *p)
-{
-	struct v4l2_subdev **sd_list = p;
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-
-	if (sd) {
-		struct platform_device *pdev = v4l2_get_subdevdata(sd);
-		if (pdev)
-			gsc_dbg("pdev->id : %d\n", pdev->id);
-		*(sd_list + pdev->id) = sd;
-	}
-
-	return 0;
-}
-
-static int flite_register_callback(struct device *dev, void *p)
-{
-	struct v4l2_subdev **sd_list = p;
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-
-	if (sd) {
-		struct platform_device *pdev = v4l2_get_subdevdata(sd);
-		if (pdev)
-			gsc_dbg("pdev->id : %d\n", pdev->id);
-		*(sd_list + pdev->id) = sd;
-	}
-
-	return 0;
-}
-
 static struct v4l2_subdev *gsc_cap_register_sensor(struct gsc_dev *gsc, int i)
 {
-	struct exynos_platform_gscaler *pdata = gsc->pdata;
-	struct exynos_gscaler_isp_info *isp_info = pdata->isp_info[i];
 	struct exynos_md *mdev = gsc->mdev[MDEV_CAPTURE];
-	struct i2c_adapter *adapter;
 	struct v4l2_subdev *sd = NULL;
 
-	adapter = i2c_get_adapter(isp_info->i2c_bus_num);
-	if (!adapter)
+	sd = mdev->sensor_sd[i];
+	if (!sd)
 		return NULL;
-	sd = v4l2_i2c_new_subdev_board(&mdev->v4l2_dev, adapter,
-				       isp_info->board_info, NULL);
-	if (IS_ERR_OR_NULL(sd)) {
-		v4l2_err(&mdev->v4l2_dev, "Failed to acquire subdev\n");
-		return NULL;
-	}
-	v4l2_set_subdev_hostdata(sd, &gsc->cap.sensor[i]);
-	sd->grp_id = SENSOR_GRP_ID;
 
-	v4l2_info(&mdev->v4l2_dev, "Registered sensor subdevice %s\n",
-		  isp_info->board_info->type);
+	v4l2_set_subdev_hostdata(sd, &gsc->cap.sensor[i]);
 
 	return sd;
 }
@@ -1501,43 +1419,8 @@ static int gsc_cap_register_sensor_entities(struct gsc_dev *gsc)
 	return 0;
 }
 
-static int gsc_cap_register_platform_entities(struct gsc_dev *gsc,
-		struct exynos_gscaler_isp_info *isp_info)
-{
-	struct device_driver *driver;
-	int ret;
-	struct v4l2_subdev *sd[FLITE_MAX_ENTITIES] = {NULL,};
-	enum gsc_cam_port id = isp_info->cam_port;
-
-	driver = driver_find(FLITE_MODULE_NAME, &platform_bus_type);
-	if (!driver)
-		return -ENODEV;
-	ret = driver_for_each_device(driver, NULL, &sd[0], flite_register_callback);
-	put_driver(driver);
-	if (ret)
-		return ret;
-
-	gsc->cap.sd_flite[id] = sd[id];
-	gsc->cap.sd_flite[id]->grp_id = FLITE_GRP_ID;
-
-	if (isp_info->bus_type == GSC_MIPI_CSI2) {
-		driver = driver_find(CSIS_MODULE_NAME, &platform_bus_type);
-		if (!driver)
-			return -ENODEV;
-		ret = driver_for_each_device(driver, NULL, &sd[0],
-					csis_register_callback);
-		put_driver(driver);
-		if (ret)
-			return ret;
-		gsc->cap.sd_csis[id] = sd[id];
-		gsc->cap.sd_csis[id]->grp_id = CSIS_GRP_ID;
-	}
-
-	return ret;
-}
-
 static int gsc_cap_config_camclk(struct gsc_dev *gsc,
-		struct exynos_gscaler_isp_info *isp_info, int i)
+		struct exynos_isp_info *isp_info, int i)
 {
 	struct gsc_capture_device *gsc_cap = &gsc->cap;
 	struct clk *camclk;
@@ -1570,7 +1453,7 @@ int gsc_register_capture_device(struct gsc_dev *gsc)
 	struct gsc_ctx *ctx;
 	struct vb2_queue *q;
 	struct exynos_platform_gscaler *pdata = gsc->pdata;
-	struct exynos_gscaler_isp_info *isp_info;
+	struct exynos_isp_info *isp_info;
 	int ret = -ENOMEM;
 	int i;
 
@@ -1619,13 +1502,15 @@ int gsc_register_capture_device(struct gsc_dev *gsc)
 
 	vb2_queue_init(q);
 
+	/* Get mipi-csis and fimc-lite subdev ptr using mdev */
+	for (i = 0; i < FLITE_MAX_ENTITIES; i++)
+		gsc->cap.sd_flite[i] = gsc->mdev[MDEV_CAPTURE]->flite_sd[i];
+
+	for (i = 0; i < CSIS_MAX_ENTITIES; i++)
+		gsc->cap.sd_csis[i] = gsc->mdev[MDEV_CAPTURE]->csis_sd[i];
+
 	for (i = 0; i < pdata->num_clients; i++) {
 		isp_info = pdata->isp_info[i];
-		ret = gsc_cap_register_platform_entities(gsc, isp_info);
-		if (ret) {
-			gsc_err("failed register platform entities");
-			goto err_ctx_alloc;
-		}
 		ret = gsc_cap_config_camclk(gsc, isp_info, i);
 		if (ret) {
 			gsc_err("failed setup cam clk");
@@ -1633,12 +1518,10 @@ int gsc_register_capture_device(struct gsc_dev *gsc)
 		}
 	}
 
-	if (pdata->cam_preview) {
-		ret = gsc_cap_register_sensor_entities(gsc);
-		if (ret) {
-			gsc_err("failed register sensor entities");
-			goto err_clk;
-		}
+	ret = gsc_cap_register_sensor_entities(gsc);
+	if (ret) {
+		gsc_err("failed register sensor entities");
+		goto err_clk;
 	}
 
 	ret = video_register_device(vfd, VFL_TYPE_GRABBER,

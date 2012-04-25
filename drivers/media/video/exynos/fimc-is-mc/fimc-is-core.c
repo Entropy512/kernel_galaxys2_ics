@@ -75,7 +75,8 @@ struct vb2_ion_conf {
 };
 
 struct vb2_ion_buf {
-	struct vm_area_struct		*vma;
+	struct vm_area_struct		**vma;
+	int				vma_count;
 	struct vb2_ion_conf		*conf;
 	struct vb2_vmarea_handler	handler;
 
@@ -156,7 +157,7 @@ int fimc_is_init_mem(struct fimc_is_dev *dev)
 	printk(KERN_DEBUG "fimc_is_init_mem - ION\n");
 	sprintf(cma_name, "%s%d", "fimc_is", 0);
 	err = cma_info(&mem_info, &dev->pdev->dev, 0);
-	printk(KERN_INFO "%s : [cma_info] start_addr : 0x%x, end_addr : 0x%x, "
+	printk(KERN_DEBUG "%s : [cma_info] start_addr : 0x%x, end_addr : 0x%x, "
 			"total_size : 0x%x, free_size : 0x%x\n",
 			__func__, mem_info.lower_bound, mem_info.upper_bound,
 			mem_info.total_size, mem_info.free_size);
@@ -174,8 +175,8 @@ int fimc_is_init_mem(struct fimc_is_dev *dev)
 		(unsigned long)sizeof(struct is_region));
 	fimc_is_mem_cache_clean((void *)dev->is_p_region, FIMC_IS_REGION_SIZE+1);
 
-	printk(KERN_INFO "ctrl->mem.size = 0x%x\n", dev->mem.size);
-	printk(KERN_INFO "ctrl->mem.base = 0x%x\n", dev->mem.base);
+	printk(KERN_DEBUG "ctrl->mem.size = 0x%x\n", dev->mem.size);
+	printk(KERN_DEBUG "ctrl->mem.base = 0x%x\n", dev->mem.base);
 
 	return 0;
 }
@@ -479,6 +480,7 @@ int fimc_is_init_set(struct fimc_is_dev *dev , u32 val)
 			return -EBUSY;
 		}
 
+		clear_bit(IS_ST_SET_FILE, &dev->state);
 		dbg(" Load setfile received\n");
 		fimc_is_load_setfile(dev);
 		dbg(" fimc_is_load_setfile end\n");
@@ -1141,7 +1143,68 @@ static int fimc_is_runtime_suspend(struct device *dev)
 
 static int fimc_is_runtime_resume(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
+	struct fimc_is_dev *isp = (struct fimc_is_dev *)platform_get_drvdata(pdev);
+	struct flite_frame f_frame;
+	u32 cfg;
+	u32 timeout;
+
 	printk(KERN_DEBUG "%s\n", __func__);
+
+	enable_mipi();
+	/* set mipi & fimclite */
+	f_frame.o_width = DEFAULT_PREVIEW_STILL_WIDTH + 16;
+	f_frame.o_height = DEFAULT_PREVIEW_STILL_HEIGHT + 12;
+	f_frame.offs_h = 0;
+	f_frame.offs_v = 0;
+	f_frame.width = DEFAULT_PREVIEW_STILL_WIDTH + 16;
+	f_frame.height = DEFAULT_PREVIEW_STILL_HEIGHT + 12;
+
+	/*start mipi & fimclite*/
+	start_fimc_lite(&f_frame);
+	mdelay(10);
+	start_mipi_csi(&f_frame);
+
+	/* init Clock */
+	if (isp->pdata->clk_cfg) {
+		isp->pdata->clk_cfg(isp->pdev);
+	} else {
+		dev_err(&isp->pdev->dev, "failed to config clock\n");
+		return 0;
+	}
+
+	if (isp->pdata->clk_on) {
+		isp->pdata->clk_on(isp->pdev);
+	} else {
+		dev_err(&isp->pdev->dev, "failed to clock on\n");
+		return 0;
+	}
+
+	/* 1. A5 start address setting */
+#if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
+	cfg = isp->mem.base;
+#elif defined(CONFIG_VIDEOBUF2_ION)
+	cfg = isp->mem.dvaddr;
+	if (isp->alloc_ctx)
+	fimc_is_mem_resume(isp->alloc_ctx);
+#endif
+
+	printk(KERN_DEBUG "mem.base(dvaddr) : 0x%08x\n", cfg);
+	printk(KERN_DEBUG "mem.base(kvaddr) : 0x%08x\n", (unsigned int)isp->mem.kvaddr);
+	writel(cfg, isp->regs + BBOAR);
+
+	/* 2. A5 power on*/
+	writel(0x1, PMUREG_ISP_ARM_CONFIGURATION);
+
+	/* 3. enable A5 */
+	writel(0x00018000, PMUREG_ISP_ARM_OPTION);
+	timeout = 1000;
+	while ((__raw_readl(PMUREG_ISP_ARM_STATUS) & 0x1) != 0x1) {
+		if (timeout == 0)
+			printk(KERN_ERR "A5 power on failed2\n");
+		timeout--;
+		mdelay(1);
+	}
 	return 0;
 }
 
@@ -1643,7 +1706,7 @@ static int fimc_is_probe(struct platform_device *pdev)
 		goto p_err3;
 	}
 
-	platform_set_drvdata(pdev, &isp);
+	platform_set_drvdata(pdev, isp);
 
 	/* create link */
 	ret = media_entity_create_link(
@@ -1717,10 +1780,8 @@ static int fimc_is_probe(struct platform_device *pdev)
 		goto p_err3;
 	}
 
-#if defined(CONFIG_VIDEOBUF2_ION)
-	if (isp->alloc_ctx)
-		fimc_is_mem_resume(isp->alloc_ctx);
-#endif
+	pm_runtime_enable(&pdev->dev);
+
 	printk(KERN_DEBUG "%s : fimc_is_front_%d probe success\n", __func__, pdev->id);
 	printk("probe2\n");
 	return 0;

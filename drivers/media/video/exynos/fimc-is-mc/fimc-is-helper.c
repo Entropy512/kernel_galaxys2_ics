@@ -1267,105 +1267,37 @@ void fimc_is_hw_subip_poweroff(struct fimc_is_dev *dev)
 	fimc_is_hw_set_intgr0_gd0(dev);
 }
 
-void fimc_is_hw_a5_power(struct fimc_is_dev *dev, int on)
+void fimc_is_hw_a5_power(struct fimc_is_dev *isp, int on)
 {
-	u32 cfg;
-	u32 timeout;
-	struct flite_frame f_frame;
+	int ret = 0;
+	struct device *dev = &isp->pdev->dev;
 
 	printk(KERN_INFO "%s(%d)\n", __func__, on);
 	if (on) {
 		/* 2. enable ISP */
-		writel(0x7, PMUREG_ISP_CONFIGURATION);
-		timeout = 1000;
-		while ((__raw_readl(PMUREG_ISP_STATUS) & 0x7) != 0x7) {
-			if (timeout == 0)
-				printk(KERN_ERR "A5 power on failed1\n");
-			timeout--;
-			mdelay(1);
-		}
+		clear_bit(FIMC_IS_PWR_ST_POWEROFF, &isp->power);
+		set_bit(FIMC_IS_PWR_ST_POWERED, &isp->power);
+		ret = pm_runtime_get_sync(dev);
+	} else {
 
-		enable_mipi();
-		/* set mipi & fimclite */
-		f_frame.o_width = DEFAULT_PREVIEW_STILL_WIDTH + 16;
-		f_frame.o_height = DEFAULT_PREVIEW_STILL_HEIGHT + 12;
-		f_frame.offs_h = 0;
-		f_frame.offs_v = 0;
-		f_frame.width = DEFAULT_PREVIEW_STILL_WIDTH + 16;
-		f_frame.height = DEFAULT_PREVIEW_STILL_HEIGHT + 12;
+		clear_bit(FIMC_IS_PWR_ST_POWERED, &isp->power);
 
 		/*start mipi & fimclite*/
-		start_fimc_lite(&f_frame);
+		stop_fimc_lite();
 		mdelay(10);
-		start_mipi_csi(&f_frame);
+		stop_mipi_csi();
 
-		/* init Clock */
-		if (dev->pdata->clk_cfg) {
-			dev->pdata->clk_cfg(dev->pdev);
-		} else {
-			dev_err(&dev->pdev->dev, "failed to config clock\n");
-			return;
-		}
-
-		if (dev->pdata->clk_on) {
-			dev->pdata->clk_on(dev->pdev);
-		} else {
-			dev_err(&dev->pdev->dev, "failed to clock on\n");
-			return;
-		}
-
-		/* 1. A5 start address setting */
-#if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
-		cfg = dev->mem.base;
-#elif defined(CONFIG_VIDEOBUF2_ION)
-		cfg = dev->mem.dvaddr;
+#if defined(CONFIG_VIDEOBUF2_ION)
+		if (isp->alloc_ctx)
+			fimc_is_mem_suspend(isp->alloc_ctx);
 #endif
-
-		printk(KERN_DEBUG "mem.base : 0x%08x\n", cfg);
-		writel(cfg, dev->regs + BBOAR);
-
-		/* 3. A5 power on*/
-		writel(0x1, PMUREG_ISP_ARM_CONFIGURATION);
-
-		/* 4. enable A5 */
-		writel(0x00018000, PMUREG_ISP_ARM_OPTION);
-		timeout = 1000;
-		while ((__raw_readl(PMUREG_ISP_ARM_STATUS) & 0x1) != 0x1) {
-			if (timeout == 0)
-				printk(KERN_ERR "A5 power on failed2\n");
-			timeout--;
-			mdelay(1);
+		if (isp->pdata->clk_off) {
+			isp->pdata->clk_off(isp->pdev);
+		} else {
+			dev_err(&isp->pdev->dev, "failed to clock on\n");
+			return;
 		}
-
-		set_bit(FIMC_IS_PWR_ST_POWERED, &dev->power);
-	} else {
-		/* 1. disable A5 */
-		writel(0x00010000, PMUREG_ISP_ARM_OPTION);
-
-		/* 2. A5 power off*/
-		writel(0x0, PMUREG_ISP_ARM_CONFIGURATION);
-
-		/* 3. Check A5 power off status register */
-		timeout = 1000;
-		while (__raw_readl(PMUREG_ISP_ARM_STATUS) & 0x1) {
-			if (timeout == 0)
-				printk(KERN_ERR "A5 power off failed\n");
-			timeout--;
-			mdelay(1);
-		}
-
-		/* 4. ISP Power down mode (LOWPWR) */
-		writel(0x0, PMUREG_CMU_RESET_ISP_SYS_PWR_REG);
-
-		writel(0x0, PMUREG_ISP_CONFIGURATION);
-
-		timeout = 1000;
-		while ((__raw_readl(PMUREG_ISP_STATUS) & 0x7)) {
-			if (timeout == 0)
-				printk(KERN_ERR "ISP power off failed\n");
-			timeout--;
-			mdelay(10);
-		}
+		ret = pm_runtime_put_sync(dev);
 	}
 }
 

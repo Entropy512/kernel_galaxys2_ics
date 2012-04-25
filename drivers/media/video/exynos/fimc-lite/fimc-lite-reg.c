@@ -11,6 +11,7 @@
 #include <linux/io.h>
 #include <media/exynos_flite.h>
 #include <mach/map.h>
+#include <plat/cpu.h>
 
 #include "fimc-lite-core.h"
 
@@ -20,7 +21,7 @@ MODULE_PARM_DESC(reg_debug, "Enable module debug trace. Set to 1 to enable.");
 
 void flite_hw_set_cam_source_size(struct flite_dev *dev)
 {
-	struct flite_frame *f_frame =  &dev->source_frame;
+	struct flite_frame *f_frame =  &dev->s_frame;
 	u32 cfg = 0;
 
 	cfg = readl(dev->regs + FLITE_REG_CISRCSIZE);
@@ -88,6 +89,9 @@ void flite_hw_set_capture_stop(struct flite_dev *dev)
 	cfg &= ~FLITE_REG_CIIMGCPT_IMGCPTEN;
 
 	writel(cfg, dev->regs + FLITE_REG_CIIMGCPT);
+
+	if (soc_is_exynos4212() || soc_is_exynos4412())
+		clear_bit(FLITE_ST_STREAM, &dev->state);
 }
 
 int flite_hw_set_source_format(struct flite_dev *dev)
@@ -107,6 +111,7 @@ int flite_hw_set_source_format(struct flite_dev *dev)
 
 	if (f_fmt->is_yuv) {
 		cfg = readl(dev->regs + FLITE_REG_CISRCSIZE);
+
 		switch(f_fmt->code) {
 		case V4L2_MBUS_FMT_YUYV8_2X8:
 			cfg |= FLITE_REG_CISRCSIZE_ORDER422_IN_YCBYCR;
@@ -209,7 +214,7 @@ void flite_hw_set_window_offset(struct flite_dev *dev)
 {
 	u32 cfg = 0;
 	u32 hoff2, voff2;
-	struct flite_frame *f_frame = &dev->source_frame;
+	struct flite_frame *f_frame = &dev->s_frame;
 
 	cfg = readl(dev->regs + FLITE_REG_CIWDOFST);
 	cfg &= ~(FLITE_REG_CIWDOFST_HOROFF_MASK |
@@ -237,3 +242,107 @@ void flite_hw_set_last_capture_end_clear(struct flite_dev *dev)
 
 	writel(cfg, dev->regs + FLITE_REG_CISTATUS2);
 }
+
+#if defined(CONFIG_MEDIA_CONTROLLER) && defined(CONFIG_ARCH_EXYNOS5)
+void flite_hw_set_inverse_polarity(struct flite_dev *dev)
+{
+	struct v4l2_subdev *sd = dev->pipeline.sensor;
+	struct flite_sensor_info *s_info = v4l2_get_subdev_hostdata(sd);
+	u32 cfg = 0;
+	cfg = readl(dev->regs + FLITE_REG_CIGCTRL);
+	cfg &= ~(FLITE_REG_CIGCTRL_INVPOLPCLK | FLITE_REG_CIGCTRL_INVPOLVSYNC
+			| FLITE_REG_CIGCTRL_INVPOLHREF);
+
+	if (s_info->pdata->flags & CAM_CLK_INV_PCLK)
+		cfg |= FLITE_REG_CIGCTRL_INVPOLPCLK;
+	if (s_info->pdata->flags & CAM_CLK_INV_VSYNC)
+		cfg |= FLITE_REG_CIGCTRL_INVPOLVSYNC;
+	if (s_info->pdata->flags & CAM_CLK_INV_HREF)
+		cfg |= FLITE_REG_CIGCTRL_INVPOLHREF;
+
+	writel(cfg, dev->regs + FLITE_REG_CIGCTRL);
+}
+
+void flite_hw_set_sensor_type(struct flite_dev *dev)
+{
+	struct v4l2_subdev *sd = dev->pipeline.sensor;
+	struct flite_sensor_info *s_info = v4l2_get_subdev_hostdata(sd);
+	u32 cfg = 0;
+	cfg = readl(dev->regs + FLITE_REG_CIGCTRL);
+
+	if (s_info->pdata->bus_type == CAM_TYPE_ITU)
+		cfg &= ~FLITE_REG_CIGCTRL_SELCAM_MIPI;
+	else
+		cfg |= FLITE_REG_CIGCTRL_SELCAM_MIPI;
+
+	writel(cfg, dev->regs + FLITE_REG_CIGCTRL);
+
+}
+
+void flite_hw_set_dma_offset(struct flite_dev *dev)
+{
+	u32 cfg = 0;
+	struct flite_frame *f_frame = &dev->d_frame;
+	cfg = readl(dev->regs + FLITE_REG_CIOOFF);
+	cfg |= FLITE_REG_CIOOFF_OOFF_H(f_frame->offs_h) |
+		FLITE_REG_CIOOFF_OOFF_V(f_frame->offs_v);
+
+	writel(cfg, dev->regs + FLITE_REG_CIOOFF);
+}
+
+void flite_hw_set_output_addr(struct flite_dev *dev,
+			     struct flite_addr *addr, int index)
+{
+	flite_info("dst_buf[%d]: 0x%X", index, addr->y);
+
+	writel(addr->y, dev->regs + FLITE_REG_CIOSA);
+}
+
+void flite_hw_set_out_order(struct flite_dev *dev)
+{
+	struct flite_frame *frame = &dev->d_frame;
+	u32 cfg = readl(dev->regs + FLITE_REG_CIODMAFMT);
+	if (frame->fmt->is_yuv) {
+		switch (frame->fmt->code) {
+		case V4L2_MBUS_FMT_UYVY8_2X8:
+			cfg |= FLITE_REG_CIODMAFMT_CBYCRY;
+			break;
+		case V4L2_MBUS_FMT_VYUY8_2X8:
+			cfg |= FLITE_REG_CIODMAFMT_CRYCBY;
+			break;
+		case V4L2_MBUS_FMT_YUYV8_2X8:
+			cfg |= FLITE_REG_CIODMAFMT_YCBYCR;
+			break;
+		case V4L2_MBUS_FMT_YVYU8_2X8:
+			cfg |= FLITE_REG_CIODMAFMT_YCRYCB;
+			break;
+		default:
+			flite_err("not supported mbus_code");
+			break;
+
+		}
+	}
+	writel(cfg, dev->regs + FLITE_REG_CIODMAFMT);
+}
+
+void flite_hw_set_output_size(struct flite_dev *dev)
+{
+	struct flite_frame *f_frame =  &dev->d_frame;
+	u32 cfg = 0;
+
+	cfg = readl(dev->regs + FLITE_REG_CIOCAN);
+
+	cfg |= FLITE_REG_CIOCAN_OCAN_V(f_frame->o_height);
+	cfg |= FLITE_REG_CIOCAN_OCAN_H(f_frame->o_width);
+
+	writel(cfg, dev->regs + FLITE_REG_CIOCAN);
+}
+#else
+void flite_hw_set_inverse_polarity(struct flite_dev *dev){}
+void flite_hw_set_sensor_type(struct flite_dev *dev){}
+void flite_hw_set_dma_offset(struct flite_dev *dev){}
+void flite_hw_set_output_addr(struct flite_dev *dev,
+			struct flite_addr *addr, int index){}
+void flite_hw_set_out_order(struct flite_dev *dev){}
+void flite_hw_set_output_size(struct flite_dev *dev){}
+#endif

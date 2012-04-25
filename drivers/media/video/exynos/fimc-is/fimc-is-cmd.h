@@ -121,19 +121,23 @@ struct is_common_reg {
 
 	u32 isp_sensor_id;
 	u32 isp_param1;
-	u32 reserved3[2];
+	u32 isp_param2;
+	u32 reserved3[1];
 
 	u32 scc_sensor_id;
 	u32 scc_param1;
-	u32 reserved4[2];
+	u32 scc_param2;
+	u32 reserved4[1];
 
 	u32 dnr_sensor_id;
 	u32 dnr_param1;
-	u32 reserved5[2];
+	u32 dnr_param2;
+	u32 reserved5[1];
 
 	u32 scp_sensor_id;
 	u32 scp_param1;
-	u32 reserved6[30];
+	u32 scp_param2;
+	u32 reserved6[29];
 };
 
 struct is_mcuctl_reg {

@@ -42,16 +42,23 @@
 #include <mach/dev.h>
 
 #include <media/videobuf2-core.h>
+#include <media/videobuf2-cma-phys.h>
 #define MODULE_NAME	"exynos4-fimc-is"
 
 #define MAX_I2H_ARG 12
 #define NUM_FIMC_IS_CLOCKS 1
 
-#define FIMC_IS_SENSOR_NUM	1
+#define FIMC_IS_MAX_BUF_NUM		8
+#define FIMC_IS_MAX_BUf_PLANE_NUM	3
+#define FIMC_IS_SENSOR_NUM	2
 
+/* Time - out definitions */
 #define FIMC_IS_SHUTDOWN_TIMEOUT	(3*HZ)
 #define FIMC_IS_SHUTDOWN_TIMEOUT_SENSOR	(HZ)
 #define FIMC_IS_SHUTDOWN_TIMEOUT_AF	(3*HZ)
+/* Memory definitions */
+#define FIMC_IS_MEM_FW			"f"
+#define FIMC_IS_MEM_ISP_BUF		"i"
 
 #define FIMC_IS_A5_MEM_SIZE		0x00A00000
 #define FIMC_IS_REGION_SIZE		0x5000
@@ -97,6 +104,23 @@
 
 #define is_af_use(dev)		((dev->af.use_af) ? 1 : 0)
 
+/*
+Default setting values
+*/
+#define DEFAULT_PREVIEW_STILL_WIDTH	640
+#define DEFAULT_PREVIEW_STILL_HEIGHT	480
+#define DEFAULT_CAPTURE_STILL_WIDTH	640
+#define DEFAULT_CAPTURE_STILL_HEIGHT	480
+#define DEFAULT_PREVIEW_VIDEO_WIDTH	640
+#define DEFAULT_PREVIEW_VIDEO_HEIGHT	480
+#define DEFAULT_CAPTURE_VIDEO_WIDTH	640
+#define DEFAULT_CAPTURE_VIDEO_HEIGHT	480
+
+
+#define DEFAULT_PREVIEW_STILL_FRAMERATE	30
+#define DEFAULT_CAPTURE_STILL_FRAMERATE	15
+#define DEFAULT_PREVIEW_VIDEO_FRAMERATE	30
+#define DEFAULT_CAPTURE_VIDEO_FRAMERATE	30
 enum fimc_is_state_flag {
 	IS_ST_IDLE,
 	IS_ST_FW_LOADED,
@@ -173,6 +197,19 @@ enum awb_lock_state {
 	FIMC_IS_AWB_LOCKED	= 1
 };
 
+enum fimc_is_video_dev_num {
+	FIMC_IS_VIDEO_NUM_BAYER = 0,
+	FIMC_IS_VIDEO_MAX_NUM,
+};
+
+enum fimc_is_video_vb2_flag {
+	FIMC_IS_STATE_IDLE		= 0,
+	FIMC_IS_STATE_READY,
+	FIMC_IS_STATE_ISP_STREAM_ON,
+	FIMC_IS_STATE_ISP_STREAM_OFF,
+	FIMC_IS_STATE_ISP_BUFFER_PREPARED,
+};
+
 struct is_meminfo {
 	dma_addr_t	base;		/* buffer base */
 	size_t		size;		/* total length */
@@ -207,6 +244,11 @@ struct is_to_host_cmd {
 	u32	sensor_id;
 	u16	num_valid_args;
 	u32	arg[MAX_I2H_ARG];
+};
+
+struct host_to_is_cmd {
+	u16	cmd_type;
+	u32	entry_id;
 };
 
 struct is_sensor {
@@ -246,6 +288,43 @@ struct is_af_info {
 	u16 use_af;
 };
 
+struct fimc_is_dev;
+
+struct fimc_is_vb2 {
+	const struct vb2_mem_ops *ops;
+	void *(*init)(struct fimc_is_dev *is_dev);
+	void (*cleanup)(void *alloc_ctx);
+
+	unsigned long (*plane_addr)(struct vb2_buffer *vb, u32 plane_no);
+
+	void (*resume)(void *alloc_ctx);
+	void (*suspend)(void *alloc_ctx);
+
+	int (*cache_flush)(struct vb2_buffer *vb, u32 num_planes);
+	void (*set_cacheable)(void *alloc_ctx, bool cacheable);
+};
+
+#if defined(CONFIG_VIDEO_EXYNOS_FIMC_IS_BAYER)
+struct fimc_is_fmt {
+	enum v4l2_mbus_pixelcode mbus_code;
+	char	*name;
+	u32	fourcc;
+	u16	flags;
+};
+
+struct fimc_is_video_dev {
+	struct video_device		vd;
+	struct vb2_queue		vbq;
+	struct fimc_is_dev		*dev;
+	struct v4l2_device		v4l2_dev;
+	unsigned int			num_buf;
+	unsigned int			num_plane;
+	unsigned int			buf_ref_cnt;
+	unsigned long			plane_size[FIMC_IS_MAX_BUf_PLANE_NUM];
+	dma_addr_t buf[FIMC_IS_MAX_BUF_NUM][FIMC_IS_MAX_BUf_PLANE_NUM];
+};
+#endif
+
 struct fimc_is_dev {
 	spinlock_t			slock;
 	struct mutex			lock;
@@ -267,6 +346,7 @@ struct fimc_is_dev {
 	int				irq1;
 	wait_queue_head_t		irq_queue1;
 	struct is_to_host_cmd		i2h_cmd;
+	struct host_to_is_cmd		h2i_cmd;
 
 	unsigned long			power;
 
@@ -275,11 +355,13 @@ struct fimc_is_dev {
 	struct vb2_alloc_ctx		*alloc_ctx;
 	struct is_meminfo		mem;		/* for reserved mem */
 	struct is_fd_result_header	fd_header;
-#ifdef CONFIG_CMA
-	char				cma_name[16];
-#endif
-	struct v4l2_subdev		sd;
 
+	struct v4l2_subdev		sd;
+#if defined(CONFIG_VIDEO_EXYNOS_FIMC_IS_BAYER)
+	struct fimc_is_video_dev	video[FIMC_IS_VIDEO_MAX_NUM];
+	const struct fimc_is_vb2	*vb2;
+	unsigned long			vb_state;
+#endif
 	struct device			*bus_dev;
 	/* Shared parameter region */
 	atomic_t			p_region_num;
@@ -319,7 +401,8 @@ extern const struct v4l2_subdev_ops fimc_is_subdev_ops;
 extern struct is_region is_p_region;
 
 extern int fimc_is_fw_clear_irq2(struct fimc_is_dev *dev);
-extern int fimc_is_fw_clear_irq1(struct fimc_is_dev *dev);
+extern int fimc_is_fw_clear_irq1(struct fimc_is_dev *dev,
+						unsigned int intr_pos);
 extern void fimc_is_hw_set_sensor_num(struct fimc_is_dev *dev);
 extern int fimc_is_hw_get_sensor_num(struct fimc_is_dev *dev);
 extern void fimc_is_hw_get_setfile_addr(struct fimc_is_dev *dev);
@@ -341,6 +424,7 @@ extern void fimc_is_hw_subip_poweroff(struct fimc_is_dev *dev);
 extern int fimc_is_hw_get_sensor_max_framerate(struct fimc_is_dev *dev);
 extern void fimc_is_hw_set_debug_level(struct fimc_is_dev *dev, int level1,
 								int level2);
+extern int fimc_is_hw_set_tune(struct fimc_is_dev *dev);
 
 extern int fimc_is_s_power(struct v4l2_subdev *sd, int on);
 
@@ -356,5 +440,13 @@ extern void fimc_is_mem_init_mem_cleanup(void *alloc_ctxes);
 extern void fimc_is_mem_cache_clean(const void *start_addr, unsigned long size);
 extern void fimc_is_mem_cache_inv(const void *start_addr, unsigned long size);
 
+#if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
+extern const struct fimc_is_vb2 fimc_is_vb2_cma;
+#elif defined(CONFIG_VIDEOBUF2_ION)
+extern const struct fimc_is_vb2 fimc_is_vb2_ion;
+#endif
+extern const struct vb2_ops fimc_is_isp_qops;
+extern const struct v4l2_file_operations fimc_is_isp_video_fops;
+extern const struct v4l2_ioctl_ops fimc_is_isp_video_ioctl_ops;
 struct fimc_is_dev *to_fimc_is_dev(struct v4l2_subdev *sdev);
 #endif

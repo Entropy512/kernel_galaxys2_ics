@@ -68,12 +68,6 @@ extern int gsc_dbg;
 
 #define GSC_MAX_CLOCKS			3
 #define GSC_SHUTDOWN_TIMEOUT		((100*HZ)/1000)
-#define GSC_MODULE_NAME			"exynos-gsc"
-#define GSC_SUBDEV_NAME			"exynos-gsc-sd"
-#define FLITE_MODULE_NAME		"exynos-fimc-lite"
-#define CSIS_MODULE_NAME		"s5p-mipi-csis"
-#define FIMD_MODULE_NAME		"s5p-fimd1"
-#define FIMD_ENTITY_NAME		"s3c-fb-window"
 #define GSC_MAX_DEVS			4
 #define WORKQUEUE_NAME_SIZE		32
 #define FIMD_NAME_SIZE			32
@@ -96,16 +90,6 @@ extern int gsc_dbg;
 #define GSC_PAD_SINK			0
 #define GSC_PAD_SOURCE			1
 #define GSC_PADS_NUM			2
-
-#define GSC_CAP_GRP_ID			(1 << 0)
-#define FLITE_GRP_ID			(1 << 1)
-#define CSIS_GRP_ID			(1 << 2)
-#define SENSOR_GRP_ID			(1 << 3)
-#define FIMD_GRP_ID			(1 << 4)
-
-#define SENSOR_MAX_ENTITIES		MAX_CAMIF_CLIENTS
-#define FLITE_MAX_ENTITIES		2
-#define CSIS_MAX_ENTITIES		2
 
 #define	GSC_PARAMS			(1 << 0)
 #define	GSC_SRC_FMT			(1 << 1)
@@ -319,7 +303,7 @@ struct gsc_frame {
 };
 
 struct gsc_sensor_info {
-	struct exynos_gscaler_isp_info *pdata;
+	struct exynos_isp_info *pdata;
 	struct v4l2_subdev *sd;
 	struct clk *camclk;
 };

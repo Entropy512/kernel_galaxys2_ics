@@ -419,6 +419,7 @@ static int fimc_is_scalerc_start_streaming(struct vb2_queue *q)
 
 		isp->scenario_id = ISS_PREVIEW_STILL;
 		set_bit(IS_ST_INIT_PREVIEW_STILL,	&isp->state);
+		clear_bit(IS_ST_INIT_CAPTURE_STILL, &isp->state);
 		clear_bit(IS_ST_INIT_PREVIEW_VIDEO, &isp->state);
 		fimc_is_hw_set_param(isp);
 		ret = wait_event_timeout(isp->irq_queue,
@@ -987,6 +988,7 @@ static int fimc_is_scalerp_start_streaming(struct vb2_queue *q)
 
 		isp->scenario_id = ISS_PREVIEW_STILL;
 		set_bit(IS_ST_INIT_PREVIEW_STILL,	&isp->state);
+		clear_bit(IS_ST_INIT_CAPTURE_STILL, &isp->state);
 		clear_bit(IS_ST_INIT_PREVIEW_VIDEO, &isp->state);
 		fimc_is_hw_set_param(isp);
 		ret = wait_event_timeout(isp->irq_queue,
@@ -1550,6 +1552,7 @@ static int fimc_is_3dnr_start_streaming(struct vb2_queue *q)
 
 		isp->scenario_id = ISS_PREVIEW_STILL;
 		set_bit(IS_ST_INIT_PREVIEW_STILL,	&isp->state);
+		clear_bit(IS_ST_INIT_CAPTURE_STILL, &isp->state);
 		clear_bit(IS_ST_INIT_PREVIEW_VIDEO, &isp->state);
 		fimc_is_hw_set_param(isp);
 		ret = wait_event_timeout(isp->irq_queue,

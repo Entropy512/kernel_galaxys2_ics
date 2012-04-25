@@ -472,7 +472,7 @@ static int s5pcsis_init_formats(struct v4l2_subdev *sd,
 	memset(&format, 0, sizeof(format));
 	format.pad = CSIS_PAD_SINK;
 	format.which = fh ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-	format.format.code = V4L2_MBUS_FMT_YUYV8_2X8;
+	format.format.code = s5pcsis_formats[0].code;
 	format.format.width = DEFAULT_CSIS_SINK_WIDTH;
 	format.format.height = DEFAULT_CSIS_SINK_HEIGHT;
 	s5pcsis_set_fmt(sd, fh, &format);
@@ -489,13 +489,13 @@ static int s5pcsis_subdev_close(struct v4l2_subdev *sd,
 
 static int s5pcsis_subdev_registered(struct v4l2_subdev *sd)
 {
-	v4l2_info(sd, "%s\n", __func__);
+	v4l2_dbg(1, debug, sd, "%s\n", __func__);
 	return 0;
 }
 
 static void s5pcsis_subdev_unregistered(struct v4l2_subdev *sd)
 {
-	v4l2_info(sd, "%s\n", __func__);
+	v4l2_dbg(1, debug, sd, "%s\n", __func__);
 }
 
 static const struct v4l2_subdev_internal_ops s5pcsis_v4l2_internal_ops = {
@@ -698,6 +698,8 @@ static int __devinit s5pcsis_probe(struct platform_device *pdev)
 	if (IS_ERR_OR_NULL(state->mdev))
 		goto e_irqfree;
 
+	state->mdev->csis_sd[pdev->id] = &state->sd;
+	state->sd.grp_id = CSIS_GRP_ID;
 	ret = v4l2_device_register_subdev(&state->mdev->v4l2_dev, &state->sd);
 	if (ret)
 		goto e_irqfree;

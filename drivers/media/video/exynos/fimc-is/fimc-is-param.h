@@ -245,6 +245,8 @@
 		(dev->is_p_region->parameter.isp.dma1_output.buffer_number = x)
 #define IS_ISP_SET_PARAM_DMA_OUTPUT1_BUFFER_ADDRESS(dev, x) \
 	(dev->is_p_region->parameter.isp.dma1_output.buffer_address = x)
+#define IS_ISP_SET_PARAM_DMA_OUTPUT1_NODIFY_DMA_DONE(dev, x) \
+	(dev->is_p_region->parameter.isp.dma1_output.notify_dma_done = x)
 #define IS_ISP_SET_PARAM_DMA_OUTPUT1_ERR(dev, x) \
 		(dev->is_p_region->parameter.isp.dma1_output.err = x)
 
@@ -266,6 +268,8 @@
 		(dev->is_p_region->parameter.isp.dma2_output.buffer_number = x)
 #define IS_ISP_SET_PARAM_DMA_OUTPUT2_BUFFER_ADDRESS(dev, x) \
 		(dev->is_p_region->parameter.isp.dma2_output.buffer_address = x)
+#define IS_ISP_SET_PARAM_DMA_OUTPUT2_NODIFY_DMA_DONE(dev, x) \
+	(dev->is_p_region->parameter.isp.dma2_output.notify_dma_done = x)
 #define IS_ISP_SET_PARAM_DMA_OUTPUT2_ERR(dev, x) \
 		(dev->is_p_region->parameter.isp.dma2_output.err = x)
 
@@ -398,6 +402,15 @@
 	(dev->is_p_region->parameter.fd.config.orientation_value = x)
 #define IS_FD_SET_PARAM_FD_CONFIG_ERR(dev, x) \
 	(dev->is_p_region->parameter.fd.config.err = x)
+
+#define IS_SENSOR_SET_TUNE_EXPOSURE(dev, x) \
+	(dev->is_p_region->tune.sensor.exposure = x)
+#define IS_SENSOR_SET_TUNE_ANALOG_GAIN(dev, x) \
+	(dev->is_p_region->tune.sensor.analog_gain = x)
+#define IS_SENSOR_SET_TUNE_FRAME_RATE(dev, x) \
+	(dev->is_p_region->tune.sensor.frame_rate = x)
+#define IS_SENSOR_SET_TUNE_ACTUATOR_POSITION(dev, x) \
+	(dev->is_p_region->tune.sensor.actuator_position = x)
 
 #ifndef BIT0
 #define  BIT0     0x00000001
@@ -647,6 +660,15 @@ enum is_param_set_bit {
 /* Enumerations
 *
 */
+/* ----------------------  INTR map-------------------------------- */
+enum interrupt_map {
+	INTR_GENERAL = 0,
+	INTR_FRAME_DONE_ISP = 1,
+	INTR_FRAME_DONE_SCALERC = 2,
+	INTR_FRAME_DONE_TDNR = 3,
+	INTR_FRAME_DONE_SCALERP = 4
+};
+
 /* ----------------------  Input  ----------------------------------- */
 enum control_command {
 	CONTROL_COMMAND_STOP	= 0,

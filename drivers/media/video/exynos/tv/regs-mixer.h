@@ -17,6 +17,7 @@
 #define SYSREG_DISP1BLK_CFG		(S3C_VA_SYS + 0x0214)
 
 #define DISP1BLK_CFG_FIFORST_DISP1	(1 << 23)
+#define DISP1BLK_CFG_MIXER_MASK		(0x3F << 2)
 #define DISP1BLK_CFG_MIXER0_VALID	(1 << 7)
 #define DISP1BLK_CFG_MIXER0_SRC_GSC(x)	(x << 5)
 #define DISP1BLK_CFG_MIXER1_VALID	(1 << 4)
@@ -130,6 +131,7 @@
 #define MXR_CFG_MX1_VIDEO_ENABLE	(1 << 13)
 #define MXR_CFG_OUT_YUV444		(0 << 8)
 #define MXR_CFG_OUT_RGB888		(1 << 8)
+#define MXR_CFG_OUT_MASK		(1 << 8)
 #define MXR_CFG_DST_SDO			(0 << 7)
 #define MXR_CFG_DST_HDMI		(1 << 7)
 #define MXR_CFG_DST_MASK		(1 << 7)
@@ -211,5 +213,6 @@
 #define MXR_TVOUT_CFG_ONE_PATH		(1 << 2)
 #define MXR_TVOUT_CFG_TWO_PATH		(0 << 2)
 #define MXR_TVOUT_CFG_PATH_MASK		(3 << 2)
+#define MXR_TVOUT_CFG_STEREO_SCOPIC	(1 << 0)
 
 #endif /* SAMSUNG_REGS_MIXER_H */

@@ -100,7 +100,6 @@
 
 /* Camera Output DMA Address */
 #define FLITE_REG_CIOSA					0x30
-#define FLITE_REG_CIOSA_OSA(x)				((x) << 0)
 
 /* Camera Status */
 #define FLITE_REG_CISTATUS				0x40
