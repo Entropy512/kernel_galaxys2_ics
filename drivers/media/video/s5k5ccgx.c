@@ -234,24 +234,12 @@ static const struct s5k5ccgx_regs reg_datas = {
 #endif
 };
 
-#ifdef NEW_CAM_DRV
 static const struct v4l2_mbus_framefmt capture_fmts[] = {
 	{
 		.code		= V4L2_MBUS_FMT_FIXED,
 		.colorspace	= V4L2_COLORSPACE_JPEG,
 	},
 };
-#else
-static const struct v4l2_fmtdesc capture_fmts[] = {
-	{
-		.index		= 0,
-		.type		= V4L2_BUF_TYPE_VIDEO_CAPTURE,
-		.flags		= FORMAT_FLAGS_COMPRESSED,
-		.description	= "JPEG + Postview",
-		.pixelformat	= V4L2_PIX_FMT_JPEG,
-	},
-};
-#endif
 
 #ifdef CONFIG_LOAD_FILE
 static int loadFile(void)
@@ -1699,9 +1687,9 @@ err_out:
 /* PX: */
 static int s5k5ccgx_set_af_window(struct v4l2_subdev *sd)
 {
+	int err = -EIO;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct s5k5ccgx_state *state = to_state(sd);
-	int err = -EIO;
 	struct s5k5ccgx_rect inner_window = {0, 0, 0, 0};
 	struct s5k5ccgx_rect outter_window = {0, 0, 0, 0};
 	struct s5k5ccgx_rect first_window = {0, 0, 0, 0};
@@ -1714,6 +1702,8 @@ static int s5k5ccgx_set_af_window(struct v4l2_subdev *sd)
 	u32 outter_half_width = 0, outter_half_height = 0;
 
 	cam_trace("E\n");
+
+	mutex_lock(&state->af_lock);
 
 	inner_window.width = SCND_WINSIZE_X * preview_width / 1024;
 	inner_window.height = SCND_WINSIZE_Y * preview_height / 1024;
@@ -1804,34 +1794,34 @@ static int s5k5ccgx_set_af_window(struct v4l2_subdev *sd)
 	af_dbg("=> first_window top=(%d, %d)\n",
 		first_window.x, first_window.y);
 
-	if (!mutex_is_locked(&state->af_lock)) {
-		mutex_unlock(&state->af_lock);
-		/* restore write mode */
-		err = s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
+	/* restore write mode */
+	err = s5k5ccgx_i2c_write_twobyte(client, 0x0028, 0x7000);
 
-		/* Set first window x, y */
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x022C);
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
-						(u16)(first_window.x));
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x022E);
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
-						(u16)(first_window.y));
+	/* Set first window x, y */
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x022C);
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
+					(u16)(first_window.x));
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x022E);
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
+					(u16)(first_window.y));
 
-		/* Set second widnow x, y */
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0234);
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
-						(u16)(second_window.x));
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0236);
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
-						(u16)(second_window.y));
+	/* Set second widnow x, y */
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0234);
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
+					(u16)(second_window.x));
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x0236);
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12,
+					(u16)(second_window.y));
 
-		/* Update AF window */
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x023C);
-		err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0001);
-		mutex_unlock(&state->af_lock);
-		CHECK_ERR(err);
-		cam_dbg("%s: AF window position completed.\n", __func__);
-	}
+	/* Update AF window */
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x002A, 0x023C);
+	err |= s5k5ccgx_i2c_write_twobyte(client, 0x0F12, 0x0001);
+
+	debug_msleep(sd, 60);
+	mutex_unlock(&state->af_lock);
+
+	CHECK_ERR(err);
+	cam_dbg("%s: AF window position completed.\n", __func__);
 
 	cam_trace("X\n");
 	return 0;
@@ -1848,22 +1838,32 @@ static int s5k5ccgx_set_touch_af(struct v4l2_subdev *sd, s32 val)
 	state->focus.touch = val;
 
 	if (val) {
-		if (mutex_is_locked(&state->af_lock))
-			goto out;
+		if (mutex_is_locked(&state->af_lock)) {
+			cam_warn("%s: WARNING, AF is busy\n", __func__);
+			return 0;
+		}
 
-		err = s5k5ccgx_set_af_window(sd);
-		CHECK_ERR_MSG(err, "val=%d\n", 1);
-
-		/* We do not give delays */
-		debug_msleep(sd, 60);
+		err = queue_work(state->workqueue, &state->af_win_work);
+		if (likely(!err))
+			cam_warn("WARNING, AF window is still processing\n");
 	} else {
 		err = s5k5ccgx_stop_af(sd, 1);
 		CHECK_ERR_MSG(err, "val=%d\n", 0)
 	}
 
-out:
 	cam_trace("X\n");
 	return 0;
+}
+
+static void s5k5ccgx_af_win_worker(struct work_struct *work)
+{
+	struct s5k5ccgx_state *state = container_of(work, \
+				struct s5k5ccgx_state, af_win_work);
+	struct v4l2_subdev *sd = &state->sd;
+
+	cam_trace("E\n");
+	s5k5ccgx_set_af_window(sd);
+	cam_trace("X\n");
 }
 
 static int s5k5ccgx_init_param(struct v4l2_subdev *sd)
@@ -2413,36 +2413,17 @@ static int s5k5ccgx_set_capture_start(struct v4l2_subdev *sd)
 	return 0;
 }
 
-#ifdef NEW_CAM_DRV
 static int s5k5ccgx_s_mbus_fmt(struct v4l2_subdev *sd,
 				struct v4l2_mbus_framefmt *fmt)
-#else
-static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
-#endif
 {
 	struct s5k5ccgx_state *state = to_state(sd);
 	s32 previous_index = 0;
 
-#ifdef NEW_CAM_DRV
 	cam_dbg("%s: pixelformat = 0x%x, colorspace = 0x%x, width = %d, height = %d\n",
 		__func__, fmt->code, fmt->colorspace, fmt->width, fmt->height);
 
 	v4l2_fill_pix_format(&state->req_fmt, fmt);
 	state->format_mode = fmt->field;
-#else
-	cam_dbg("%s: pixelformat = 0x%x (%c%c%c%c),"
-		" colorspace = 0x%x, width = %d, height = %d\n",
-		__func__, fmt->fmt.pix.pixelformat,
-		fmt->fmt.pix.pixelformat,
-		fmt->fmt.pix.pixelformat >> 8,
-		fmt->fmt.pix.pixelformat >> 16,
-		fmt->fmt.pix.pixelformat >> 24,
-		fmt->fmt.pix.colorspace,
-		fmt->fmt.pix.width, fmt->fmt.pix.height);
-
-	state->req_fmt = fmt->fmt.pix;
-	state->format_mode = fmt->fmt.pix.priv;
-#endif
 	state->wide_cmd = WIDE_REQ_NONE;
 
 	if (state->format_mode != V4L2_PIX_FMT_MODE_CAPTURE) {
@@ -2500,46 +2481,27 @@ static int s5k5ccgx_s_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 	return 0;
 }
 
-#ifdef NEW_CAM_DRV
 static int s5k5ccgx_enum_mbus_fmt(struct v4l2_subdev *sd, unsigned int index,
 					enum v4l2_mbus_pixelcode *code)
-#else
-static int s5k5ccgx_enum_fmt(struct v4l2_subdev *sd,
-			struct v4l2_fmtdesc *fmtdesc)
-#endif
 {
-#ifdef NEW_CAM_DRV
 	cam_dbg("%s: index = %d\n", __func__, index);
 
 	if (index >= ARRAY_SIZE(capture_fmts))
 		return -EINVAL;
 
 	*code = capture_fmts[index].code;
-#else
-	pr_debug("%s: index = %d\n", __func__, fmtdesc->index);
-
-	if (fmtdesc->index >= ARRAY_SIZE(capture_fmts))
-		return -EINVAL;
-
-	memcpy(fmtdesc, &capture_fmts[fmtdesc->index], sizeof(*fmtdesc));
-#endif
 
 	return 0;
 }
 
-#ifdef NEW_CAM_DRV
 static int s5k5ccgx_try_mbus_fmt(struct v4l2_subdev *sd,
 				struct v4l2_mbus_framefmt *fmt)
-#else
-static int s5k5ccgx_try_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
-#endif
 {
 	int num_entries;
 	int i;
 
 	num_entries = ARRAY_SIZE(capture_fmts);
 
-#ifdef NEW_CAM_DRV
 	cam_dbg("%s: code = 0x%x , colorspace = 0x%x, num_entries = %d\n",
 		__func__, fmt->code, fmt->colorspace, num_entries);
 
@@ -2550,22 +2512,7 @@ static int s5k5ccgx_try_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
 			return 0;
 		}
 	}
-#else
-	cam_dbg("%s: pixelformat = 0x%x (%c%c%c%c), num_entries = %d\n",
-		__func__, fmt->fmt.pix.pixelformat,
-		fmt->fmt.pix.pixelformat,
-		fmt->fmt.pix.pixelformat >> 8,
-		fmt->fmt.pix.pixelformat >> 16,
-		fmt->fmt.pix.pixelformat >> 24,
-		num_entries);
 
-	for (i = 0; i < num_entries; i++) {
-		if (capture_fmts[i].pixelformat == fmt->fmt.pix.pixelformat) {
-			pr_debug("%s: match found, returning 0\n", __func__);
-			return 0;
-		}
-	}
-#endif
 	cam_err("%s: no match found, returning -EINVAL\n", __func__);
 	return -EINVAL;
 }
@@ -2873,6 +2820,8 @@ static int s5k5ccgx_s_stream(struct v4l2_subdev *sd, int enable)
 
 	cam_info("stream mode = %d\n", enable);
 
+	BUG_ON(!state->initialized);
+
 	switch (enable) {
 	case STREAM_MODE_CAM_OFF:
 		if (state->pdata->is_mipi)
@@ -2898,12 +2847,14 @@ static int s5k5ccgx_s_stream(struct v4l2_subdev *sd, int enable)
 		break;
 
 	case STREAM_MODE_MOVIE_ON:
+		cam_info("movie on");
 		state->recording = 1;
 		if (state->flash_mode != FLASH_MODE_OFF)
 			s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_ON);
 		break;
 
 	case STREAM_MODE_MOVIE_OFF:
+		cam_info("movie off");
 		state->recording = 0;
 		if (state->flash_on)
 			s5k5ccgx_flash_torch(sd, S5K5CCGX_FLASH_OFF);
@@ -2949,11 +2900,14 @@ static int s5k5ccgx_init(struct v4l2_subdev *sd, u32 val)
 	CHECK_ERR_MSG(err, "failed to indentify sensor chip\n");
 
 	if (state->hd_videomode) {
-		cam_info("HD(720p) mode\n");
+		cam_info("init: HD mode\n");
 		err = S5K5CCGX_BURST_WRITE_REGS(sd, s5k5ccgx_hd_init_reg);
-	} else
+	} else {
+		cam_info("init: Cam, Non-HD mode\n");
 		err = S5K5CCGX_BURST_WRITE_REGS(sd, s5k5ccgx_init_reg);
+	}
 	CHECK_ERR_MSG(err, "failed to initialize camera device\n");
+
 #ifdef CONFIG_VIDEO_S5K5CCGX_P8
 	s5k5ccgx_set_from_table(sd, "antibanding",
 		&state->regs->antibanding, 1, 0);
@@ -3070,19 +3024,10 @@ static const struct v4l2_subdev_core_ops s5k5ccgx_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops s5k5ccgx_video_ops = {
-#ifdef NEW_CAM_DRV
 	.s_mbus_fmt = s5k5ccgx_s_mbus_fmt,
-#else
-	.s_fmt = s5k5ccgx_s_fmt,
-#endif
 	.enum_framesizes = s5k5ccgx_enum_framesizes,
-#ifdef NEW_CAM_DRV
 	.enum_mbus_fmt = s5k5ccgx_enum_mbus_fmt,
 	.try_mbus_fmt = s5k5ccgx_try_mbus_fmt,
-#else
-	.enum_fmt = s5k5ccgx_enum_fmt,
-	.try_fmt = s5k5ccgx_try_fmt,
-#endif
 	.g_parm = s5k5ccgx_g_parm,
 	.s_parm = s5k5ccgx_s_parm,
 	.s_stream = s5k5ccgx_s_stream,
@@ -3128,6 +3073,7 @@ static int s5k5ccgx_probe(struct i2c_client *client,
 		goto err_out;
 	}
 	INIT_WORK(&state->af_work, s5k5ccgx_af_worker);
+	INIT_WORK(&state->af_win_work, s5k5ccgx_af_win_worker);
 
 	err = s5k5ccgx_s_config(sd, 0, client->dev.platform_data);
 	CHECK_ERR_MSG(err, "fail to s_config\n");

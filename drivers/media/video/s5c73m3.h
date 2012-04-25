@@ -69,6 +69,7 @@ enum s5c73m3_prev_frmsize {
 	S5C73M3_PREVIEW_1056X704,
 	S5C73M3_PREVIEW_1184X666,
 	S5C73M3_PREVIEW_720P,
+	S5C73M3_VDIS_720P,
 	S5C73M3_PREVIEW_1080P,
 	S5C73M3_VDIS_1080P,
 	S5C73M3_PREVIEW_HDR,
@@ -88,6 +89,7 @@ enum s5c73m3_cap_frmsize {
 	S5C73M3_CAPTURE_W6MP,	/* 3072 x 1856 */
 	S5C73M3_CAPTURE_7MP,	/* 3072 x 2304 */
 	S5C73M3_CAPTURE_W7MP,	/* WQXGA - 2560 x 1536 */
+	S5C73M3_CAPTURE_3264X2176,	/* 3264 x 2176 */
 	S5C73M3_CAPTURE_8MP,	/* 3264 x 2448 */
 };
 
@@ -161,9 +163,12 @@ struct s5c73m3_state {
 	enum v4l2_pix_format_mode format_mode;
 	enum v4l2_sensor_mode sensor_mode;
 	enum v4l2_flash_mode flash_mode;
+	enum v4l2_wb_mode wb_mode;
+	enum v4l2_scene_mode scene_mode;
 	int vt_mode;
 	int beauty_mode;
 	int hdr_mode;
+	int hybrid_mode;
 	int zoom;
 	int stream_enable;
 	int ae_lock;
@@ -171,6 +176,7 @@ struct s5c73m3_state {
 
 	unsigned int fps;
 	struct s5c73m3_focus focus;
+	int caf_mode;
 	char isflash;
 
 	struct s5c73m3_jpeg jpeg;
@@ -194,6 +200,7 @@ struct s5c73m3_state {
 #define S5C73M3_HDR_OUTPUT	0x0008
 #define S5C73M3_YUV_OUTPUT	0x0009
 #define S5C73M3_INTERLEAVED_OUTPUT	0x000D
+#define S5C73M3_HYBRID_OUTPUT	0x0016
 
 #define S5C73M3_STILL_PRE_FLASH			0x0A00
 #define S5C73M3_STILL_PRE_FLASH_FIRE		0x0000
@@ -350,6 +357,9 @@ struct s5c73m3_state {
 #define S5C73M3_FIXED_30FPS	0x0002
 #define S5C73M3_FIXED_20FPS	0x0003
 #define S5C73M3_FIXED_15FPS	0x0004
+#define S5C73M3_FIXED_120FPS	0x0008
+#define S5C73M3_FIXED_7FPS	0x0009
+#define S5C73M3_ANTI_SHAKE	0x0013
 
 #define S5C73M3_SHARPNESS	0x0C14
 #define S5C73M3_SHARPNESS_0	0x0000
@@ -388,6 +398,7 @@ struct s5c73m3_state {
 #define S5C73M3_SCENE_MODE_TEXT		0x000C
 #define S5C73M3_SCENE_MODE_CANDLE	0x000D
 
+#define S5C73M3_FIREWORK_CAPTURE 0x0C20
 
 #define S5C73M3_AE_AUTO_BRAKET		0x0B14
 #define S5C73M3_AE_AUTO_BRAKET_EV05	0x0080
@@ -411,6 +422,7 @@ struct s5c73m3_state {
 #define S5C73M3_AWB_STOP		0x0000/*LOCK*/
 #define S5C73M3_AWB_START		0x0001/*UNLOCK*/
 
+#define S5C73M3_HYBRID_CAPTURE	0x0996
 
 /* S5C73M3 Sensor Mode */
 #define S5C73M3_SYSINIT_MODE	0x0

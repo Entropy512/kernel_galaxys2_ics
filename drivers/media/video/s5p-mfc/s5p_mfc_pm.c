@@ -164,7 +164,7 @@ bool s5p_mfc_power_chk(void)
 #include <linux/pm_runtime.h>
 #endif
 
-#define MFC_PARENT_CLK_NAME	"mout_aclk_333"
+#define MFC_PARENT_CLK_NAME	"dout_aclk_333"
 #define MFC_CLKNAME		"sclk_mfc"
 #define MFC_GATE_CLK_NAME	"mfc"
 

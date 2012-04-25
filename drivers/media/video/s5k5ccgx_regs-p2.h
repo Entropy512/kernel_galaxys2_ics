@@ -6988,31 +6988,31 @@ static const u32 s5k5ccgx_update_preview_reg[] = {
 };
 
 static const u32 s5k5ccgx_update_hd_preview_reg[] = {
-/* PREVIEW */
-0x002A0208,
-0x0F120000, /* REG_TC_GP_ActivePrevConfig */
-0x002A0210,
-0x0F120000, /* REG_TC_GP_ActiveCapConfig */
-0x002A020C,
-0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
-0x002A01F4,
-0x0F120001, /* REG_TC_GP_NewConfigSync */
-0x002A020A,
-0x0F120001, /* REG_TC_GP_PrevConfigChanged */
-0x002A0212,
-0x0F120001, /* REG_TC_GP_CapConfigChanged */
-0x002A01E8,
-0x0F120000, /* REG_TC_GP_EnableCapture */
-0x0F120001, /* REG_TC_GP_EnableCaptureChanged */
+	/* PREVIEW */
+	0x002A0208,
+	0x0F120000, /* REG_TC_GP_ActivePrevConfig */
+	0x002A0210,
+	0x0F120000, /* REG_TC_GP_ActiveCapConfig */
+	0x002A020C,
+	0x0F120001, /* REG_TC_GP_PrevOpenAfterChange */
+	0x002A01F4,
+	0x0F120001, /* REG_TC_GP_NewConfigSync */
+	0x002A020A,
+	0x0F120001, /* REG_TC_GP_PrevConfigChanged */
+	0x002A0212,
+	0x0F120001, /* REG_TC_GP_CapConfigChanged */
+	0x002A01E8,
+	0x0F120000, /* REG_TC_GP_EnableCapture */
+	0x0F120001, /* REG_TC_GP_EnableCaptureChanged */
 
-/* TNP_Regs_bUseAccurateFR */
-0x00287000,
-0x002A3FE4,
-0x0F120001, /* on/off TNP_Regs_bAccuDynamicFR */
-0x0F1234A2, /* on/off TNP_Regs_usMinAccuDynamicFrTme */
-0x0F1240FD, /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
+	/* TNP_Regs_bUseAccurateFR */
+	0x00287000,
+	0x002A3FE4,
+	0x0F120001, /* on/off TNP_Regs_bAccuDynamicFR */
+	0x0F1234A2, /* on/off TNP_Regs_usMinAccuDynamicFrTme */
+	0x0F1240FD, /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
 
-0xFFFF0064, /* Delay 100ms */
+	0xFFFF0064, /* Delay 100ms */
 };
 
 static const u32 s5k5ccgx_stream_stop_reg[] = {
@@ -12562,24 +12562,24 @@ static const u32 s5k5ccgx_hd_init_reg[] =
 
 
 
-	//PREVIEW
-	0x002A0208,
-	0x0F120000, //REG_TC_GP_ActivePrevConfig
-	0x002A0210,
-	0x0F120000, //REG_TC_GP_ActiveCapConfig
-	0x002A020C,
-	0x0F120001, //REG_TC_GP_PrevOpenAfterChange
-	0x002A01F4,
-	0x0F120001, //REG_TC_GP_NewConfigSync
-	0x002A020A,
-	0x0F120001, //REG_TC_GP_PrevConfigChanged
-	0x002A0212,
-	0x0F120001, //REG_TC_GP_CapConfigChanged
-	0x002A01E8,
-	0x0F120000, //REG_TC_GP_EnableCapture
-	0x0F120001, //REG_TC_GP_EnableCaptureChanged
+	/* PREVIEW */
+	/* 0x002A0208, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActivePrevConfig */
+	/* 0x002A0210, */
+	/* 0x0F120000, */ /* REG_TC_GP_ActiveCapConfig */
+	/* 0x002A020C, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevOpenAfterChange */
+	/* 0x002A01F4, */
+	/* 0x0F120001, */ /* REG_TC_GP_NewConfigSync */
+	/* 0x002A020A, */
+	/* 0x0F120001, */ /* REG_TC_GP_PrevConfigChanged */
+	/* 0x002A0212 ,*/
+	/* 0x0F120001, */ /* REG_TC_GP_CapConfigChanged */
+	/* 0x002A01E8, */
+	/* 0x0F120000, */ /* REG_TC_GP_EnableCapture */
+	/* 0x0F120001, */ /* REG_TC_GP_EnableCaptureChanged */
 
-	0xFFFF0064, //Delay 100ms
+	/* 0xFFFF0064, */ /* Delay 100ms */
 
 	//===================================================================
 	// AFC
@@ -14234,12 +14234,12 @@ static const u32 s5k5ccgx_hd_init_reg[] =
 	0x0f120800, //analog filter update Green
 
 
-	// TNP_Regs_bUseAccurateFR
-	0x00287000,
-	0x002A3FE4,
-	0x0F120001,	                  // on/off TNP_Regs_bAccuDynamicFR
-	0x0F1234A2,	                  // on/off TNP_Regs_usMinAccuDynamicFrTme
-	0x0F1240FD,	                  // on/off TNP_Regs_usMaxAccuDynamicFrTme
+	/* TNP_Regs_bUseAccurateFR */
+	/* 0x00287000, */
+	/* 0x002A3FE4, */
+	/* 0x0F120001, */ /* on/off TNP_Regs_bAccuDynamicFR */
+	/* 0x0F1234A2, */ /* on/off TNP_Regs_usMinAccuDynamicFrTme */
+	/* 0x0F1240FD, */ /* on/off TNP_Regs_usMaxAccuDynamicFrTme */
 };
 
 /* Return preview mode */

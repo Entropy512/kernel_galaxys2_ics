@@ -550,6 +550,14 @@ config VIDEO_SR200PC20_P4W
 	  SR200PC20 camera module is manufactured by Silliconfile coporate
 	  and it's maximum resolution is 2MP.
 
+config VIDEO_SR200PC20M
+	tristate "SR200PC20M supporting camera driver"
+	depends on I2C && VIDEO_V4L2
+	---help---
+	  This driver supports SR200PC20M SoC camera module
+	  SR200PC20M camera module is manufactured by Silliconfile coporate
+	  and it's maximum resolution is 2MP.
+
 config VIDEO_S5K4BA
 	tristate "S5K4BA supporting camera driver"
 	depends on I2C && VIDEO_V4L2 && (VIDEO_FIMC || VIDEO_SAMSUNG_S5P_FIMC) && !(VIDEO_FIMC_MIPI || VIDEO_S5P_MIPI_CSIS)

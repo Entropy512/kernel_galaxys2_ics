@@ -204,15 +204,12 @@ static void s5p_mfc_handle_frame_all_extracted(struct s5p_mfc_ctx *ctx)
 		ctx->dst_queue_cnt--;
 		dst_buf->vb.v4l2_buf.sequence = (ctx->sequence++);
 
-		/* FIXME: move to proper postion or REMOVE
-		and clk enable should not be used in ISR */
-		#if 0
 		if (s5p_mfc_read_info(ctx, PIC_TIME_TOP) ==
 			s5p_mfc_read_info(ctx, PIC_TIME_BOT))
 			dst_buf->vb.v4l2_buf.field = V4L2_FIELD_NONE;
 		else
 			dst_buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
-		#endif
+
 		clear_bit(dst_buf->vb.v4l2_buf.index, &dec->dpb_status);
 
 		vb2_buffer_done(&dst_buf->vb, VB2_BUF_STATE_DONE);
@@ -249,15 +246,13 @@ static void s5p_mfc_handle_frame_new(struct s5p_mfc_ctx *ctx, unsigned int err)
 			list_del(&dst_buf->list);
 			ctx->dst_queue_cnt--;
 			dst_buf->vb.v4l2_buf.sequence = ctx->sequence;
-			/* FIXME: move to proper postion or REMOVE
-			and clk enable should not be used in ISR */
-			#if 0
+
 			if (s5p_mfc_read_info(ctx, PIC_TIME_TOP) ==
 				s5p_mfc_read_info(ctx, PIC_TIME_BOT))
 				dst_buf->vb.v4l2_buf.field = V4L2_FIELD_NONE;
 			else
 				dst_buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
-			#endif
+
 			vb2_set_plane_payload(&dst_buf->vb, 0, ctx->luma_size);
 			vb2_set_plane_payload(&dst_buf->vb, 1, ctx->chroma_size);
 			clear_bit(dst_buf->vb.v4l2_buf.index, &dec->dpb_status);

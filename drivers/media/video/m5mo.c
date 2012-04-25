@@ -1559,7 +1559,9 @@ static int m5mo_set_af(struct v4l2_subdev *sd, int val)
 static int m5mo_set_af_mode(struct v4l2_subdev *sd, int val)
 {
 	struct m5mo_state *state = to_state(sd);
+#ifndef CONFIG_MACH_S2PLUS
 	struct regulator *movie = regulator_get(NULL, "led_movie");
+#endif
 	u32 cancel, mode, status = 0;
 	int i, err;
 
@@ -1622,10 +1624,12 @@ retry:
 		CHECK_ERR(err);
 	}
 
+#ifndef CONFIG_MACH_S2PLUS
 	if (val == FOCUS_MODE_MACRO)
 		regulator_set_current_limit(movie, 15000, 17000);
 	else if (state->focus.mode == FOCUS_MODE_MACRO)
 		regulator_set_current_limit(movie, 90000, 110000);
+#endif
 
 	state->focus.mode = val;
 

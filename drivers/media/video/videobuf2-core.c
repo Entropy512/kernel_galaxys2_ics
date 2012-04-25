@@ -48,7 +48,7 @@ static int __vb2_buf_mem_alloc(struct vb2_buffer *vb,
 {
 	struct vb2_queue *q = vb->vb2_queue;
 	void *mem_priv;
-	int plane, ret, *export_fd;
+	int plane, ret, export_fd;
 
 	/* Allocate memory for all planes in this buffer */
 	for (plane = 0; plane < vb->num_planes; ++plane) {
@@ -66,13 +66,13 @@ static int __vb2_buf_mem_alloc(struct vb2_buffer *vb,
 		if (q->memory == V4L2_MEMORY_DMABUF) {
 			ret = call_memop(q, plane, export_dmabuf,
 						q->alloc_ctx[plane],
-						mem_priv, export_fd);
+						mem_priv, &export_fd);
 			if (ret < 0) {
 				dprintk(1, "failed to export buf to dmabuf.\n");
 				goto free;
 			}
 
-			vb->v4l2_planes[plane].m.fd = *export_fd;
+			vb->v4l2_planes[plane].m.fd = export_fd;
 		}
 	}
 
@@ -1039,9 +1039,17 @@ err:
 static void __enqueue_in_driver(struct vb2_buffer *vb)
 {
 	struct vb2_queue *q = vb->vb2_queue;
+	void *privs[VIDEO_MAX_PLANES];
+	int plane;
 
 	vb->state = VB2_BUF_STATE_ACTIVE;
 	atomic_inc(&q->queued_count);
+
+	for (plane = 0; plane < vb->num_planes; plane++)
+		privs[plane] = vb->planes[plane].mem_priv;
+
+	call_memop(q, plane, sync_to_dev, q->alloc_ctx, privs, vb->num_planes,
+			vb->v4l2_buf.type);
 	q->ops->buf_queue(vb);
 }
 
@@ -1276,8 +1284,8 @@ EXPORT_SYMBOL_GPL(vb2_wait_for_all_buffers);
 int vb2_dqbuf(struct vb2_queue *q, struct v4l2_buffer *b, bool nonblocking)
 {
 	struct vb2_buffer *vb = NULL;
+	int plane;
 	int ret;
-	unsigned int plane;
 
 	if (q->fileio) {
 		dprintk(1, "dqbuf: file io in progress\n");
@@ -1313,6 +1321,15 @@ int vb2_dqbuf(struct vb2_queue *q, struct v4l2_buffer *b, bool nonblocking)
 
 	switch (vb->state) {
 	case VB2_BUF_STATE_DONE:
+		{
+			void *privs[VIDEO_MAX_PLANES];
+
+			for (plane = 0; plane < vb->num_planes; plane++)
+				privs[plane] = vb->planes[plane].mem_priv;
+
+			call_memop(q, plane, sync_from_dev, q->alloc_ctx, privs,
+					vb->num_planes, vb->v4l2_buf.type);
+		}
 		dprintk(3, "dqbuf: Returning done buffer\n");
 		break;
 	case VB2_BUF_STATE_ERROR:
