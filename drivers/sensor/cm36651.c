@@ -100,7 +100,7 @@ static u8 als_reg_setting[ALS_REG_NUM][2] = {
 
 static u8 ps_reg_setting[PS_REG_NUM][2] = {
 	{0x00, 0x3C},	/* PS_CONF1 */
-	{0x01, 0x07},	/* PS_THD */
+	{0x01, 0x09},	/* PS_THD */
 	{0x02, 0x00},	/* PS_CANC */
 	{0x03, 0x13},	/* PS_CONF2 */
 };
@@ -423,7 +423,8 @@ static ssize_t proximity_cancel_show(struct device *dev,
 {
 	struct cm36651_data *cm36651 = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", cm36651->prox_cal);
+	return sprintf(buf, "%d,%d\n", cm36651->prox_cal,
+		ps_reg_setting[1][1]);
 }
 #endif
 
@@ -998,7 +999,6 @@ static int cm36651_i2c_probe(struct i2c_client *client,
 		goto err_proximity_device_create_file2;
 	}
 #endif
-
 	if (device_create_file(cm36651->proximity_dev,
 		&dev_attr_prox_avg) < 0) {
 		pr_err("%s: could not create device file(%s)!\n", __func__,

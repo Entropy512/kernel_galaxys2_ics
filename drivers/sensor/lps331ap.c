@@ -1183,7 +1183,7 @@ static int lps331ap_prs_probe(struct i2c_client *client,
 	int err = -1;
 	int tempvalue;
 
-	pr_err("%s: probe start.\n", LPS331AP_PRS_DEV_NAME);
+	pr_info("%s: probe start.\n", LPS331AP_PRS_DEV_NAME);
 
 	if (client->dev.platform_data == NULL) {
 		dev_err(&client->dev, "platform data is NULL. exiting.\n");
@@ -1240,7 +1240,7 @@ static int lps331ap_prs_probe(struct i2c_client *client,
 	/* read chip id */
 	tempvalue = i2c_smbus_read_word_data(client, WHO_AM_I);
 	if ((tempvalue & 0x00FF) == WHOAMI_LPS331AP_PRS) {
-		pr_err("%s I2C driver registered!\n", LPS331AP_PRS_DEV_NAME);
+		pr_info("%s I2C driver registered!\n", LPS331AP_PRS_DEV_NAME);
 	} else {
 		prs->client = NULL;
 		err = -ENODEV;
@@ -1296,7 +1296,7 @@ static int lps331ap_prs_probe(struct i2c_client *client,
 	err = lps331ap_prs_acquire_compensation_data(prs);
 	if (err < 0) {
 		dev_err(&client->dev, "compensation data acquisition failed\n");
-		goto err_power_off;
+		goto err_input_cleanup;
 	}
 
 	err = sysfs_create_group(&prs->input_dev->dev.kobj,

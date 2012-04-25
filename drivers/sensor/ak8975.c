@@ -159,7 +159,7 @@ static int akm8975_wait_for_data_ready(struct akm8975_data *akm)
 
 	enable_irq(akm->irq);
 
-	err = wait_for_completion_timeout(&akm->data_ready, 5*HZ);
+	err = wait_for_completion_timeout(&akm->data_ready, 2*HZ);
 	if (err > 0)
 		return 0;
 
@@ -274,7 +274,6 @@ static long akmd_ioctl(struct file *file, unsigned int cmd,
 			mutex_unlock(&akm->lock);
 			return ret;
 		}
-
 		ret = i2c_smbus_read_i2c_block_data(akm->this_client,
 						    AK8975_REG_ST1,
 						    sizeof(rwbuf.data),
@@ -285,8 +284,8 @@ static long akmd_ioctl(struct file *file, unsigned int cmd,
 		y = (rwbuf.data[4] << 8) + rwbuf.data[3];
 		z = (rwbuf.data[6] << 8) + rwbuf.data[5];
 
-		printk(KERN_INFO "%s: raw x = %d, y = %d, z = %d\n",\
-			__func__, x, y, z);
+		printk(KERN_INFO "%s:ST1=%d, x=%d, y=%d, z=%d, ST2=%d\n",
+			__func__, rwbuf.data[0], x, y, z, rwbuf.data[7]);
 		#endif
 
 		mutex_unlock(&akm->lock);
@@ -341,8 +340,8 @@ static int akm8975_setup_irq(struct akm8975_data *akm)
 	/* trigger high so we don't miss initial interrupt if it
 	 * is already pending
 	 */
-	rc = request_irq(irq, akm8975_irq_handler, IRQF_TRIGGER_RISING,
-			 "akm_int", akm);
+	rc = request_irq(irq, akm8975_irq_handler,
+		IRQF_TRIGGER_RISING | IRQF_ONESHOT, "akm_int", akm);
 	if (rc < 0) {
 		pr_err("%s: request_irq(%d) failed for gpio %d (%d)\n",
 			__func__, irq,
@@ -770,6 +769,7 @@ exit_device_create_raw_data:
 	sensors_classdev_unregister(akm->dev);
 exit_class_create_failed:
 exit_i2c_failed:
+	misc_deregister(&akm->akmd_device);
 exit_akmd_device_register_failed:
 	free_irq(akm->irq, akm);
 	gpio_free(akm->pdata->gpio_data_ready_int);

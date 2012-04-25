@@ -808,7 +808,7 @@ static int lsm330dlc_accel_probe(struct i2c_client *client,
 		       const struct i2c_device_id *id)
 {
 	struct lsm330dlc_accel_data *accel_data;
-	int err;
+	int err = 0;
 
 	if (!i2c_check_functionality(client->adapter,
 				     I2C_FUNC_SMBUS_WRITE_BYTE_DATA |
@@ -824,6 +824,15 @@ static int lsm330dlc_accel_probe(struct i2c_client *client,
 				"failed to allocate memory for module data\n");
 		err = -ENOMEM;
 		goto exit;
+	}
+
+	/* Checking device */
+	err = i2c_smbus_write_byte_data(client, CTRL_REG1,
+		PM_OFF);
+	if (err) {
+		pr_err("%s: there is no such device, err = %d\n",
+							__func__, err);
+		goto err_read_reg;
 	}
 
 	accel_data->client = client;
@@ -947,6 +956,7 @@ err_request_irq:
 err_misc_register:
 	mutex_destroy(&accel_data->read_lock);
 	mutex_destroy(&accel_data->write_lock);
+err_read_reg:
 	kfree(accel_data);
 exit:
 	return err;

@@ -34,12 +34,6 @@
 #include <linux/sensor/sensors_core.h>
 #endif
 
-#if defined(CONFIG_MACH_S2PLUS)
-#include <linux/regulator/machine.h>
-#include <linux/err.h>
-#include <linux/delay.h>
-#endif
-
 #define LIGHT_BUFFER_NUM	5
 #define PROX_READ_NUM		40
 
@@ -61,11 +55,7 @@ static u8 reg_defaults[8] = {
 	0x00, /* ALS_LSB: read only register */
 	0x30, /* PS_CMD: interrupt disable */
 	0x00, /* PS_DATA: read only register */
-#if defined(CONFIG_MACH_S2PLUS)
-	0x03, /* PS_THD: 3 */
-#else
 	0x0A, /* PS_THD: 10 */
-#endif
 };
 
 static const int adc_table[4] = {
@@ -934,26 +924,6 @@ static int cm3663_resume(struct device *dev)
 	/* Turn power back on if we were before suspend. */
 	struct i2c_client *client = to_i2c_client(dev);
 	struct cm3663_data *cm3663 = i2c_get_clientdata(client);
-
-	/* [S2PLUS] Temporary Patch */
-#if defined(CONFIG_MACH_S2PLUS)
-	struct regulator *regulator;
-	int ret = 0;
-
-	regulator = regulator_get(NULL, "vcc_pls_2.8v");
-	if (IS_ERR(regulator)) {
-		printk(KERN_ERR
-			"vcc_pls_2.8v regulator get err\n");
-		return -1;
-	}
-	if (!regulator_is_enabled(regulator)) {
-		printk(KERN_ERR "%s: vcc_pls_2.8v is off. so ON\n",
-		__func__);
-		ret = regulator_enable(regulator);
-	}
-	regulator_put(regulator);
-	mdelay(100);
-#endif
 
 	if (cm3663->power_state & LIGHT_ENABLED)
 		cm3663_light_enable(cm3663);

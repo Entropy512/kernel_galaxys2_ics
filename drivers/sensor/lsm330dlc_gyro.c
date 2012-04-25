@@ -1329,9 +1329,9 @@ err_device_create_file:
 		free_irq(data->client->irq, data);
 	else
 		destroy_workqueue(data->lsm330dlc_gyro_wq);
-	input_unregister_device(data->input_dev);
 err_create_workqueue:
 err_request_irq:
+	input_unregister_device(data->input_dev);
 err_input_register_device:
 err_input_allocate_device:
 	mutex_destroy(&data->lock);

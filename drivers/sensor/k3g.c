@@ -665,16 +665,16 @@ static int k3g_fifo_self_test(struct k3g_data *k3g_data)
 	if (!k3g_data->enable && k3g_data->interruptible) {
 		enable_irq(k3g_data->client->irq);
 		err = wait_for_completion_timeout(&k3g_data->data_ready, 5*HZ);
+		msleep(200);
 		if (err <= 0) {
 			disable_irq(k3g_data->client->irq);
 			if (!err)
 				pr_err("%s: wait timed out\n", __func__);
 			goto exit;
 		}
-	}
-
-	/* wait for 32 fifo entries */
-	msleep(200);
+	/* if polling mode */
+	} else
+		msleep(200);
 
 	/* check out watermark status */
 	status_reg = i2c_smbus_read_byte_data(k3g_data->client, FIFO_SRC_REG);
@@ -718,10 +718,6 @@ static int k3g_fifo_self_test(struct k3g_data *k3g_data)
 
 exit:
 	k3g_data->fifo_test = false;
-
-	/* make sure clearing interrupt */
-	enable_irq(k3g_data->client->irq);
-	disable_irq(k3g_data->client->irq);
 
 	/* 1: success, 0: fail, 2: retry */
 	return fifo_pass;
