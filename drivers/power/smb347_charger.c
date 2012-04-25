@@ -390,7 +390,6 @@ int smb347_get_charging_current(void)
 void smb347_set_charging_current(int set_current)
 {
 	struct smb347_chg_data *chg = smb347_chg;
-	u8 data = 0;
 
 	if (set_current > 450) {
 		/* CommandB : High-current mode */
@@ -453,6 +452,7 @@ static int smb347_i2c_probe
 	return 0;
 
 err_pdata:
+	kfree(chg->callbacks);
 	kfree(chg);
 	return ret;
 }

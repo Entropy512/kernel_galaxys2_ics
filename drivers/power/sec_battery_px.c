@@ -1141,18 +1141,14 @@ static int sec_ac_get_property(struct power_supply *ac_ps,
 
 static struct device_attribute sec_battery_attrs[] = {
 	SEC_BATTERY_ATTR(batt_vol),
-#if defined(CONFIG_MACH_P4)
 	SEC_BATTERY_ATTR(temp),
-#else
-	SEC_BATTERY_ATTR(batt_temp),
-#endif
 #ifdef CONFIG_MACH_SAMSUNG_P5
 	SEC_BATTERY_ATTR(batt_temp_cels),
 #endif
-	SEC_BATTERY_ATTR(charging_source),
+	SEC_BATTERY_ATTR(batt_charging_source),
 	SEC_BATTERY_ATTR(fg_soc),
 	SEC_BATTERY_ATTR(reset_soc),
-	SEC_BATTERY_ATTR(reset_cap),
+	SEC_BATTERY_ATTR(fg_reset_cap),
 	SEC_BATTERY_ATTR(fg_reg),
 	SEC_BATTERY_ATTR(batt_type),
 	SEC_BATTERY_ATTR(batt_temp_check),
@@ -1273,7 +1269,7 @@ static ssize_t sec_bat_show_property(struct device *dev,
 		break;
 	case VOLTAGE_NOW:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-			get_fuelgauge_value(FG_VOLTAGE));
+			get_fuelgauge_value(FG_VOLTAGE_NOW));
 		break;
 #endif
 	case JIG_ON:

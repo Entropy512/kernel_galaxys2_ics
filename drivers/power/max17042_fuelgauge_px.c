@@ -180,6 +180,36 @@ static void fg_test_print(void)
 			reg_data/2, reg_data);
 }
 
+static int fg_read_voltage_now(void)
+{
+	struct i2c_client *client = fg_i2c_client;
+	struct max17042_chip *chip = i2c_get_clientdata(client);
+	u8 data[2];
+	u32 voltage_now;
+	u16 w_data;
+	u32 temp;
+	u32 temp2;
+
+	if (fg_i2c_read(client, VCELL_REG, data, 2) < 0) {
+		pr_err("%s: Failed to read VCELL\n", __func__);
+		return -1;
+	}
+
+	w_data = (data[1]<<8) | data[0];
+
+	temp = (w_data & 0xFFF) * 78125;
+	voltage_now = temp / 1000;
+
+	temp = ((w_data & 0xF000) >> 4) * 78125;
+	temp2 = temp / 1000;
+	voltage_now += (temp2 << 4);
+
+	pr_info("%s : VCELL(%duV), data(0x%04x)\n",
+		__func__, voltage_now, (data[1]<<8) | data[0]);
+
+	return voltage_now;
+}
+
 static int fg_read_vcell(void)
 {
 	struct i2c_client *client = fg_i2c_client;
@@ -1439,6 +1469,10 @@ int get_fuelgauge_value(int data)
 
 	case FG_VF_SOC:
 		ret = fg_read_vfsoc();
+		break;
+
+	case FG_VOLTAGE_NOW:
+		ret = fg_read_voltage_now();
 		break;
 
 	default:
