@@ -34,6 +34,9 @@
 #include <plat/pm.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+#include <plat/regs-watchdog.h>
+#endif
 #include <mach/regs-usb-phy.h>
 
 #ifdef CONFIG_ARM_TRUSTZONE
@@ -383,6 +386,14 @@ static int exynos4_check_operation(void)
 	return 0;
 }
 
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+static struct sleep_save exynos4_aftr_save[] = {
+	SAVE_ITEM(S3C2410_WTDAT),
+	SAVE_ITEM(S3C2410_WTCNT),
+	SAVE_ITEM(S3C2410_WTCON),
+};
+#endif
+
 static struct sleep_save exynos4_lpa_save[] = {
 	/* CMU side */
 	SAVE_ITEM(EXYNOS4_CLKSRC_MASK_TOP),
@@ -395,6 +406,11 @@ static struct sleep_save exynos4_lpa_save[] = {
 	SAVE_ITEM(EXYNOS4_CLKSRC_MASK_PERIL0),
 	SAVE_ITEM(EXYNOS4_CLKSRC_MASK_PERIL1),
 	SAVE_ITEM(EXYNOS4_CLKSRC_MASK_DMC),
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	SAVE_ITEM(S3C2410_WTDAT),
+	SAVE_ITEM(S3C2410_WTCNT),
+	SAVE_ITEM(S3C2410_WTCON),
+#endif
 };
 
 static struct sleep_save exynos4_set_clksrc[] = {
@@ -461,6 +477,10 @@ static int exynos4_enter_core0_aftr(struct cpuidle_device *dev,
 	int idle_time;
 	unsigned long tmp;
 
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	s3c_pm_do_save(exynos4_aftr_save, ARRAY_SIZE(exynos4_aftr_save));
+#endif
+
 	local_irq_disable();
 
 	if (log_en)
@@ -500,6 +520,11 @@ static int exynos4_enter_core0_aftr(struct cpuidle_device *dev,
 	cpu_init();
 
 	vfp_enable(NULL);
+
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	s3c_pm_do_restore_core(exynos4_aftr_save,
+				ARRAY_SIZE(exynos4_aftr_save));
+#endif
 
 early_wakeup:
 #ifdef CONFIG_EXYNOS4_CPUFREQ
