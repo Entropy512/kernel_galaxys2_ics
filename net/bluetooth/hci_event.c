@@ -1404,7 +1404,9 @@ static inline void hci_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *s
 
 		conn->type = SCO_LINK;
 	}
-	if (!conn->ssp_mode || !conn->hdev->ssp_mode) {
+
+	if ((!conn->ssp_mode || !conn->hdev->ssp_mode) &&
+			((conn->dev_class[1] & 0x1f) != 0x05)) {
 		__u8 auth = AUTH_DISABLED;
 		hci_send_cmd(hdev, HCI_OP_WRITE_AUTH_ENABLE, 1, &auth);
 	}
@@ -1594,19 +1596,19 @@ static inline void hci_auth_complete_evt(struct hci_dev *hdev, struct sk_buff *s
 	if (!conn)
 		goto unlock;
 
-	/* SS_BLUETOOTH(gudam.ryu) 2012. 03. 02 - Fixed for opp sending fail, if the devices were unpaired on the remote end */
-	if (ev->status == 0x06 && hdev->ssp_mode > 0 &&
-			conn->ssp_mode > 0) {
-		struct hci_cp_auth_requested cp;
-		hci_remove_link_key(hdev, &conn->dst);
-		cp.handle = cpu_to_le16(conn->handle);
-		hci_send_cmd(conn->hdev, HCI_OP_AUTH_REQUESTED,
-		sizeof(cp), &cp);
-		hci_dev_unlock(hdev);
-		BT_DBG("Pin or key missing !!!");
-		return;
-	}
-	/* SS_Bluetooth(gudam.ryu) End */
+	/* SS_BLUETOOTH(gudam.ryu) 2012. 03. 02 - Fixed for opp sending fail, if the devices were unpaired on the remote end */ 
+	if (ev->status == 0x06 && hdev->ssp_mode > 0 && 
+				conn->ssp_mode > 0) { 
+		struct hci_cp_auth_requested cp; 
+		hci_remove_link_key(hdev, &conn->dst); 
+		cp.handle = cpu_to_le16(conn->handle); 
+		hci_send_cmd(conn->hdev, HCI_OP_AUTH_REQUESTED, 
+		sizeof(cp), &cp); 
+		hci_dev_unlock(hdev); 
+		BT_DBG("Pin or key missing !!!"); 
+		return; 
+	} 
+	/* SS_Bluetooth(gudam.ryu) End */ 
 
 	if (!ev->status) {
 		if (!(conn->ssp_mode > 0 && hdev->ssp_mode > 0) &&
