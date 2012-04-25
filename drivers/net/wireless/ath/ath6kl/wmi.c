@@ -2933,7 +2933,7 @@ int ath6kl_wmi_add_del_mcast_filter_cmd(struct wmi *wmi, u8 if_idx,
 
 s32 ath6kl_wmi_get_rate(s8 rate_index)
 {
-	if (rate_index == RATE_AUTO)
+	if (rate_index == RATE_AUTO || rate_index >= ARRAY_SIZE(wmi_rate_tbl))
 		return 0;
 
 	return wmi_rate_tbl[(u32) rate_index][0];

@@ -37,6 +37,7 @@ ath6kl_sdio-y += wmi_btcoex.o
 ath6kl_sdio-y += sdio.o
 ifeq ($(CONFIG_MACH_PX),y)
 ath6kl_sdio-y += c210.o
+ccflags-y += -DTARGET_PX
 else
 ath6kl_sdio-y += msm.o
 endif

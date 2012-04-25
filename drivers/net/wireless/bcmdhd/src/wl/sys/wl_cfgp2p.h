@@ -191,6 +191,9 @@ extern wpa_ie_fixed_t *
 wl_cfgp2p_find_wpsie(u8 *parse, u32 len);
 
 extern wifi_p2p_ie_t *
+wl_cfgp2p_find_customer_ie(u8 *parse, u32 *len);
+
+extern wifi_p2p_ie_t *
 wl_cfgp2p_find_p2pie(u8 *parse, u32 len);
 
 extern wifi_wfd_ie_t *
@@ -266,6 +269,7 @@ wl_cfgp2p_unregister_ndev(struct wl_priv *wl);
 #define SOCIAL_CHAN_2 6
 #define SOCIAL_CHAN_3 11
 #define SOCIAL_CHAN_CNT 3
+#define AF_PEER_SEARCH_CNT (SOCIAL_CHAN_CNT + 1)
 #define WL_P2P_WILDCARD_SSID "DIRECT-"
 #define WL_P2P_WILDCARD_SSID_LEN 7
 #define WL_P2P_INTERFACE_PREFIX "p2p"
@@ -279,6 +283,10 @@ wl_cfgp2p_unregister_ndev(struct wl_priv *wl);
 						((frame->subtype == P2P_PAF_GON_REQ) || \
 						(frame->subtype == P2P_PAF_INVITE_REQ) || \
 						(frame->subtype == P2P_PAF_PROVDIS_REQ)))
+#define IS_P2P_PUB_ACT_RSP_SUBTYPE(subtype) ((subtype == P2P_PAF_GON_RSP) || \
+							((subtype == P2P_PAF_GON_CONF) || \
+							(subtype == P2P_PAF_INVITE_RSP) || \
+							(subtype == P2P_PAF_PROVDIS_RSP)))
 #define IS_P2P_SOCIAL(ch) ((ch == SOCIAL_CHAN_1) || (ch == SOCIAL_CHAN_2) || (ch == SOCIAL_CHAN_3))
 #define IS_P2P_SSID(ssid) (memcmp(ssid, WL_P2P_WILDCARD_SSID, WL_P2P_WILDCARD_SSID_LEN) == 0)
 #endif				/* _wl_cfgp2p_h_ */

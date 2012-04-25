@@ -286,6 +286,11 @@ int ath6kl_control_tx(void *devt, struct sk_buff *skb,
 	int status = 0;
 	struct ath6kl_cookie *cookie = NULL;
 
+#if 1 /* Px */
+	if (ar->wow_state == ATH6KL_WOW_STATE_SUSPENDED)
+		return -EINVAL;
+#endif
+
 	spin_lock_bh(&ar->lock);
 
 	ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
@@ -350,6 +355,13 @@ int ath6kl_data_tx(struct sk_buff *skb, struct net_device *dev)
 	u8 csum_start = 0, csum_dest = 0, csum = skb->ip_summed;
 	u8 meta_ver = 0;
 	u32 flags = 0;
+
+#if 1 /* Px */
+	if (ar->wow_state != ATH6KL_WOW_STATE_NONE) {
+		dev_kfree_skb(skb);
+		return 0;
+	}
+#endif
 
 	ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
 		   "%s: skb=0x%p, data=0x%p, len=0x%x\n", __func__,

@@ -729,6 +729,9 @@ void ath6kl_cfg80211_connect_event(struct ath6kl_vif *vif, u16 channel,
 	if (vif->sme_state == SME_CONNECTING) {
 		/* inform connect result to cfg80211 */
 		vif->sme_state = SME_CONNECTED;
+#if 1 /* Px */
+		ar->suspend_mode = WLAN_POWER_STATE_WOW;
+#endif
 		cfg80211_connect_result(vif->ndev, bssid,
 					assoc_req_ie, assoc_req_len,
 					assoc_resp_ie, assoc_resp_len,
@@ -839,6 +842,9 @@ void ath6kl_cfg80211_disconnect_event(struct ath6kl_vif *vif, u8 reason,
 	}
 
 	vif->sme_state = SME_DISCONNECTED;
+#if 1 /* Px */
+	ar->suspend_mode = WLAN_POWER_STATE_DEEP_SLEEP;
+#endif
 }
 
 static int ath6kl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
@@ -1921,6 +1927,14 @@ static int ath6kl_wow_suspend(struct ath6kl *ar, struct cfg80211_wowlan *wow)
 	if (!ath6kl_cfg80211_ready(vif))
 		return -EIO;
 
+#if 1 /* Px */
+	if (ar->wow_state != ATH6KL_WOW_STATE_NONE) {
+		ath6kl_warn("wow_state is not ATH6KL_WOW_STATE_NONE (%d)\n",
+				ar->wow_state);
+		return -EINVAL;
+	}
+#endif
+
 	if (!test_bit(CONNECTED, &vif->flags))
 		return -ENOTCONN;
 
@@ -1965,10 +1979,17 @@ static int ath6kl_wow_suspend(struct ath6kl *ar, struct cfg80211_wowlan *wow)
 		return -EINVAL;
 	}
 
+#if 1 /* Px */
+	wake_lock_timeout(&ar->wake_lock, 2 * HZ);
+	ar->wow_state = ATH6KL_WOW_STATE_SUSPENDING;
+#endif
+
 	ret = ath6kl_wmi_set_ip_cmd(ar->wmi, vif->fw_vif_idx, ips[0], ips[1]);
 	if (ret) {
 		ath6kl_err("fail to setup ip for arp agent\n");
+#if 0 /* Px */
 		return ret;
+#endif
 	}
 
 skip_arp:
@@ -1976,24 +1997,26 @@ skip_arp:
 					  ATH6KL_WOW_MODE_ENABLE,
 					  filter,
 					  WOW_HOST_REQ_DELAY);
+#if 0 /* Px */
 	if (ret)
 		return ret;
-
+#endif
 	clear_bit(HOST_SLEEP_MODE_CMD_PROCESSED, &vif->flags);
 
 	ret = ath6kl_wmi_set_host_sleep_mode_cmd(ar->wmi, vif->fw_vif_idx,
 						 ATH6KL_HOST_MODE_ASLEEP);
+#if 0 /* Px */
 	if (ret)
 		return ret;
-
+#endif
 	left = wait_event_interruptible_timeout(ar->event_wq,
 			test_bit(HOST_SLEEP_MODE_CMD_PROCESSED, &vif->flags),
 			WMI_TIMEOUT);
 	if (left == 0) {
-		ath6kl_warn("timeout, didn't get host sleep cmd processed event\n");
+		ath6kl_warn("wow_suspend timeout, didn't get host sleep cmd processed event\n");
 		ret = -ETIMEDOUT;
 	} else if (left < 0) {
-		ath6kl_warn("error while waiting for host sleep cmd processed event: %d\n",
+		ath6kl_warn("wow_suspend error while waiting for host sleep cmd processed event: %d\n",
 			    left);
 		ret = left;
 	}
@@ -2010,23 +2033,54 @@ skip_arp:
 		}
 	}
 
+#if 1 /* Px */
+	ar->wow_state = ATH6KL_WOW_STATE_SUSPENDED;
+	wake_unlock(&ar->wake_lock);
+	ret = 0;
+#endif
+
 	return ret;
 }
 
 static int ath6kl_wow_resume(struct ath6kl *ar)
 {
 	struct ath6kl_vif *vif;
-	int ret;
+	int ret, left;
 
 	vif = ath6kl_vif_first(ar);
 	if (!vif)
 		return -EIO;
 
+#if 1 /* Px */
+	if (ar->wow_state == ATH6KL_WOW_STATE_NONE)
+		return 0;
+
+	ar->wow_state = ATH6KL_WOW_STATE_NONE;
+	clear_bit(HOST_SLEEP_MODE_CMD_PROCESSED, &vif->flags);
+#endif
+
 #ifdef CONFIG_HAS_WAKELOCK
-	wake_lock_timeout(&ar->wake_lock, 5);
+	wake_lock_timeout(&ar->wake_lock, 7 * HZ);
 #endif
 	ret = ath6kl_wmi_set_host_sleep_mode_cmd(ar->wmi, vif->fw_vif_idx,
 						 ATH6KL_HOST_MODE_AWAKE);
+
+#if 1 /* Px */
+	left = wait_event_interruptible_timeout(ar->event_wq,
+			test_bit(HOST_SLEEP_MODE_CMD_PROCESSED, &vif->flags),
+			WMI_TIMEOUT);
+	if (left == 0) {
+		ath6kl_warn("wow_resume timeout, didn't get host sleep cmd processed event\n");
+		ret = -ETIMEDOUT;
+	} else if (left < 0) {
+		ath6kl_warn("wow_resume error while waiting for host sleep cmd processed event: %d\n",
+			    left);
+		ret = left;
+	}
+
+	ret = 0;
+#endif
+
 	return ret;
 }
 
@@ -2197,6 +2251,21 @@ static int __ath6kl_cfg80211_resume(struct wiphy *wiphy)
 void ath6kl_check_wow_status(struct ath6kl *ar, struct sk_buff *skb,
 			     bool is_event_pkt)
 {
+#if 1 /* Px */
+	if (in_interrupt()) {
+		ath6kl_dbg(ATH6KL_DBG_SUSPEND,
+			"%s() called in sw interrupt context\n", __func__);
+		return;
+	}
+
+	if (ar->wow_state == ATH6KL_WOW_STATE_SUSPENDING) {
+		ath6kl_dbg(ATH6KL_DBG_SUSPEND,
+			"%s() received IRQ while we are WoW suspending\n",
+			__func__);
+		return;
+	}
+#endif
+
 	if (ar->state == ATH6KL_STATE_WOW || ar->state == ATH6KL_STATE_SCHED_SCAN)
 		ath6kl_cfg80211_resume(ar);
 	else
@@ -2746,6 +2815,8 @@ static int ath6kl_cfg80211_sscan_start(struct wiphy *wiphy,
 	int ret;
 	u8 i;
 
+	printk(KERN_ERR "AR6K: %s() ar->state = %d vif->sme_state = %d\n",
+		__func__, ar->state, vif->sme_state);
 	if (ar->state != ATH6KL_STATE_ON)
 		return -EIO;
 
@@ -3016,6 +3087,17 @@ struct ath6kl *ath6kl_core_alloc(struct device *dev)
 			return NULL;
 		}
 	}
+
+#if 1 /* Px */
+	memset((u8 *)&ar->scparams, 0, sizeof(ar->scparams));
+	ar->scparams.bg_period = WLAN_CONFIG_BG_SCAN_INTERVAL;
+	ar->scparams.maxact_chdwell_time = WLAN_CONFIG_MAXACT_CHDWELL_TIME;
+	ar->scparams.pas_chdwell_time = WLAN_CONFIG_PASSIVE_CHDWELL_TIME;
+	ar->scparams.short_scan_ratio = WMI_SHORTSCANRATIO_DEFAULT;
+	ar->scparams.scan_ctrl_flags = DEFAULT_SCAN_CTRL_FLAGS;
+
+	ar->pspoll_num = WLAN_CONFIG_PSPOLL_NUM;
+#endif
 
 	skb_queue_head_init(&ar->mcastpsq);
 

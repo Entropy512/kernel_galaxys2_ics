@@ -70,6 +70,40 @@
 #define A_DEFAULT_LISTEN_INTERVAL         1      /* beacon intervals */
 #define A_MAX_WOW_LISTEN_INTERVAL         1000
 
+#if 1 /* Px */
+/*
+ * background scan interval (sec)
+ * disable background scan interval: 65535
+ * default: 60 sec
+ * to restore the default value: 0
+ *
+ * For P2P and PMKID cache, bg scan should be enabled.
+ */
+#define WLAN_CONFIG_BG_SCAN_INTERVAL         65535
+/*
+ * maximum active dwell time (ms)
+ * default: 20 ms
+ * to restore the default value: 0
+ */
+#define WLAN_CONFIG_MAXACT_CHDWELL_TIME      60
+/*
+ * passive dwell time (ms)
+ * default: 50 ms
+ * to restore the default value: 0
+ */
+#define WLAN_CONFIG_PASSIVE_CHDWELL_TIME     60
+#define WMI_SHORTSCANRATIO_DEFAULT           3
+#define DEFAULT_SCAN_CTRL_FLAGS              (CONNECT_SCAN_CTRL_FLAGS | \
+			SCAN_CONNECTED_CTRL_FLAGS | ACTIVE_SCAN_CTRL_FLAGS | \
+			ROAM_SCAN_CTRL_FLAGS | ENABLE_AUTO_CTRL_FLAGS)
+
+/*
+ * 0: to disable sending ps-poll in TIM interrupt
+ * 1: to send one ps-poll (the default)
+ */
+#define WLAN_CONFIG_PSPOLL_NUM              0
+#endif
+
 /* includes also the null byte */
 #define ATH6KL_FIRMWARE_MAGIC               "QCA-ATH6KL"
 
@@ -139,6 +173,11 @@ struct ath6kl_fw_ie {
 #define AR6003_HW_2_1_1_BOARD_DATA_FILE "ath6k/AR6003/hw2.1.1/bdata.bin"
 #define AR6003_HW_2_1_1_DEFAULT_BOARD_DATA_FILE	\
 			"ath6k/AR6003/hw2.1.1/bdata.SD31.bin"
+
+#ifdef TARGET_PX
+#define AR6003_HW_2_1_1_TCMD_BOARD_DATA_FILE \
+			"ath6k/AR6003/hw2.1.1/bdata.tcmd.bin"
+#endif
 
 /* AR6004 1.0 definitions */
 #define AR6004_HW_1_0_VERSION                 0x30000623
@@ -555,11 +594,22 @@ enum ath6kl_state {
 	ATH6KL_STATE_SCHED_SCAN,
 };
 
+#if 1 /* Px */
+enum ath6kl_wow_state {
+	ATH6KL_WOW_STATE_NONE = 0,
+	ATH6KL_WOW_STATE_SUSPENDING,
+	ATH6KL_WOW_STATE_SUSPENDED
+};
+#endif
+
 struct ath6kl {
 	struct device *dev;
 	struct wiphy *wiphy;
 
 	enum ath6kl_state state;
+#if 1 /* Px */
+	enum ath6kl_wow_state wow_state;
+#endif
 
 	struct ath6kl_bmi bmi;
 	const struct ath6kl_hif_ops *hif_ops;
@@ -681,6 +731,8 @@ struct ath6kl {
 
 #if 1 /* Px */
 	unsigned int psminfo;
+	struct wmi_scan_params_cmd scparams;
+	unsigned int pspoll_num;
 #endif
 
 #ifdef CONFIG_ATH6KL_DEBUG

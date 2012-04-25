@@ -50,13 +50,11 @@ struct ath6kl_sdio {
 	/* scatter request list head */
 	struct list_head scat_req;
 
-	/* Avoids disabling irq while the interrupts being handled */
-	struct mutex mtx_irq;
-
 	spinlock_t scat_lock;
 	bool scatter_enabled;
 
 	bool is_disabled;
+	atomic_t irq_handling;
 	const struct sdio_device_id *id;
 	struct work_struct wr_async_work;
 	struct list_head wr_asyncq;
@@ -405,8 +403,9 @@ static int ath6kl_sdio_read_write_sync(struct ath6kl *ar, u32 addr, u8 *buf,
 			return -ENOMEM;
 		mutex_lock(&ar_sdio->dma_buffer_mutex);
 		tbuf = ar_sdio->dma_buffer;
-		memcpy(tbuf, buf, len);
 		bounced = true;
+		if ((request & HIF_WRITE) && bounced)
+			memcpy(tbuf, buf, len);
 	} else
 		tbuf = buf;
 
@@ -463,7 +462,8 @@ static void ath6kl_sdio_irq_handler(struct sdio_func *func)
 	ath6kl_dbg(ATH6KL_DBG_SDIO, "irq\n");
 
 	ar_sdio = sdio_get_drvdata(func);
-	mutex_lock(&ar_sdio->mtx_irq);
+	atomic_set(&ar_sdio->irq_handling, 1);
+
 	/*
 	 * Release the host during interrups so we can pick it back up when
 	 * we process commands.
@@ -472,7 +472,7 @@ static void ath6kl_sdio_irq_handler(struct sdio_func *func)
 
 	status = ath6kl_hif_intr_bh_handler(ar_sdio->ar);
 	sdio_claim_host(ar_sdio->func);
-	mutex_unlock(&ar_sdio->mtx_irq);
+	atomic_set(&ar_sdio->irq_handling, 0);
 	WARN_ON(status && status != -ECANCELED);
 }
 
@@ -580,13 +580,16 @@ static void ath6kl_sdio_irq_disable(struct ath6kl *ar)
 
 	sdio_claim_host(ar_sdio->func);
 
-	mutex_lock(&ar_sdio->mtx_irq);
+	/* Mask our function IRQ */
+	while (atomic_read(&ar_sdio->irq_handling)) {
+		sdio_release_host(ar_sdio->func);
+		schedule_timeout(HZ / 10);
+		sdio_claim_host(ar_sdio->func);
+	}
 
 	ret = sdio_release_irq(ar_sdio->func);
 	if (ret)
 		ath6kl_err("Failed to release sdio irq: %d\n", ret);
-
-	mutex_unlock(&ar_sdio->mtx_irq);
 
 	sdio_release_host(ar_sdio->func);
 }
@@ -796,10 +799,6 @@ static int ath6kl_sdio_suspend(struct ath6kl *ar, struct cfg80211_wowlan *wow)
 	/* Schedule scan uses WOW internally */
 	pmode_to_try = (ar->state == ATH6KL_STATE_SCHED_SCAN) ?
 			WLAN_POWER_STATE_WOW : ar->suspend_mode;
-
-	pmode_to_try = 2;
-
-	printk(KERN_ERR "pmode_to_try : %d", pmode_to_try);
 retry:
 	switch (pmode_to_try) {
 	case WLAN_POWER_STATE_CUT_PWR:
@@ -1289,7 +1288,6 @@ static int ath6kl_sdio_probe(struct sdio_func *func,
 	spin_lock_init(&ar_sdio->scat_lock);
 	spin_lock_init(&ar_sdio->wr_async_lock);
 	mutex_init(&ar_sdio->dma_buffer_mutex);
-	mutex_init(&ar_sdio->mtx_irq);
 
 	INIT_LIST_HEAD(&ar_sdio->scat_req);
 	INIT_LIST_HEAD(&ar_sdio->bus_req_freeq);
