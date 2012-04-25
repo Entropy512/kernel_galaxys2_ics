@@ -92,6 +92,9 @@ struct busfreq_data {
 	/* Dividers calculated at boot/probe-time */
 	unsigned int dmc_divtable[_LV_END]; /* DMC0 */
 	unsigned int top_divtable[_LV_END];
+
+	/* Exynos4x12 uses DMC_PAUSE */
+	unsigned int dmc_pause_ctrl;
 };
 
 struct bus_opp_table {
@@ -169,6 +172,18 @@ static unsigned int exynos4x12_int_volt[][EX4x12_LV_NUM] = {
 	{887500,  850000, 850000, 850000}, /* ASV6 */
 	{887500,  850000, 850000, 850000}, /* ASV7 */
 	{887500,  850000, 850000, 850000}, /* ASV8 */
+};
+
+static unsigned int exynos4x12_qos_value[][4] = {
+	{0x00, 0x00, 0x00, 0x00},	/* 400 */
+	{0x00, 0x00, 0x00, 0x00},	/* 267 */
+	{0x06, 0x03, 0x06, 0x0e},	/* 160 */
+	{0x06, 0x03, 0x06, 0x0e},	/* 133 */
+	{0x03, 0x0B, 0x00, 0x00},	/* 100 */
+};
+
+static unsigned int exynos4x12_timingrow[] = {
+	0x34498691, 0x24488490, 0x154882D0, 0x154882D0, 0x0D488210,
 };
 
 /*** Clock Divider Data for Exynos4210 ***/
@@ -575,7 +590,6 @@ static int exynos4x12_get_dev_status(struct busfreq_data *data,
 	unsigned long long busy, total;
 
 	ppmu_update(data->dev, 3);
-	ppmu_start(data->dev);
 
 	if (ppmu_load[PPMU_DMC0] > ppmu_load[PPMU_DMC1])
 		id = PPMU_DMC0;
@@ -595,6 +609,7 @@ static int exynos4x12_get_dev_status(struct busfreq_data *data,
 	stat->busy_time = busy;
 	stat->total_time = total;
 
+	ppmu_start(data->dev);
 	return 0;
 }
 
@@ -654,6 +669,43 @@ static int exynos4_bus_setvolt(struct busfreq_data *data, struct opp *opp,
 	return err;
 }
 
+
+/**
+ * exynos4x12_set_qos() - Apply QoS registers (GDL/GDR)
+ * @data:
+ * @opp:
+ */
+static void exynos4x12_set_qos(struct busfreq_data *data, struct opp *opp)
+{
+	int index;
+
+	switch (opp_get_freq(opp)) {
+	case 400000:
+		index = 0;
+		break;
+	case 267000:
+		index = 1;
+		break;
+	case 160000:
+		index = 2;
+		break;
+	case 133000:
+		index = 3;
+		break;
+	case 100000:
+		index = 4;
+		break;
+	default:
+		dev_err(data->dev, "Incorrect OPP configuration.\n");
+		return;
+	}
+
+	__raw_writel(exynos4x12_qos_value[index][0], S5P_VA_GDL + 0x400);
+	__raw_writel(exynos4x12_qos_value[index][1], S5P_VA_GDL + 0x404);
+	__raw_writel(exynos4x12_qos_value[index][2], S5P_VA_GDR + 0x400);
+	__raw_writel(exynos4x12_qos_value[index][3], S5P_VA_GDR + 0x404);
+}
+
 static int exynos4_bus_target(struct device *dev, unsigned long *_freq)
 {
 	int err = 0;
@@ -686,6 +738,7 @@ static int exynos4_bus_target(struct device *dev, unsigned long *_freq)
 			err = exynos4210_set_busclk(data, opp);
 			break;
 		case TYPE_BUSF_EXYNOS4x12:
+			exynos4x12_set_qos(data, opp);
 			err = exynos4x12_set_busclk(data, opp);
 			break;
 		default:
@@ -1055,6 +1108,11 @@ static __devinit int exynos4_busfreq_probe(struct platform_device *pdev)
 	case TYPE_BUSF_EXYNOS4x12:
 		err = exynos4x12_init_tables(data);
 
+		/* Enable pause function for DREX2 DVFS */
+		data->dmc_pause_ctrl = __raw_readl(EXYNOS4_DMC_PAUSE_CTRL);
+		data->dmc_pause_ctrl |= DMC_PAUSE_ENABLE;
+		__raw_writel(data->dmc_pause_ctrl, EXYNOS4_DMC_PAUSE_CTRL);
+
 		ppmu_clk = clk_get(NULL, "ppmudmc0");
 		if (IS_ERR(ppmu_clk))
 			printk(KERN_ERR "failed to get ppmu_dmc0\n");
@@ -1127,8 +1185,13 @@ static __devinit int exynos4_busfreq_probe(struct platform_device *pdev)
 		for (i = 0; i < EX4210_LV_NUM; i++) {
 			qos_list[EX4210_LV_MAX - i].freq =
 				exynos4210_busclk_table[i].clk;
+			/*
+			 * clk / 1000 is added in order to keep compatible
+			 * with S.LSI hack (busfreq_opp)'s qos values.
+			 */
 			qos_list[EX4210_LV_MAX - i].qos_value =
-				exynos4210_busclk_table[i].clk;
+				exynos4210_busclk_table[i].clk +
+				(exynos4210_busclk_table[i].clk / 1000);
 		}
 		break;
 	case TYPE_BUSF_EXYNOS4x12:
@@ -1219,17 +1282,45 @@ static __devexit int exynos4_busfreq_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#define TIMINGROW_OFFSET	0x34
+static int exynos4_busfreq_suspend(struct device *dev)
+{
+	int index = 0;
+	unsigned int timing0;
+	struct platform_device *pdev = container_of(dev, struct platform_device,
+						    dev);
+	struct busfreq_data *data = platform_get_drvdata(pdev);
+
+	if (data->type == TYPE_BUSF_EXYNOS4x12) {
+		timing0 = __raw_readl(S5P_VA_DMC0 + TIMINGROW_OFFSET);
+		timing0 |= exynos4x12_timingrow[index];
+		__raw_writel(timing0, S5P_VA_DMC0 + TIMINGROW_OFFSET);
+		__raw_writel(exynos4x12_timingrow[index],
+			     S5P_VA_DMC0 + TIMINGROW_OFFSET);
+		__raw_writel(timing0, S5P_VA_DMC1 + TIMINGROW_OFFSET);
+		__raw_writel(exynos4x12_timingrow[index],
+			     S5P_VA_DMC1 + TIMINGROW_OFFSET);
+	}
+
+	return 0;
+}
+
 static int exynos4_busfreq_resume(struct device *dev)
 {
 	struct platform_device *pdev = container_of(dev, struct platform_device,
 						    dev);
 	struct busfreq_data *data = platform_get_drvdata(pdev);
 
-	busfreq_mon_reset(data);
+	ppmu_reset(data->dev);
+
+	if (data->type == TYPE_BUSF_EXYNOS4x12)
+		__raw_writel(data->dmc_pause_ctrl, EXYNOS4_DMC_PAUSE_CTRL);
+
 	return 0;
 }
 
 static const struct dev_pm_ops exynos4_busfreq_pm = {
+	.suspend = exynos4_busfreq_suspend,
 	.resume	= exynos4_busfreq_resume,
 };
 
@@ -1263,53 +1354,6 @@ static void __exit exynos4_busfreq_exit(void)
 }
 module_exit(exynos4_busfreq_exit);
 
-#ifdef CONFIG_BUSFREQ_LOCK_WRAPPER
-#include <mach/cpufreq.h>
-static struct pm_qos_request_list qos_wrapper[DVFS_LOCK_ID_END];
-
-/* Wrappers for obsolete legacy kernel hack (busfreq_lock/lock_free) */
-int exynos4_busfreq_lock(unsigned int nId, enum busfreq_level_request lvl)
-{
-	s32 qos_value;
-
-	if (WARN(nId >= DVFS_LOCK_ID_END, "incorrect nId."))
-		return -EINVAL;
-	if (WARN(lvl >= BUS_LEVEL_END, "incorrect level."))
-		return -EINVAL;
-
-	switch (lvl) {
-	case BUS_L0:
-		qos_value = 400000;
-		break;
-	case BUS_L1:
-		qos_value = 267000;
-		break;
-	case BUS_L2:
-		qos_value = 133000;
-		break;
-	default:
-		qos_value = 0;
-	}
-
-	if (qos_wrapper[nId].pm_qos_class == 0) {
-		pm_qos_add_request(&qos_wrapper[nId],
-				   PM_QOS_BUS_DMA_THROUGHPUT, qos_value);
-	} else {
-		pm_qos_update_request(&qos_wrapper[nId], qos_value);
-	}
-
-	return 0;
-}
-void exynos4_busfreq_lock_free(unsigned int nId)
-{
-	if (WARN(nId >= DVFS_LOCK_ID_END, "incorrect nId."))
-		return;
-
-	if (qos_wrapper[nId].pm_qos_class)
-		pm_qos_update_request(&qos_wrapper[nId],
-				      PM_QOS_BUS_DMA_THROUGHPUT_DEFAULT_VALUE);
-}
-#endif
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("EXYNOS4 busfreq driver with devfreq framework");
 MODULE_AUTHOR("MyungJoo Ham <myungjoo.ham@samsung.com>");
