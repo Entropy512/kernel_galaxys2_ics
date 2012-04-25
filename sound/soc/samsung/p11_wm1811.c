@@ -419,6 +419,19 @@ static int mic_sel_set(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+static int ext_amp_bias(struct snd_soc_dapm_widget *w,
+				struct snd_kcontrol *k, int event)
+{
+	struct snd_soc_codec *codec = w->codec;
+
+	gpio_set_value(GPIO_AMP_L_INT,
+			SND_SOC_DAPM_EVENT_ON(event) ? 1 : 0);
+	gpio_set_value(GPIO_AMP_R_INT,
+			SND_SOC_DAPM_EVENT_ON(event) ? 1 : 0);
+
+	return 0;
+}
+
 const char *mic_sel_text[] = {
 	"Sub", "Headset"
 };
@@ -439,7 +452,7 @@ const struct snd_soc_dapm_widget p11_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("HP", NULL),
 	SND_SOC_DAPM_SPK("SPK", NULL),
 	SND_SOC_DAPM_SPK("RCV", NULL),
-	SND_SOC_DAPM_LINE("LINE", NULL),
+	SND_SOC_DAPM_SPK("LINE", ext_amp_bias),
 
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("Main Mic", NULL),
@@ -836,10 +849,10 @@ static int __init p11_audio_init(void)
 #endif
 
 	gpio_request_one(GPIO_AMP_L_INT, GPIOF_OUT_INIT_LOW, "AMP_L_INT");
-	gpio_set_value(GPIO_AMP_L_INT, 1);
+	gpio_set_value(GPIO_AMP_L_INT, 0);
 
 	gpio_request_one(GPIO_AMP_R_INT, GPIOF_OUT_INIT_LOW, "AMP_R_INT");
-	gpio_set_value(GPIO_AMP_R_INT, 1);
+	gpio_set_value(GPIO_AMP_R_INT, 0);
 
 	p11_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!p11_snd_device)

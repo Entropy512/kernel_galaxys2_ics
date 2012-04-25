@@ -142,6 +142,8 @@ static int wm8994_readable(struct snd_soc_codec *codec, unsigned int reg)
 	case WM8994_GPIO_11:
 	case WM8994_INTERRUPT_STATUS_1:
 	case WM8994_INTERRUPT_STATUS_2:
+	case WM8994_INTERRUPT_STATUS_1_MASK:
+	case WM8994_INTERRUPT_STATUS_2_MASK:
 	case WM8994_INTERRUPT_RAW_STATUS_2:
 		return 1;
 
@@ -2749,7 +2751,7 @@ static struct snd_soc_dai_driver wm8994_dai[] = {
 		.playback = {
 			.stream_name = "AIF1 Playback",
 			.channels_min = 1,
-			.channels_max = 2,
+			.channels_max = 6,
 			.rates = WM8994_RATES,
 			.formats = WM8994_FORMATS,
 		},
@@ -3510,10 +3512,18 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		}
 	}
 
+	/* By default use idle_bias_off, will override for WM8994 */
+	codec->dapm.idle_bias_off = 1;
+
 	/* Set revision-specific configuration */
 	wm8994->revision = snd_soc_read(codec, WM8994_CHIP_REVISION);
 	switch (control->type) {
 	case WM8994:
+		/* Single ended line outputs should have VMID on. */
+		if (!wm8994->pdata->lineout1_diff ||
+		    !wm8994->pdata->lineout2_diff)
+			codec->dapm.idle_bias_off = 0;
+
 		switch (wm8994->revision) {
 		case 2:
 		case 3:
@@ -3961,6 +3971,7 @@ static struct snd_soc_codec_driver soc_codec_dev_wm8994 = {
 	.volatile_register = wm8994_volatile,
 	.set_bias_level = wm8994_set_bias_level,
 
+	.max_register = WM8994_MAX_REGISTER,
 	.reg_cache_size = WM8994_CACHE_SIZE,
 	.reg_cache_default = wm8994_reg_defaults,
 	.reg_word_size = 2,

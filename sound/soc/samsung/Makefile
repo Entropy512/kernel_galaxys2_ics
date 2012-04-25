@@ -46,6 +46,7 @@ snd-soc-speyside-objs := speyside.o
 snd-soc-u1-mc1n2-objs := u1_mc1n2.o
 snd-soc-midas-wm1811-objs := midas_wm1811.o
 snd-soc-slp-midas-wm1811-objs := slp_midas_wm1811.o
+snd-soc-slp-naples-wm1811-objs := slp_naples_wm1811.o
 snd-soc-p11-wm1811-objs := p11_wm1811.o
 
 obj-$(CONFIG_SND_SOC_SAMSUNG_JIVE_WM8750) += snd-soc-jive-wm8750.o
@@ -70,6 +71,7 @@ obj-$(CONFIG_SND_SOC_SPEYSIDE) += snd-soc-speyside.o
 obj-$(CONFIG_SND_SOC_U1_MC1N2) += snd-soc-u1-mc1n2.o
 obj-$(CONFIG_SND_SOC_SAMSUNG_MIDAS_WM1811) += snd-soc-midas-wm1811.o
 obj-$(CONFIG_SND_SOC_SAMSUNG_SLP_MIDAS_WM1811) += snd-soc-slp-midas-wm1811.o
+obj-$(CONFIG_SND_SOC_SAMSUNG_SLP_NAPLES_WM1811) += snd-soc-slp-naples-wm1811.o
 obj-$(CONFIG_SND_SOC_SAMSUNG_P11_WM1811) += snd-soc-p11-wm1811.o
 obj-$(CONFIG_SND_SOC_SAMSUNG_P10_WM1811) += snd-soc-p11-wm1811.o
 

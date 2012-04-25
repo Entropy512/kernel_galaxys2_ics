@@ -85,6 +85,12 @@ config SND_SOC_SAMSUNG_SLP_MIDAS_WM1811
 	help
 	  Say Y if you want to add support for SoC audio on the MIDAS.
 
+config SND_SOC_SAMSUNG_SLP_NAPLES_WM1811
+	tristate "SoC I2S Audio support for WM1811 on SLP NAPLES"
+	depends on SND_SOC_SAMSUNG && (MACH_SLP_NAPLES || MACH_SLP_NAPLES_D || MACH_SLP_NAPLES_Q)
+	select SND_SOC_WM8994
+	select SND_SAMSUNG_I2S
+
 config SND_SOC_SAMSUNG_P11_WM1811
 	tristate "SoC I2S Audio support for WM1811 on P11"
 	depends on SND_SOC_SAMSUNG && MACH_P11

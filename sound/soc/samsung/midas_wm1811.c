@@ -59,13 +59,23 @@ static const struct wm8958_micd_rate midas_det_rates[] = {
 	{ 44100 * 256, false, 8, 8 },
 };
 
+static const struct wm8958_micd_rate midas_jackdet_rates[] = {
+	{ 32768,       true,  0, 1 },
+	{ 32768,       false, 0, 1 },
+	{ 44100 * 256, true,  8, 8 },
+	{ 44100 * 256, false, 8, 8 },
+};
+
+static int aif2_mode;
+const char *aif2_mode_text[] = {
+	"Slave", "Master"
+};
+
 /* To support PBA function test */
 static struct class *jack_class;
 static struct device *jack_dev;
 
 static bool midas_fll1_active;
-static enum snd_soc_bias_level midas_card_bias_level;
-struct mutex midas_lock;
 
 static void midas_set_mclk(int on)
 {
@@ -132,6 +142,52 @@ static void midas_gpio_init(void)
 	gpio_direction_output(GPIO_SUB_MIC_BIAS_EN, 1);
 	gpio_set_value(GPIO_SUB_MIC_BIAS_EN, 0);
 	gpio_free(GPIO_SUB_MIC_BIAS_EN);
+
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	/* Third Microphone BIAS */
+	err = gpio_request(GPIO_THIRD_MIC_BIAS_EN, "GPJ0");
+	if (err) {
+		pr_err(KERN_ERR "THIRD_MIC_BIAS_EN GPIO set error!\n");
+		return;
+	}
+	gpio_direction_output(GPIO_THIRD_MIC_BIAS_EN, 1);
+	gpio_set_value(GPIO_THIRD_MIC_BIAS_EN, 0);
+	gpio_free(GPIO_THIRD_MIC_BIAS_EN);
+
+	/* FM/Third Mic GPIO */
+	err = gpio_request(GPIO_FM_MIC_SW, "GPL0");
+	if (err) {
+		pr_err(KERN_ERR "FM/THIRD_MIC Switch GPIO set error!\n");
+		return;
+	}
+	gpio_direction_output(GPIO_FM_MIC_SW, 1);
+	gpio_set_value(GPIO_FM_MIC_SW, 0);
+	gpio_free(GPIO_FM_MIC_SW);
+#endif
+}
+
+static const struct soc_enum aif2_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(aif2_mode_text), aif2_mode_text),
+};
+
+static int get_aif2_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = aif2_mode;
+	return 0;
+}
+
+static int set_aif2_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	if (aif2_mode == ucontrol->value.integer.value[0])
+		return 0;
+
+	aif2_mode = ucontrol->value.integer.value[0];
+
+	pr_info("set aif2 mode : %s\n", aif2_mode_text[aif2_mode]);
+
+	return 0;
 }
 
 static int midas_ext_micbias(struct snd_soc_dapm_widget *w,
@@ -180,6 +236,31 @@ static int midas_ext_submicbias(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+static int midas_ext_thirdmicbias(struct snd_soc_dapm_widget *w,
+				struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_codec *codec = w->codec;
+
+	dev_dbg(codec->dev, "%s event is %02X", w->name, event);
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		gpio_set_value(GPIO_THIRD_MIC_BIAS_EN, 1);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		gpio_set_value(GPIO_THIRD_MIC_BIAS_EN, 0);
+		break;
+	}
+
+#if 0
+	gpio_set_value(GPIO_SUB_MIC_BIAS_EN, SND_SOC_DAPM_EVENT_ON(event));
+#endif
+
+	return 0;
+}
+#endif
+
 static int midas_ext_spkmode(struct snd_soc_dapm_widget *w,
 			     struct snd_kcontrol *kcontrol, int event)
 {
@@ -198,8 +279,8 @@ static void midas_micd_set_rate(struct snd_soc_codec *codec)
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	int best, i, sysclk, val;
 	bool idle;
-	const struct wm8958_micd_rate *rates;
-	int num_rates;
+	const struct wm8958_micd_rate *rates = NULL;
+	int num_rates = 0;
 
 	idle = !wm8994->jack_mic;
 
@@ -210,6 +291,9 @@ static void midas_micd_set_rate(struct snd_soc_codec *codec)
 		sysclk = wm8994->aifclk[0];
 
 	if (wm8994->jackdet) {
+		rates = midas_jackdet_rates;
+		num_rates = ARRAY_SIZE(midas_jackdet_rates);
+	} else {
 		rates = midas_det_rates;
 		num_rates = ARRAY_SIZE(midas_det_rates);
 	}
@@ -579,22 +663,28 @@ static int midas_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
 		prate = 8000;
 	}
 
-#ifdef CONFIG_LTE_MODEM_CMC221
+#if defined(CONFIG_LTE_MODEM_CMC221) || defined(CONFIG_MACH_M0_CTC)
 	/* Set the codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_DSP_A
 					| SND_SOC_DAIFMT_IB_NF
 					| SND_SOC_DAIFMT_CBS_CFS);
 #else
-	/* Set the codec DAI configuration */
-	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S
+	/* Set the codec DAI configuration, aif2_mode:0 is slave */
+	if (aif2_mode == 0) {
+		ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S
 					| SND_SOC_DAIFMT_NB_NF
 					| SND_SOC_DAIFMT_CBS_CFS);
+	} else {
+		ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S
+					| SND_SOC_DAIFMT_NB_NF
+					| SND_SOC_DAIFMT_CBM_CFM);
+	}
 #endif
 
 	if (ret < 0)
 		return ret;
 
-#ifdef CONFIG_LTE_MODEM_CMC221
+#if defined(CONFIG_LTE_MODEM_CMC221) || defined(CONFIG_MACH_M0_CTC)
 	bclk = 2048000;
 #else
 	switch (prate) {
@@ -608,10 +698,15 @@ static int midas_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 #endif
-
-	ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL2,
+	if (aif2_mode == 0) {
+		ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL2,
 					WM8994_FLL_SRC_BCLK,
 					bclk, prate * 256);
+	} else {
+		ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL2,
+					WM8994_FLL_SRC_MCLK1,
+					24000000, prate * 256);
+	}
 	if (ret < 0)
 		dev_err(codec_dai->dev, "Unable to configure FLL2: %d\n", ret);
 
@@ -644,6 +739,13 @@ static const struct snd_kcontrol_new midas_controls[] = {
 	SOC_DAPM_PIN_SWITCH("RCV"),
 	SOC_DAPM_PIN_SWITCH("FM In"),
 	SOC_DAPM_PIN_SWITCH("LINE"),
+	SOC_DAPM_PIN_SWITCH("Main Mic"),
+	SOC_DAPM_PIN_SWITCH("Sub Mic"),
+	SOC_DAPM_PIN_SWITCH("Third Mic"),
+	SOC_DAPM_PIN_SWITCH("Headset Mic"),
+
+	SOC_ENUM_EXT("AIF2 Mode", aif2_mode_enum[0],
+		get_aif2_mode, set_aif2_mode),
 };
 
 const struct snd_soc_dapm_widget midas_dapm_widgets[] = {
@@ -655,6 +757,9 @@ const struct snd_soc_dapm_widget midas_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("Main Mic", midas_ext_micbias),
 	SND_SOC_DAPM_MIC("Sub Mic", midas_ext_submicbias),
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	SND_SOC_DAPM_MIC("Third Mic", midas_ext_thirdmicbias),
+#endif
 	SND_SOC_DAPM_LINE("FM In", NULL),
 
 	SND_SOC_DAPM_INPUT("S5P RP"),
@@ -689,6 +794,11 @@ const struct snd_soc_dapm_route midas_dapm_routes[] = {
 
 	{ "IN2RN", NULL, "FM In" },
 	{ "IN2RP:VXRP", NULL, "FM In" },
+
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	{ "IN2RN", NULL, "Third Mic" },
+	{ "IN2RP:VXRP", NULL, "Third Mic" },
+#endif
 };
 
 struct wm1811_machine_priv {
@@ -958,6 +1068,10 @@ static int midas_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(&codec->dapm, "AIF2ADCDAT");
 	snd_soc_dapm_ignore_suspend(&codec->dapm, "AIF3ADCDAT");
 	snd_soc_dapm_ignore_suspend(&codec->dapm, "FM In");
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	snd_soc_dapm_ignore_suspend(&codec->dapm, "Third Mic");
+#endif
+
 
 	wm1811->codec = codec;
 
@@ -1010,10 +1124,7 @@ static int midas_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
 		pr_err("Failed to create device file (%s)!\n",
 			dev_attr_state.attr.name);
 
-	mutex_init(&midas_lock);
-
 	return snd_soc_dapm_sync(&codec->dapm);
-
 }
 
 static struct snd_soc_dai_link midas_dai[] = {
@@ -1077,32 +1188,38 @@ static int midas_card_resume(struct snd_soc_card *card)
 }
 
 static int midas_set_bias_level(struct snd_soc_card *card,
+				struct snd_soc_dapm_context *dapm,
 				enum snd_soc_bias_level level)
 {
-	mutex_lock(&midas_lock);
+	struct snd_soc_dai *aif1_dai = card->rtd[0].codec_dai;
+
+	if (dapm->dev != aif1_dai->dev)
+		return 0;
+
 	switch (level) {
 	case SND_SOC_BIAS_PREPARE:
-		if (midas_card_bias_level == SND_SOC_BIAS_STANDBY)
-			midas_start_fll1(card->rtd[0].codec_dai);
+		midas_start_fll1(card->rtd[0].codec_dai);
 		break;
 
 	default:
 		break;
 	}
-	mutex_unlock(&midas_lock);
 
 	return 0;
 }
 
 static int midas_set_bias_level_post(struct snd_soc_card *card,
-					 enum snd_soc_bias_level level)
+				     struct snd_soc_dapm_context *dapm,
+				     enum snd_soc_bias_level level)
 {
 	struct snd_soc_codec *codec = card->rtd->codec;
 	struct snd_soc_dai *aif1_dai = card->rtd[0].codec_dai;
 	struct snd_soc_dai *aif2_dai = card->rtd[1].codec_dai;
 	int ret;
 
-	mutex_lock(&midas_lock);
+	if (dapm->dev != aif1_dai->dev)
+		return 0;
+
 	switch (level) {
 	case SND_SOC_BIAS_STANDBY:
 
@@ -1110,7 +1227,7 @@ static int midas_set_bias_level_post(struct snd_soc_card *card,
 		 * directly for minimum power consumptin for accessory
 		 * detection.
 		 */
-		if (midas_card_bias_level == SND_SOC_BIAS_PREPARE) {
+		if (card->dapm.bias_level == SND_SOC_BIAS_PREPARE) {
 			dev_info(aif1_dai->dev, "Moving to STANDBY\n");
 
 			ret = snd_soc_dai_set_sysclk(aif2_dai,
@@ -1153,12 +1270,7 @@ static int midas_set_bias_level_post(struct snd_soc_card *card,
 		break;
 	}
 
-#if 0 /* TODO */
-	codec->dapm.bias_level = level;
-#else
-	midas_card_bias_level = level;
-#endif
-	mutex_unlock(&midas_lock);
+	card->dapm.bias_level = level;
 
 	return 0;
 }
@@ -1214,5 +1326,3 @@ module_exit(midas_audio_exit);
 MODULE_AUTHOR("JS. Park <aitdark.park@samsung.com>");
 MODULE_DESCRIPTION("ALSA SoC Midas WM1811");
 MODULE_LICENSE("GPL");
-
-
