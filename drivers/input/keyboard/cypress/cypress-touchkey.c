@@ -307,6 +307,8 @@ static int i2c_touchkey_read(u8 reg, u8 *val, unsigned int len)
 
 }
 
+#if defined(CONFIG_TARGET_LOCALE_NAATT) \
+|| defined(CONFIG_TARGET_LOCALE_NA) || defined(CONFIG_MACH_Q1_BD)
 static int i2c_touchkey_write(u8 *val, unsigned int len)
 {
 	int err = 0;
@@ -336,6 +338,36 @@ static int i2c_touchkey_write(u8 *val, unsigned int len)
 	}
 	return err;
 }
+#else
+static int i2c_touchkey_write(u8 *val, unsigned int len)
+{
+	int err = 0;
+	struct i2c_msg msg[1];
+	unsigned char data[2];
+	int retry = 2;
+
+	if ((touchkey_driver == NULL) || !(touchkey_enable == 1)) {
+		/*printk(KERN_ERR "[TouchKey] touchkey is not enabled.\n"); */
+		return -ENODEV;
+	}
+
+	while (retry--) {
+		data[0] = *val;
+		msg->addr = touchkey_driver->client->addr;
+		msg->flags = I2C_M_WR;
+		msg->len = len;
+		msg->buf = data;
+		err = i2c_transfer(touchkey_driver->client->adapter, msg, 1);
+
+		if (err >= 0)
+			return 0;
+		printk(KERN_DEBUG "[TouchKey] %s %d i2c transfer error\n",
+		       __func__, __LINE__);
+		mdelay(10);
+	}
+	return err;
+}
+#endif
 
 #if defined(CONFIG_TARGET_LOCALE_NAATT) \
 || defined(CONFIG_TARGET_LOCALE_NA) || defined(CONFIG_MACH_Q1_BD)
