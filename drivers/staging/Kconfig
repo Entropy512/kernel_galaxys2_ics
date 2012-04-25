@@ -138,8 +138,6 @@ source "drivers/staging/westbridge/Kconfig"
 
 source "drivers/staging/sbe-2t3e3/Kconfig"
 
-source "drivers/staging/ath6kl/Kconfig"
-
 source "drivers/staging/keucr/Kconfig"
 
 source "drivers/staging/bcm/Kconfig"

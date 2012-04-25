@@ -79,13 +79,21 @@ struct acc_con_info {
 	struct mutex lock;
 };
 
+#if defined(CONFIG_STMPE811_ADC)
+#define ACCESSORY_ID_ADC_CH 0
+#else
 #define ACCESSORY_ID_ADC_CH 4
+#endif
 
 static int acc_get_adc_accessroy_id(struct s3c_adc_client *padc)
 {
 	int adc_data;
 
+#if defined(CONFIG_STMPE811_ADC)
+	adc_data = stmpe811_get_adc_data(ACCESSORY_ID_ADC_CH);
+#else
 	adc_data = s3c_adc_read(padc, ACCESSORY_ID_ADC_CH);
+#endif
 /*	ACC_CONDEV_DBG("[ACC] adc_data = %d..\n",adc_data); */
 	return adc_data;
 }
@@ -125,8 +133,8 @@ static int acc_get_accessory_id(struct acc_con_info *acc)
 }
 
 #ifdef CONFIG_MHL_SII9234
-static ssize_t MHD_check_read(struct device *dev,
-				struct device_attribute *attr, char *buf)
+static ssize_t MHD_check_read(struct class *class,
+	struct class_attribute *attr, char *buf)
 {
 	int count;
 	int res;
@@ -145,16 +153,40 @@ static ssize_t MHD_check_read(struct device *dev,
 	return count;
 }
 
-static ssize_t MHD_check_write(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t size)
+static ssize_t MHD_check_write(struct class *class,
+		struct class_attribute *attr, const char *buf, size_t size)
 {
 	printk(KERN_INFO"input data --> %s\n", buf);
 
 	return size;
 }
 
-static DEVICE_ATTR(MHD_file, S_IRUGO, MHD_check_read, MHD_check_write);
+static CLASS_ATTR(test_result, S_IRUGO, MHD_check_read, MHD_check_write);
 #endif /* CONFIG_MHL_SII9234 */
+
+static ssize_t acc_read_acc_id(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct acc_con_info *acc  = dev_get_drvdata(dev);
+	int adc_val = 0 ;
+	int jig_uart_off = 0 ;
+	int count = 0 ;
+	adc_val = acc_get_accessory_id(acc);
+
+	if ((3920 < adc_val) && (3540 > adc_val))
+		jig_uart_off = 28 ;
+	else
+		jig_uart_off = 0 ;
+
+	ACC_CONDEV_DBG("jig_uart_off : %d", jig_uart_off);
+
+	count = sprintf(buf, "%x\n", jig_uart_off);
+
+	return count;
+}
+
+static DEVICE_ATTR(adc, S_IRUGO, acc_read_acc_id, NULL);
+
 
 void acc_accessory_uevent(struct acc_con_info *acc, int acc_adc)
 {
@@ -438,7 +470,9 @@ static int acc_con_probe(struct platform_device *pdev)
 	struct regulator *vadc_regulator;
 
 	int	retval;
-
+#ifdef CONFIG_MHL_SII9234
+	struct class *sec_mhl;
+#endif
 	ACC_CONDEV_DBG("");
 
 	if (pdata == NULL) {
@@ -526,10 +560,26 @@ static int acc_con_probe(struct platform_device *pdev)
 	schedule_delayed_work(&acc->acc_dwork, msecs_to_jiffies(10000));
 	INIT_DELAYED_WORK(&acc->acc_id_dwork, acc_dwork_accessory_detect);
 #ifdef CONFIG_MHL_SII9234
-	if (device_create_file(acc->acc_dev, &dev_attr_MHD_file) < 0)
-		pr_err("Failed to create device file(%s)!\n",
-			dev_attr_MHD_file.attr.name);
+	sec_mhl = class_create(THIS_MODULE, "mhl");
+	if (IS_ERR(sec_mhl)) {
+		pr_err("Failed to create class(sec_mhl)!\n");
+		retval = -ENOMEM;
+	}
+
+	retval = class_create_file(sec_mhl, &class_attr_test_result);
+	if (retval) {
+		pr_err("Failed to create device file in sysfs entries!\n");
+		retval = -ENOMEM;
+	}
 #endif
+
+#ifndef CONFIG_MACH_P10
+	if (device_create_file(sec_switch_dev, &dev_attr_adc) < 0)
+		pr_err("Failed to create device file(%s)!\n",
+			dev_attr_adc  .attr.name);
+	dev_set_drvdata(sec_switch_dev, acc);
+#endif
+
 	return 0;
 
 #ifndef CONFIG_SEC_KEYBOARD_DOCK

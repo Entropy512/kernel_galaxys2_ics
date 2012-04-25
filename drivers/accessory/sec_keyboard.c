@@ -302,6 +302,11 @@ static int __devinit sec_keyboard_probe(struct platform_device *pdev)
 	struct input_dev *input;
 	int i, error;
 
+	if (pdata == NULL) {
+		printk(KERN_ERR "%s: no pdata\n", __func__);
+		return -ENODEV;
+	}
+
 	ddata = kzalloc(sizeof(struct sec_keyboard_drvdata), GFP_KERNEL);
 	if (NULL == ddata) {
 		error = -ENOMEM;

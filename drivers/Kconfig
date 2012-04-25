@@ -148,4 +148,7 @@ source "drivers/irda/Kconfig"
 
 source "drivers/extcon/Kconfig"
 
+# Secure OS Mobicore
+source "drivers/gud/Kconfig"
+
 endmenu

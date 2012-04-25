@@ -132,3 +132,5 @@ obj-$(CONFIG_PHONE_IPC_SPI) += phone_svn/
 obj-$(CONFIG_ACCESSORY)		+= accessory/
 obj-$(CONFIG_IR_REMOCON)		+= irda/
 obj-$(CONFIG_EXTCON)		+= extcon/
+# Secure OS Mobicore
+obj-$(CONFIG_MOBICORE_SUPPORT)	+= gud/

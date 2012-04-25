@@ -1264,10 +1264,12 @@ int hid_connect(struct hid_device *hdev, unsigned int connect_mask)
 	if (ret)
 		hid_warn(hdev,
 			 "can't create sysfs report descriptor attribute err: %d\n", ret);
-
+/*
 	hid_info(hdev, "%s: %s HID v%x.%02x %s [%s] on %s\n",
 		 buf, bus, hdev->version >> 8, hdev->version & 0xff,
 		 type, hdev->name, hdev->phys);
+*/
+    dbg_hid("%s: %s HID v%x.%02x %s [%s]\n", buf, bus, hdev->version >> 8, hdev->version & 0xff, type, hdev->name);
 
 	return 0;
 }
