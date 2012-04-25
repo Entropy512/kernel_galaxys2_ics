@@ -34,6 +34,8 @@
 #include <linux/mfd/max8997.h>
 #include <linux/mfd/max8997-private.h>
 
+#include <mach/sec_debug.h>
+
 struct max8997_data {
 	struct device		*dev;
 	struct max8997_dev	*iodev;
@@ -503,6 +505,10 @@ static int max8997_set_voltage_buck(struct regulator_dev *rdev,
 
 	switch (buck) {
 	case MAX8997_BUCK1:
+		sec_debug_aux_log(SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+					"%s: BUCK1: min_vol=%d, max_vol=%d.",
+					__func__, min_vol, max_vol);
+
 		if (!max8997->buck1_gpiodvs) {
 			ret = max8997_write_reg(i2c, reg, i);
 			break;
@@ -546,6 +552,9 @@ buck1_exit:
 			ret = max8997_write_reg(i2c, reg, i);
 		break;
 	case MAX8997_BUCK2:
+		sec_debug_aux_log(SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+					"%s: BUCK2: min_vol=%d, max_vol=%d.",
+					__func__, min_vol, max_vol);
 	case MAX8997_BUCK5:
 		for (k = 0; k < 7; k++)
 			data[k] = i;

@@ -39,12 +39,20 @@
 #define MAX77686_OPMODE_BUCK234_SHIFT 4
 #define MAX77686_OPMODE_MASK 0x3
 
+#define MAX77686_DVS_VOL_COMP 50000
+
+enum MAX77686_DEVICE_ID {
+	MAX77686_DEVICE_PASS1 = 0x1,
+	MAX77686_DEVICE_PASS2 = 0x2,
+};
+
 struct max77686_data {
 	struct device *dev;
 	struct max77686_dev *iodev;
 	int num_regulators;
 	struct regulator_dev **rdev;
 	int ramp_delay; /* in mV/us */
+	int device_id;
 
 	struct max77686_opmode_data *opmode_data;
 
@@ -228,7 +236,7 @@ static int max77686_get_enable_register(struct regulator_dev *rdev,
 	unsigned int mode;
 	struct max77686_data *max77686 = rdev_get_drvdata(rdev);
 
-	if (rid > ARRAY_SIZE(max77686_opmode_reg))
+	if (rid >= ARRAY_SIZE(max77686_opmode_reg))
 		return -EINVAL;
 
 	mode = max77686->opmode_data[rid].mode;
@@ -436,6 +444,14 @@ static int max77686_set_voltage(struct regulator_dev *rdev,
 	u8 org;
 
 	desc = reg_voltage_map[rid];
+
+	/* W/A code about voltage drop of PASS1 */
+	if (max77686->device_id <= MAX77686_DEVICE_PASS1) {
+		if (rid >= MAX77686_BUCK1 && rid <= MAX77686_BUCK4) {
+			min_uV = min_uV + MAX77686_DVS_VOL_COMP;
+			max_uV = max_uV + MAX77686_DVS_VOL_COMP;
+		}
+	}
 
 	i = max77686_get_voltage_proper_val(desc, min_uV, max_uV);
 	if (i < 0)
@@ -659,6 +675,7 @@ static __devinit int max77686_pmic_probe(struct platform_device *pdev)
 	max77686->ramp_delay = max77686_set_ramp_rate(i2c, pdata->ramp_rate);
 
 	max77686_read_reg(i2c, MAX77686_REG_DEVICE_ID, &data);
+	max77686->device_id = (data & 0x7);
 	printk(PMIC_DEBUG "%s: DEVICE ID=0x%x\n", __func__, data);
 
 	/*
@@ -739,6 +756,8 @@ static __devinit int max77686_pmic_probe(struct platform_device *pdev)
 				   max77686->buck4_vol[i]);
 	}
 
+	if (pdata->has_full_constraints)
+		regulator_has_full_constraints();
 
 	for (i = 0; i < pdata->num_regulators; i++) {
 		const struct voltage_map_desc *desc;
