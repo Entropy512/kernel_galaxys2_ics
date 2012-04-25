@@ -370,7 +370,6 @@ int exynos_drm_gem_cache_op_ioctl(struct drm_device *drm_dev, void *data,
 
 	switch (cache_sel) {
 	case EXYNOS_DRM_ALL_CACHE:
-		__cpuc_flush_kern_all();
 		smp_call_function(exynos_gem_flush_cache_all, NULL, 1);
 		outer_flush_all();
 		break;

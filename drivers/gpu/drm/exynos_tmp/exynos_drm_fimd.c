@@ -36,6 +36,47 @@
 #include <linux/devfreq/exynos4_display.h>
 #endif
 
+#ifdef CONFIG_MACH_SLP_NAPLES
+#define VIDCON0_DSI_DISABLE			(0 << 30)
+#define VIDCON0_DSI_ENABLE			(1 << 30)
+
+/* I80/RGB Trigger control */
+#define TRIGCON		(0x01A4)
+/* I80 interface control 0 for main LDI */
+#define I80IFCONA0	(0x01B0)
+#define I80IFCONA1	(0x01B4)
+#define I80IFCONB0	(0x01B8)
+#define I80IFCONB1	(0x01B8)
+
+/* I80IFCONA0 and I80IFCONA1 */
+#define LCD_CS_SETUP(x)			(((x) & 0xf) << 16)
+#define LCD_WR_SETUP(x)			(((x) & 0xf) << 12)
+#define LCD_WR_ACT(x)			(((x) & 0xf) << 8)
+#define LCD_WR_HOLD(x)			(((x) & 0xf) << 4)
+#define RSPOL_LOW				(0 << 2)
+#define RSPOL_HIGH				(1 << 2)
+#define I80IFEN_DISABLE			(0 << 0)
+#define I80IFEN_ENABLE			(1 << 0)
+
+enum s3cfb_cpu_auto_cmd_rate {
+	DISABLE_AUTO_FRM,
+	PER_TWO_FRM,
+	PER_FOUR_FRM,
+	PER_SIX_FRM,
+	PER_EIGHT_FRM,
+	PER_TEN_FRM,
+	PER_TWELVE_FRM,
+	PER_FOURTEEN_FRM,
+	PER_SIXTEEN_FRM,
+	PER_EIGHTEEN_FRM,
+	PER_TWENTY_FRM,
+	PER_TWENTY_TWO_FRM,
+	PER_TWENTY_FOUR_FRM,
+	PER_TWENTY_SIX_FRM,
+	PER_TWENTY_EIGHT_FRM,
+	PER_THIRTY_FRM,
+};
+#endif
 /*
  * FIMD is stand for Fully Interactive Mobile Display and
  * as a display controller, it transfers contents drawn on memory
@@ -121,6 +162,9 @@ struct fimd_context {
 	unsigned int			reserved_size;
 	struct work_struct		work;
 };
+#ifdef CONFIG_MACH_SLP_NAPLES
+struct fimd_context *ctx_global;
+#endif
 
 static bool fimd_display_is_connected(struct device *dev)
 {
@@ -328,6 +372,45 @@ static void fimd_apply(struct device *subdrv_dev)
 	if (mgr_ops && mgr_ops->commit)
 		mgr_ops->commit(subdrv_dev);
 }
+#ifdef CONFIG_MACH_SLP_NAPLES
+void fimd_set_trigger(void)
+{
+	u32 reg = 0;
+
+	reg = readl(ctx_global->regs + TRIGCON);
+
+	reg |= 1 << 0 | 1 << 1;
+
+	writel(reg, ctx_global->regs  + TRIGCON);
+}
+
+void _fimd_set_auto_cmd_rate(struct fimd_context *ctx, unsigned char cmd_rate)
+{
+	unsigned int cmd_rate_val;
+	unsigned int i80_if_con_reg_val;
+
+	cmd_rate_val = (cmd_rate == DISABLE_AUTO_FRM) ? (0x0 << 0) :
+		(cmd_rate == PER_TWO_FRM) ? (0x1 << 0) :
+		(cmd_rate == PER_FOUR_FRM) ? (0x2 << 0) :
+		(cmd_rate == PER_SIX_FRM) ? (0x3 << 0) :
+		(cmd_rate == PER_EIGHT_FRM) ? (0x4 << 0) :
+		(cmd_rate == PER_TEN_FRM) ? (0x5 << 0) :
+		(cmd_rate == PER_TWELVE_FRM) ? (0x6 << 0) :
+		(cmd_rate == PER_FOURTEEN_FRM) ? (0x7 << 0) :
+		(cmd_rate == PER_SIXTEEN_FRM) ? (0x8 << 0) :
+		(cmd_rate == PER_EIGHTEEN_FRM) ? (0x9 << 0) :
+		(cmd_rate == PER_TWENTY_FRM) ? (0xa << 0) :
+		(cmd_rate == PER_TWENTY_TWO_FRM) ? (0xb << 0) :
+		(cmd_rate == PER_TWENTY_FOUR_FRM) ? (0xc << 0) :
+		(cmd_rate == PER_TWENTY_SIX_FRM) ? (0xd << 0) :
+		(cmd_rate == PER_TWENTY_EIGHT_FRM) ? (0xe << 0) : (0xf << 0);
+
+	i80_if_con_reg_val = readl(ctx->regs + I80IFCONB0);
+	i80_if_con_reg_val &= ~(0xf << 0);
+	i80_if_con_reg_val |= cmd_rate_val;
+	writel(i80_if_con_reg_val, ctx->regs + I80IFCONB0);
+}
+#endif
 
 static void fimd_commit(struct device *dev)
 {
@@ -341,6 +424,51 @@ static void fimd_commit(struct device *dev)
 
 	DRM_DEBUG_KMS("%s\n", __FILE__);
 
+#ifdef CONFIG_MACH_SLP_NAPLES
+		/* setup horizontal and vertical display size. */
+		val = VIDTCON2_LINEVAL(timing->yres - 1) |
+		       VIDTCON2_HOZVAL(timing->xres - 1);
+		writel(val, ctx->regs + VIDTCON2);
+
+		/* cpu_interface_timing */
+		val = readl(ctx->regs + I80IFCONA0);
+	val = LCD_CS_SETUP(0) |
+		LCD_WR_SETUP(0) |
+		LCD_WR_ACT(1) |
+		LCD_WR_HOLD(0) |
+			RSPOL_LOW | /* in case of LCD MIPI module */
+			I80IFEN_ENABLE;
+		writel(val, ctx->regs + I80IFCONA0);
+
+		_fimd_set_auto_cmd_rate(ctx, DISABLE_AUTO_FRM);
+
+		/* setup clock source, clock divider, enable dma. */
+		val = ctx->vidcon0;
+		val &= ~(VIDCON0_CLKVAL_F_MASK | VIDCON0_CLKDIR);
+
+		if (ctx->clkdiv > 1)
+			val |= VIDCON0_CLKVAL_F(ctx->clkdiv - 1)
+					| VIDCON0_CLKDIR;
+		else
+			val &= ~VIDCON0_CLKDIR;	/* 1:1 clock */
+
+		/*
+		 * fields of register with prefix '_F' would be updated
+		 * at vsync(same as dma start)
+		 */
+		val |= VIDCON0_ENVID | VIDCON0_ENVID_F;
+		writel(val, ctx->regs + VIDCON0);
+
+		/*
+		 * Workaround: After power domain is turned off
+		 * then when it is turned on, this needs.
+		 */
+		val &= ~(VIDCON0_ENVID | VIDCON0_ENVID_F);
+		writel(val, ctx->regs + VIDCON0);
+
+		val |= VIDCON0_ENVID | VIDCON0_ENVID_F;
+		writel(val, ctx->regs + VIDCON0);
+#else
 	/* setup polarity values from machine code. */
 	writel(ctx->vidcon1, ctx->regs + VIDCON1);
 
@@ -379,8 +507,8 @@ static void fimd_commit(struct device *dev)
 
 	if (!ctx->boot_on) {
 		/*
-		 * Workaround: After power domain is turned off then
-		 * when it is turned on, this needs.
+		* Workaround: After power domain is turned off then
+		* when it is turned on, this needs.
 		 */
 		val &= ~(VIDCON0_ENVID | VIDCON0_ENVID_F);
 		writel(val, ctx->regs + VIDCON0);
@@ -388,6 +516,7 @@ static void fimd_commit(struct device *dev)
 		val |= VIDCON0_ENVID | VIDCON0_ENVID_F;
 		writel(val, ctx->regs + VIDCON0);
 	}
+#endif
 }
 
 static int fimd_enable_vblank(struct device *dev)
@@ -619,15 +748,15 @@ static void fimd_win_commit(struct device *dev, int zpos)
 		val = (unsigned long)(ctx->logo_addr + size);
 		writel(val, ctx->regs + VIDWx_BUF_END(win, 0));
 	} else {
-		/* buffer start address */
-		val = (unsigned long)win_data->dma_addr;
-		writel(val, ctx->regs + VIDWx_BUF_START(win, 0));
+	/* buffer start address */
+	val = (unsigned long)win_data->dma_addr;
+	writel(val, ctx->regs + VIDWx_BUF_START(win, 0));
 
-		/* buffer end address */
+	/* buffer end address */
 		size = win_data->fb_width * win_data->ovl_height *
 			(win_data->bpp >> 3);
-		val = (unsigned long)(win_data->dma_addr + size);
-		writel(val, ctx->regs + VIDWx_BUF_END(win, 0));
+	val = (unsigned long)(win_data->dma_addr + size);
+	writel(val, ctx->regs + VIDWx_BUF_END(win, 0));
 	}
 
 	DRM_DEBUG_KMS("start addr = 0x%lx, end addr = 0x%lx, size = 0x%lx\n",
@@ -746,7 +875,6 @@ static void fimd_finish_pageflip(struct drm_device *drm_dev, int crtc)
 	struct timeval now;
 	unsigned long flags;
 	bool is_checked = false;
-	int counter;
 
 	spin_lock_irqsave(&drm_dev->event_lock, flags);
 
@@ -768,9 +896,7 @@ static void fimd_finish_pageflip(struct drm_device *drm_dev, int crtc)
 	}
 
 	if (is_checked) {
-		counter = atomic_read(&drm_dev->vblank_refcount[crtc]);
-		if (counter != 0)
-			drm_vblank_put(drm_dev, crtc);
+		drm_vblank_put(drm_dev, crtc);
 
 		/*
 		 * don't off vblank if vblank_disable_allowed is 1,
@@ -875,10 +1001,14 @@ static int fimd_calc_clkdiv(struct fimd_context *ctx,
 
 	DRM_DEBUG_KMS("%s\n", __FILE__);
 
+#ifdef CONFIG_MACH_SLP_NAPLES
+	retrace = timing->xres * timing->yres * 2;
+#else
 	retrace = timing->left_margin + timing->hsync_len +
 				timing->right_margin + timing->xres;
 	retrace *= timing->upper_margin + timing->vsync_len +
 				timing->lower_margin + timing->yres;
+#endif
 
 	/* default framerate is 60Hz */
 	if (!timing->refresh)
@@ -1168,6 +1298,11 @@ static int __devinit fimd_probe(struct platform_device *pdev)
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+#ifdef CONFIG_MACH_SLP_NAPLES
+	ctx_global = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx_global)
+		return -ENOMEM;
+#endif
 
 	ctx->bus_clk = clk_get(dev, "lcd");
 	if (IS_ERR(ctx->bus_clk)) {
@@ -1208,6 +1343,10 @@ static int __devinit fimd_probe(struct platform_device *pdev)
 		ret = -ENXIO;
 		goto err_req_region_io;
 	}
+#ifdef CONFIG_MACH_SLP_NAPLES
+	/* Temporary code for trigger*/
+	ctx_global->regs = ctx->regs;
+#endif
 
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {

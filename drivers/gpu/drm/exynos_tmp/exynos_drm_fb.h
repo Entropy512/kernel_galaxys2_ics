@@ -25,28 +25,14 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef _EXYNOS_DRM_ENCODER_H_
-#define _EXYNOS_DRM_ENCODER_H_
+#ifndef _EXYNOS_DRM_FB_H_
+#define _EXYNOS_DRM_FB_H
 
-struct exynos_drm_manager;
+struct drm_framebuffer *
+exynos_drm_framebuffer_init(struct drm_device *dev,
+			    struct drm_mode_fb_cmd2 *mode_cmd,
+			    struct drm_gem_object *obj);
 
-void exynos_drm_encoder_setup(struct drm_device *dev);
-struct drm_encoder *exynos_drm_encoder_create(struct drm_device *dev,
-					       struct exynos_drm_manager *mgr,
-					       unsigned int possible_crtcs);
-struct exynos_drm_manager *
-exynos_drm_get_manager(struct drm_encoder *encoder);
-void exynos_drm_fn_encoder(struct drm_crtc *crtc, void *data,
-			    void (*fn)(struct drm_encoder *, void *));
-void exynos_drm_enable_vblank(struct drm_encoder *encoder, void *data);
-void exynos_drm_disable_vblank(struct drm_encoder *encoder, void *data);
-void exynos_drm_encoder_crtc_plane_commit(struct drm_encoder *encoder,
-					  void *data);
-void exynos_drm_encoder_crtc_commit(struct drm_encoder *encoder, void *data);
-void exynos_drm_encoder_dpms_from_crtc(struct drm_encoder *encoder,
-					void *data);
-void exynos_drm_encoder_crtc_dpms(struct drm_encoder *encoder, void *data);
-void exynos_drm_encoder_crtc_mode_set(struct drm_encoder *encoder, void *data);
-void exynos_drm_encoder_crtc_disable(struct drm_encoder *encoder, void *data);
+void exynos_drm_mode_config_init(struct drm_device *dev);
 
 #endif

@@ -26,9 +26,24 @@
 #include <linux/pagemap.h>
 #include <linux/dma-mapping.h>
 
+#include <linux/miscdevice.h>
 #include <asm/pgtable.h>
+#include <asm/cacheflush.h>
+#include <asm/outercache.h>
 
 #include "../ion_priv.h"
+
+struct ion_device {
+	struct miscdevice dev;
+	struct rb_root buffers;
+	struct mutex lock;
+	struct rb_root heaps;
+	long (*custom_ioctl) (struct ion_client *client, unsigned int cmd,
+			      unsigned long arg);
+	struct rb_root user_clients;
+	struct rb_root kernel_clients;
+	struct dentry *debug_root;
+};
 
 struct ion_device *ion_exynos;
 
@@ -406,8 +421,37 @@ static int ion_exynos_contig_heap_allocate(struct ion_heap *heap,
 					   unsigned long flags)
 {
 	buffer->priv_phys = cma_alloc(exynos_ion_dev, NULL, len, align);
-	if (IS_ERR_VALUE(buffer->priv_phys))
+
+	if (IS_ERR_VALUE(buffer->priv_phys)) {
+		struct cma_info mem_info;
+		struct rb_node *n=NULL;
+		int err;
+		int buffer_cnt = 0;
+		int size = 0;
+
+		pr_err("%s: get cma alloc for ION failed\n", __func__);
+		err = cma_info(&mem_info, exynos_ion_dev, 0);
+		if (err) {
+			pr_err("%s: get cma info failed\n", __func__);
+			return (int)buffer->priv_phys;
+		}
+		printk(KERN_INFO
+			"[ION_EXYNOS_CONTIG_HEAP] addr: %x ~ %x, total size: 0x%x, free size: 0x%x\n",
+			mem_info.lower_bound, mem_info.upper_bound,
+			mem_info.total_size, mem_info.free_size);
+		for(n = rb_first(&ion_exynos->buffers); n; n = rb_next(n)) {
+			struct ion_buffer *buffer = rb_entry(n, struct ion_buffer, node);
+			if (buffer->heap->type == ION_HEAP_TYPE_EXYNOS_CONTIG) {
+				printk(KERN_INFO "[%d] 0x%x ~ 0x%x, size:0x%x\n",
+					buffer_cnt, (unsigned int)buffer->priv_phys,
+					(unsigned int)buffer->priv_phys+buffer->size, buffer->size);
+				size += buffer->size;
+				buffer_cnt++;
+			}
+		}
+		printk(KERN_INFO "usage size: 0x%x\n", size);
 		return (int)buffer->priv_phys;
+	}
 
 	buffer->flags = flags;
 
@@ -653,10 +697,24 @@ static enum dma_data_direction ion_msync_dir_table[IMSYNC_BUF_TYPES_NUM] = {
 };
 
 
+static bool need_cache_invalidate(long dir)
+{
+	return !(ion_msync_dir_table[dir & IMSYNC_BUF_TYPES_MASK] ==
+							DMA_TO_DEVICE);
+}
+
+static void flush_local_cache_all(void *p)
+{
+	flush_cache_all();
+}
+
 static long ion_exynos_heap_msync(struct ion_client *client,
 		struct ion_handle *handle, off_t offset, size_t size, long dir)
 {
 	struct ion_buffer *buffer;
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+	enum dma_data_direction dmadir;
+#endif
 	struct scatterlist *sg, *tsg;
 	int nents = 0;
 	int ret = 0;
@@ -682,6 +740,19 @@ static long ion_exynos_heap_msync(struct ion_client *client,
 	if (!sg)
 		goto err_buf_sync;
 
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+	if (size > SZ_64K)
+		smp_call_function(&flush_local_cache_all, NULL, true);
+
+	if (size > SZ_1M) {
+		if (need_cache_invalidate(dir))
+			outer_flush_all();
+		else
+			outer_clean_all();
+		goto done;
+	}
+#endif
+
 	tsg = sg;
 	while (tsg && (size > sg_dma_len(tsg))) {
 		size -= sg_dma_len(tsg);
@@ -692,15 +763,47 @@ static long ion_exynos_heap_msync(struct ion_client *client,
 	if (tsg && size)
 		nents++;
 
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
+	if (size > SZ_64K) {
+		if (need_cache_invalidate(dir))
+			for (; nents > 0; nents--, sg = sg_next(sg))
+				outer_flush_range(sg_phys(sg),
+					sg_phys(sg) + sg_dma_len(sg));
+		else
+			for (; nents > 0; nents--, sg = sg_next(sg))
+				outer_clean_range(sg_phys(sg),
+					sg_phys(sg) + sg_dma_len(sg));
+		goto done;
+	}
+
+	/* size <= SZ_64K */
+	dmadir = ion_msync_dir_table[dir & IMSYNC_BUF_TYPES_MASK];
+
+	if ((nents == 1) && (buffer->flags & ION_HEAP_TYPE_EXYNOS_CONTIG)) {
+		if (dir & IMSYNC_SYNC_FOR_CPU)
+			dma_sync_single_for_cpu(NULL, sg_phys(sg) + offset,
+								size, dmadir);
+		else if (dir & IMSYNC_SYNC_FOR_DEV)
+			dma_sync_single_for_device(NULL, sg_phys(sg) + offset,
+								size, dmadir);
+	} else {
+		if (dir & IMSYNC_SYNC_FOR_CPU)
+			dma_sync_sg_for_cpu(NULL, sg, nents, dmadir);
+		else if (dir & IMSYNC_SYNC_FOR_DEV)
+			dma_sync_sg_for_device(NULL, sg, nents, dmadir);
+	}
+#else
 	/* TODO: exclude offset in the first entry and remainder of the
-	   last entry. */
+	last entry. */
 	if (dir & IMSYNC_SYNC_FOR_CPU)
 		dma_sync_sg_for_cpu(NULL, sg, nents,
 			ion_msync_dir_table[dir & IMSYNC_BUF_TYPES_MASK]);
 	else if (dir & IMSYNC_SYNC_FOR_DEV)
 		dma_sync_sg_for_device(NULL, sg, nents,
 			ion_msync_dir_table[dir & IMSYNC_BUF_TYPES_MASK]);
+#endif
 
+done:
 err_buf_sync:
 	ion_unmap_dma(client, handle);
 	return ret;

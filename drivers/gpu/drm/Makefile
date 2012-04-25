@@ -36,5 +36,9 @@ obj-$(CONFIG_DRM_SAVAGE)+= savage/
 obj-$(CONFIG_DRM_VMWGFX)+= vmwgfx/
 obj-$(CONFIG_DRM_VIA)	+=via/
 obj-$(CONFIG_DRM_NOUVEAU) +=nouveau/
+ifeq ($(CONFIG_NAPLES_COMMON),y)
+obj-$(CONFIG_DRM_EXYNOS) +=exynos_tmp/
+else
 obj-$(CONFIG_DRM_EXYNOS) +=exynos/
+endif
 obj-y			+= i2c/
