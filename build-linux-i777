@@ -1,0 +1,22 @@
+#!/bin/sh
+#Copy the initramfs
+mkdir -p kernel/usr/initramfs
+rm -rf kernel/usr/initramfs/*
+cp -R ../initramfs_galaxys2_ics/* kernel/usr/initramfs
+chmod -R g-w kernel/usr/initramfs/*
+rm $(find kernel/usr/initramfs -name EMPTY_DIRECTORY -print)
+rm -rf $(find kernel/usr/initramfs -name .git -print)
+#Enable FIPS mode
+export USE_SEC_FIPS_MODE=true
+make dd_i777_defconfig
+make -j8
+echo "Copying Modules"
+cp -a $(find . -name *.ko -print |grep -v initramfs) kernel/usr/initramfs/lib/modules/
+echo "Modules Copied"
+sleep 5
+touch kernel/usr/initramfs
+echo "Rebuilding kernel with new initramfs"
+make -j8
+# adb shell reboot download
+# sleep 5
+# heimdall flash --kernel arch/arm/boot/zImage

@@ -33,6 +33,8 @@ static void mc1n2_dump_path_info(const void *pvPrm, UINT32 dPrm)
 	MCDRV_PATH_INFO *info = (MCDRV_PATH_INFO *)pvPrm;
 	int i;
 
+	char str[256], *p;
+
 	struct path_table {
 		size_t offset;
 		char *name;
@@ -60,13 +62,22 @@ static void mc1n2_dump_path_info(const void *pvPrm, UINT32 dPrm)
 
 #define N_PATH_TABLE (sizeof(table) / sizeof(struct path_table))
 
+        static int oldvals[N_PATH_TABLE][SOURCE_BLOCK_NUM];
+
 	for (i = 0; i < N_PATH_TABLE; i++) {
 		MCDRV_CHANNEL *ch = (MCDRV_CHANNEL *)((void *)info + table[i].offset);
 		int j;
 		for (j = 0; j < SOURCE_BLOCK_NUM; j++) {
 			if (ch->abSrcOnOff[j] != 0) {
-				dbg_info("%s.abSrcOnOff[%d] = 0x%02x\n",
-					 table[i].name, j, ch->abSrcOnOff[j]);
+			  p = str;
+			  p += sprintf(p,"%s.abSrcOnOff[%d] = 0x%02x",
+				       table[i].name, j, ch->abSrcOnOff[j]);
+			  if(ch->abSrcOnOff[j] != oldvals[i][j])
+			    {
+			      p += sprintf(p,", was 0x%02x", oldvals[i][j]);
+			      oldvals[i][j] = ch->abSrcOnOff[j];
+			    }
+			  dbg_info("%s\n",str);
 			}
 		}
 	}
