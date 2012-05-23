@@ -47,8 +47,8 @@ enum {
 #define seek_FM_ID_th_MAX	0x01	/*most stops */
 #define seek_FM_ID_th_MIN	0x0F	/*fewest stops */
 
-#define TUNE_RSSI_THRESHOLD	14
-#define TUNE_SNR_THRESHOLD	3
+#define TUNE_RSSI_THRESHOLD	10
+#define TUNE_SNR_THRESHOLD	4
 #define TUNE_CNT_THRESHOLD	0x00
 
 #define _ENABLE_RDS_
@@ -110,7 +110,7 @@ static void wait_RDS(void);
 static int powerup(void);
 static int powerdown(void);
 
-static int seek(u32 *, int);
+static int seek(u32 *, int, int);
 static int tune_freq(u32);
 
 static void get_cur_chan_freq(u32 *, u16);
@@ -148,9 +148,19 @@ int Si4709_RDS_flag = NO_WAIT;
 unsigned int Si4709_dev_int;
 unsigned int Si4709_dev_irq;
 
+#if defined(CONFIG_MACH_M0)
+unsigned int Si4709_dev_sw;
+#endif
+
+#if defined(CONFIG_MACH_M0_CTC)
 static const u16 rx_vol[] = {
 0x0, 0x15, 0x18, 0x1B, 0x1E, 0x21, 0x24, 0x27,
 0x2A, 0x2D, 0x30, 0x33, 0x36, 0x39, 0x3C, 0x3F};
+#else
+static const u16 rx_vol[] = {
+0x0, 0x13, 0x16, 0x19, 0x1C, 0x1F, 0x22, 0x25,
+0x28, 0x2B, 0x2E, 0x31, 0x34, 0x37, 0x3A, 0x3D};
+#endif
 
 
 int Si4709_dev_init(struct i2c_client *client)
@@ -163,13 +173,18 @@ int Si4709_dev_init(struct i2c_client *client)
 
 	Si4709_dev.client = client;
 
-	if (system_rev >= 0x7) {
-		Si4709_dev_int = GPIO_FM_INT_REV07;
-		Si4709_dev_irq = gpio_to_irq(GPIO_FM_INT_REV07);
-	} else {
+#if defined(CONFIG_MACH_M0)
+	if (system_rev >= 15)
+		Si4709_dev_int = GPIO_FM_INT_REV15;
+	else
+#endif
 		Si4709_dev_int = GPIO_FM_INT;
-		Si4709_dev_irq = gpio_to_irq(GPIO_FM_INT);
-	}
+
+	Si4709_dev_irq = gpio_to_irq(Si4709_dev_int);
+
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	Si4709_dev_sw = GPIO_FM_MIC_SW;
+#endif
 
 	disable_irq(Si4709_dev_irq);
 
@@ -302,7 +317,6 @@ int Si4709_dev_powerup(void)
 /*VNVS:18-NOV'09 : modified for detecting more stations of good quality*/
 			si47xx_set_property(FM_SEEK_TUNE_RSSI_THRESHOLD,
 				TUNE_RSSI_THRESHOLD);
-			Si4709_dev_volume_set(0x3F);
 			si47xx_set_property(FM_SEEK_BAND_BOTTOM, 8750);
 			si47xx_set_property(FM_SEEK_BAND_TOP, 10800);
 			Si4709_dev.settings.band = BAND_87500_108000_kHz;
@@ -414,7 +428,6 @@ int Si4709_dev_resume(void)
 	}
 
 	mutex_unlock(&(Si4709_dev.lock));
-
 	debug("Si4709_dev_disable call over");
 
 	return ret;
@@ -456,15 +469,6 @@ int Si4709_dev_band_set(int band)
 			break;
 		default:
 			ret = -1;
-		}
-
-		if (ret == 0) {
-			if (ret < 0) {
-				debug("Si4709_dev_band_set i2c_write 1 failed");
-				Si4709_dev.settings.band = prev_band;
-				Si4709_dev.settings.bottom_of_band =
-					prev_bottom_of_band;
-			}
 		}
 	}
 
@@ -565,6 +569,27 @@ int Si4709_dev_chan_get(u32 *frequency)
 	return ret;
 }
 
+int Si4709_dev_seek_full(u32 *frequency)
+{
+	int ret = 0;
+
+	debug("Si4709_dev_seek_full called\n");
+	mutex_lock(&(Si4709_dev.lock));
+
+	if (Si4709_dev.valid == eFALSE) {
+		debug("Si4709_dev_seek_full called when DS is invalid");
+		ret = -1;
+	} else {
+		Si4709_dev.state.seek_state = RADIO_SEEK_ON;
+		ret = seek(frequency, 1, 0);
+		Si4709_dev.state.seek_state = RADIO_SEEK_OFF;
+	}
+
+	mutex_unlock(&(Si4709_dev.lock));
+
+	return ret;
+}
+
 int Si4709_dev_seek_up(u32 *frequency)
 {
 	int ret = 0;
@@ -577,7 +602,7 @@ int Si4709_dev_seek_up(u32 *frequency)
 		ret = -1;
 	} else {
 		Si4709_dev.state.seek_state = RADIO_SEEK_ON;
-		ret = seek(frequency, 1);
+		ret = seek(frequency, 1, 1);
 		Si4709_dev.state.seek_state = RADIO_SEEK_OFF;
 	}
 
@@ -600,7 +625,7 @@ int Si4709_dev_seek_down(u32 *frequency)
 	} else {
 		Si4709_dev.state.seek_state = RADIO_SEEK_ON;
 
-		ret = seek(frequency, 0);
+		ret = seek(frequency, 0, 1);
 
 		Si4709_dev.state.seek_state = RADIO_SEEK_OFF;
 	}
@@ -860,9 +885,6 @@ int Si4709_dev_sys_config2_set(struct sys_config2 *sys_conf2)
 		Si4709_dev_band_set(sys_conf2->fm_band);
 		si47xx_set_property(FM_SEEK_FREQ_SPACING,
 			sys_conf2->fm_chan_spac);
-		si47xx_set_property(RX_HARD_MUTE, 0);
-		si47xx_set_property(RX_VOLUME,
-			rx_vol[sys_conf2->fm_vol] & RX_VOLUME_MASK);
 		Si4709_dev.settings.curr_rssi_th = sys_conf2->rssi_th;
 		Si4709_dev.settings.band = sys_conf2->fm_band;
 		Si4709_dev.settings.channel_spacing = sys_conf2->fm_chan_spac;
@@ -1046,7 +1068,6 @@ int Si4709_dev_volume_set(u8 volume)
 		debug("Si4709_dev_volume_set called when DS is invalid");
 		ret = -1;
 	} else {
-		si47xx_set_property(RX_HARD_MUTE, 0);
 		si47xx_set_property(RX_VOLUME, rx_vol[volume] & RX_VOLUME_MASK);
 
 		if (ret < 0) {
@@ -1258,7 +1279,8 @@ int Si4709_dev_RDS_ENABLE(void)
 	} else {
 #ifdef RDS_INTERRUPT_ON_ALWAYS
 		si47xx_set_property(GPO_IEN, GPO_IEN_STCIEN_MASK |
-		GPO_IEN_STCREP_MASK | GPO_IEN_RDSIEN_MASK);
+		GPO_IEN_STCREP_MASK | GPO_IEN_RDSIEN_MASK |
+		GPO_IEN_RDSREP_MASK);
 #endif
 		si47xx_set_property(FM_RDS_INTERRUPT_SOURCE,
 					FM_RDS_INTERRUPT_SOURCE_RECV_MASK);
@@ -1336,7 +1358,7 @@ void Si4709_work_func(struct work_struct *work)
 	u8 group_type;
 #endif
 	debug_rds("%s", __func__);
-/* mutex_lock(&(Si4709_dev.lock)); */
+mutex_lock(&(Si4709_dev.lock));
 
 	if (Si4709_dev.valid == eFALSE) {
 		error("Si4709_dev_RDS_data_get called when DS is invalid");
@@ -1346,46 +1368,33 @@ void Si4709_work_func(struct work_struct *work)
 	if (RDS_Data_Lost > 1)
 		debug_rds("No_of_RDS_groups_Lost till now : %d",
 				RDS_Data_Lost);
+	fmRdsStatus(1, 0);
+	/* RDSR bit and RDS Block data, so reading the RDS registers */
+	do {
+		/* Writing into RDS_Block_Data_buffer */
+		i = 0;
+		RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BlockA;
+		RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BlockB;
+		RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BlockC;
+		RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BlockD;
 
-/* RDSR bit and RDS Block data, so reading the RDS registers */
-	fmRdsStatus(0, 0);
+		/*Writing into RDS_Block_Error_buffer */
+		i = 0;
 
-	if (ret < 0) {
-		error("Si4709_work_func i2c_read failed");
-		return;
-	}
-
-	debug_rds("No_of_RDS_groups_Available : %d", RDS_Data_Available);
-
-	RDS_Data_Available = 0;
-
-	debug_rds("RDS_Buffer_Index_write = %d",
-			RDS_Buffer_Index_write);
-
-/* Writing into the Circular Buffer */
-
-/* Writing into RDS_Block_Data_buffer */
-	i = 0;
-	RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BlockA;
-	RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BlockB;
-	RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BlockC;
-	RDS_Block_Data_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BlockD;
-
-/*Writing into RDS_Block_Error_buffer */
-	i = 0;
-
-	RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BleA;
-	RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BleB;
-	RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BleC;
-	RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
-		BleD;
+		RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BleA;
+		RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BleB;
+		RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BleC;
+		RDS_Block_Error_buffer[i++ + 4 * RDS_Buffer_Index_write] =
+			BleD;
+		fmRdsStatus(1, 0);
+	} while (RdsFifoUsed != 0);
 
 #ifdef RDS_TESTING
 	if (RDS_Block_Error_buffer
@@ -1422,7 +1431,7 @@ void Si4709_work_func(struct work_struct *work)
 		RDS_Buffer_Index_write = 0;
 
 	debug_rds("RDS_Buffer_Index_write = %d", RDS_Buffer_Index_write);
-	/* mutex_unlock(&(Si4709_dev.lock)); */
+	mutex_unlock(&(Si4709_dev.lock));
 }
 #endif
 /*VNVS:END*/
@@ -1618,6 +1627,10 @@ static int powerup(void)
 	u16 powercfg = Si4709_dev.registers[POWERCFG];
 	int reg;
 
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	gpio_set_value(Si4709_dev_sw, GPIO_LEVEL_HIGH);
+#endif
+
 	gpio_set_value(GPIO_FM_RST, GPIO_LEVEL_LOW);
 	usleep_range(5, 10);
 	s3c_gpio_cfgpin(Si4709_dev_int, S3C_GPIO_OUTPUT);
@@ -1626,7 +1639,7 @@ static int powerup(void)
 	usleep_range(10, 15);
 	gpio_set_value(GPIO_FM_RST, GPIO_LEVEL_HIGH);
 	usleep_range(5, 10);
-	s3c_gpio_cfgpin(Si4709_dev_int, S3C_GPIO_INPUT);
+	s3c_gpio_cfgpin(Si4709_dev_int, S3C_GPIO_SFN(0xF));
 	s3c_gpio_setpull(Si4709_dev_int, S3C_GPIO_PULL_UP);
 	usleep_range(10, 15);
 
@@ -1665,10 +1678,14 @@ static int powerdown(void)
 	} else
 		debug("Device already Powered-OFF\n");
 
+#if defined(CONFIG_MACH_M0) || defined(CONFIG_MACH_M0_CTC)
+	gpio_set_value(Si4709_dev_sw, GPIO_LEVEL_LOW);
+#endif
+
 	return ret;
 }
 
-static int seek(u32 *frequency, int up)
+static int seek(u32 *frequency, int up, int mode)
 {
 	int ret = 0;
 	u16 powercfg = Si4709_dev.registers[POWERCFG];
@@ -1680,8 +1697,8 @@ static int seek(u32 *frequency, int up)
 		debug("seek i2c_write 1 failed");
 	} else {
 		Si4709_dev_wait_flag = SEEK_WAITING;
-		fmSeekStart(up, 0);
-		/* wait(); */
+		fmSeekStart(up, mode); /* mode 0 is full scan */
+		wait();
 		do {
 			get_int = getIntStatus();
 		} while (!(get_int & STCINT));
@@ -1731,7 +1748,7 @@ static int tune_freq(u32 frequency)
 	} else {
 		Si4709_dev_wait_flag = TUNE_WAITING;
 		fmTuneFreq(frequency);
-		/* wait(); */
+		wait();
 		Si4709_dev_wait_flag = NO_WAIT;
 		debug("Si4709_dev_wait_flag = TUNE_WAITING\n");
 		do {
@@ -1739,7 +1756,6 @@ static int tune_freq(u32 frequency)
 			msleep(80);
 		} while (!(get_int & STCINT));
 
-		debug("Si4709 tune_freq  out INT %x\n", temp);
 		fmTuneStatus(0, 1);
 
 		debug("Si4709 tune_freq fmTuneStatus %x\n", rsp[0]);
@@ -2060,7 +2076,6 @@ static int i2c_write(u8 number_bytes, u8 *data_out)
 	u8 writing_reg = POWERCFG;
 	u8 data[NUM_OF_REGISTERS * 2];
 	int i, msglen = 0, ret = 0;
-	debug("Si4709_dev_RDS_timeout_set called\n");
 
 	ret = i2c_master_send((struct i2c_client *)(Si4709_dev.client),
 			(const char *)data_out, number_bytes);

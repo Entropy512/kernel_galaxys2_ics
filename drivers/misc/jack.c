@@ -75,12 +75,17 @@ EXPORT_SYMBOL_GPL(jack_get_data);
 
 void jack_event_handler(const char *name, int value)
 {
-	struct jack_data *jack = platform_get_drvdata(jack_dev);
+	struct jack_data *jack;
 	char env_str[16];
 	char *envp[] = { env_str, NULL };
 
-	jack_set_data(jack->pdata, name, value);
+	if (!jack_dev) {
+		printk(KERN_ERR "jack device is not allocated\n");
+		return;
+	}
 
+	jack = platform_get_drvdata(jack_dev);
+	jack_set_data(jack->pdata, name, value);
 	sprintf(env_str, "CHGDET=%s", name);
 	dev_info(&jack_dev->dev, "jack event %s\n", env_str);
 	kobject_uevent_env(&jack_dev->dev.kobj, KOBJ_CHANGE, envp);

@@ -34,6 +34,8 @@
 #include <linux/mfd/max8997.h>
 #include <linux/mfd/max8997-private.h>
 
+#include <mach/sec_debug.h>
+
 struct max8997_data {
 	struct device		*dev;
 	struct max8997_dev	*iodev;
@@ -317,6 +319,14 @@ static int max8997_ldo_disable(struct regulator_dev *rdev)
 	return max8997_update_reg(i2c, reg, val<<shift, mask<<shift);
 }
 
+static int max8997_ldo_suspend_enable(struct regulator_dev *rdev)
+{
+	if (rdev->use_count > 0)
+		return max8997_ldo_enable(rdev);
+	else
+		return max8997_ldo_disable(rdev);
+}
+
 static int max8997_get_voltage_register(struct regulator_dev *rdev,
 				int *_reg, int *_shift, int *_mask)
 {
@@ -503,6 +513,11 @@ static int max8997_set_voltage_buck(struct regulator_dev *rdev,
 
 	switch (buck) {
 	case MAX8997_BUCK1:
+		sec_debug_aux_log(SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+				"%s: BUCK1: min_vol=%d, max_vol=%d(%ps)",
+				__func__, min_vol, max_vol,
+				__builtin_return_address(0));
+
 		if (!max8997->buck1_gpiodvs) {
 			ret = max8997_write_reg(i2c, reg, i);
 			break;
@@ -546,6 +561,10 @@ buck1_exit:
 			ret = max8997_write_reg(i2c, reg, i);
 		break;
 	case MAX8997_BUCK2:
+		sec_debug_aux_log(SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+				"%s: BUCK2: min_vol=%d, max_vol=%d(%ps)",
+				__func__, min_vol, max_vol,
+				__builtin_return_address(0));
 	case MAX8997_BUCK5:
 		for (k = 0; k < 7; k++)
 			data[k] = i;
@@ -774,7 +793,7 @@ static struct regulator_ops max8997_ldo_ops = {
 	.disable		= max8997_ldo_disable,
 	.get_voltage		= max8997_get_voltage,
 	.set_voltage		= max8997_set_voltage_ldo,
-	.set_suspend_enable	= max8997_ldo_enable,
+	.set_suspend_enable	= max8997_ldo_suspend_enable,
 	.set_suspend_disable	= max8997_ldo_disable,
 };
 
@@ -1170,6 +1189,25 @@ static int max8997_set_buck1_dvs_table(struct max8997_buck1_dvs_funcs *ptr,
 	return ret;
 }
 
+static void max8997_set_mr_debouce_time(struct max8997_data *max8997,
+					struct max8997_platform_data *pdata)
+{
+	struct i2c_client *i2c = max8997->iodev->i2c;
+	int ret;
+	u8 val = pdata->mr_debounce_time;
+
+	if (val > 8) {
+		dev_err(max8997->dev, "Invalid MR debounce time(%d)\n", val);
+		return;
+	}
+
+	dev_info(max8997->dev, "manual reset debouce time: %d sec.\n", val);
+
+	ret = max8997_write_reg(i2c, MAX8997_REG_CONTROL2, --val);
+	if (ret < 0)
+		dev_err(max8997->dev, "failed to write CONTROL2(%d)\n", ret);
+}
+
 static __devinit int max8997_pmic_probe(struct platform_device *pdev)
 {
 	struct max8997_dev *iodev = dev_get_drvdata(pdev->dev.parent);
@@ -1304,6 +1342,9 @@ static __devinit int max8997_pmic_probe(struct platform_device *pdev)
 			goto err2;
 		}
 	}
+
+	if (pdata->mr_debounce_time)
+		max8997_set_mr_debouce_time(max8997, pdata);
 
 	for (i = 0; i < pdata->num_regulators; i++) {
 		const struct vol_cur_map_desc *desc;

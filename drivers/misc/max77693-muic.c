@@ -1,7 +1,7 @@
 /*
  * max77693-muic.c - MUIC driver for the Maxim 77693
  *
- *  Copyright (C) 2010 Samsung Electronics
+ *  Copyright (C) 2012 Samsung Electronics
  *  <sukdong.kim@samsung.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -37,12 +37,18 @@
 #include <linux/usb3803.h>
 #endif
 #include <linux/delay.h>
+#include <linux/extcon.h>
 
 /* for providing API */
 static struct max77693_muic_info *gInfo;
 
 /* For restore charger interrupt states */
 static u8 chg_int_state;
+
+#ifdef CONFIG_LTE_VIA_SWITCH
+/* For saving uart path during CP booting */
+static int cpbooting;
+#endif
 
 /* MAX77693 MUIC CHG_TYP setting values */
 enum {
@@ -71,16 +77,20 @@ enum {
 enum {
 	ADC_GND			= 0x00,
 	ADC_MHL			= 0x01,
-	ADC_DOCK_VOL_DN		= 0x0a,
-	ADC_DOCK_VOL_UP		= 0x0b,
-	ADC_CEA936ATYPE1_CHG	= 0x17,
-	ADC_JIG_USB_OFF		= 0x18,
-	ADC_JIG_USB_ON		= 0x19,
-	ADC_DESKDOCK		= 0x1a,
-	ADC_CEA936ATYPE2_CHG	= 0x1b,
-	ADC_JIG_UART_OFF	= 0x1c,
-	ADC_JIG_UART_ON		= 0x1d,
-	ADC_CARDOCK		= 0x1d,
+	ADC_DOCK_PREV_KEY	= 0x04,
+	ADC_DOCK_NEXT_KEY	= 0x07,
+	ADC_DOCK_VOL_DN		= 0x0a, /* 0x01010 14.46K ohm */
+	ADC_DOCK_VOL_UP		= 0x0b, /* 0x01011 17.26K ohm */
+	ADC_DOCK_PLAY_PAUSE_KEY = 0x0d,
+	ADC_SMARTDOCK		= 0x10, /* 0x10000 40.2K ohm */
+	ADC_CEA936ATYPE1_CHG	= 0x17,	/* 0x10111 200K ohm */
+	ADC_JIG_USB_OFF		= 0x18, /* 0x11000 255K ohm */
+	ADC_JIG_USB_ON		= 0x19, /* 0x11001 301K ohm */
+	ADC_DESKDOCK		= 0x1a, /* 0x11010 365K ohm */
+	ADC_CEA936ATYPE2_CHG	= 0x1b, /* 0x11011 442K ohm */
+	ADC_JIG_UART_OFF	= 0x1c, /* 0x11100 523K ohm */
+	ADC_JIG_UART_ON		= 0x1d, /* 0x11101 619K ohm */
+	ADC_CARDOCK		= 0x1d, /* 0x11101 619K ohm */
 	ADC_OPEN		= 0x1f
 };
 
@@ -90,6 +100,12 @@ enum {
 	DOCK_KEY_VOL_UP_RELEASED,
 	DOCK_KEY_VOL_DOWN_PRESSED,
 	DOCK_KEY_VOL_DOWN_RELEASED,
+	DOCK_KEY_PREV_PRESSED,
+	DOCK_KEY_PREV_RELEASED,
+	DOCK_KEY_PLAY_PAUSE_PRESSED,
+	DOCK_KEY_PLAY_PAUSE_RELEASED,
+	DOCK_KEY_NEXT_PRESSED,
+	DOCK_KEY_NEXT_RELEASED,
 };
 
 struct max77693_muic_info {
@@ -115,30 +131,37 @@ struct max77693_muic_info {
 
 	struct input_dev	*input;
 	int			previous_key;
+
+#ifdef CONFIG_EXTCON
+	struct extcon_dev	*edev;
+#endif
 };
 
 static int if_muic_info;
 static int switch_sel;
 static int if_pmic_rev;
 
+/* func : get_if_pmic_inifo
+ * switch_sel value get from bootloader comand line
+ * switch_sel data consist 8 bits (xxxxzzzz)
+ * first 4bits(zzzz) mean path infomation.
+ * next 4bits(xxxx) mean if pmic version info
+ */
 static int get_if_pmic_inifo(char *str)
 {
 	get_option(&str, &if_muic_info);
 	switch_sel = if_muic_info & 0x0f;
 	if_pmic_rev = (if_muic_info & 0xf0) >> 4;
-	pr_info("%s %s: switch_sel: %d if_pmic_rev:%d\n",
+	pr_info("%s %s: switch_sel: %x if_pmic_rev:%x\n",
 		__FILE__, __func__, switch_sel, if_pmic_rev);
 	return if_muic_info;
 }
 __setup("pmic_info=", get_if_pmic_inifo);
 
-static int if_muic_info;
-
 int get_switch_sel(void)
 {
 	return switch_sel;
 }
-
 
 static int max77693_muic_get_comp2_comn1_pass2
 	(struct max77693_muic_info *info)
@@ -192,15 +215,23 @@ static int max77693_muic_set_comp2_comn1_pass2
 			else
 				val = MAX77693_MUIC_CTRL1_BIN_5_101;
 #ifdef CONFIG_LTE_VIA_SWITCH
-			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
-					GPIO_LEVEL_HIGH);
-				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_HIGH"
-								, __func__);
-			} else {
-				dev_err(info->dev, "%s: ERR_LTE_GPIO_SET_HIGH\n"
-								, __func__);
-				return -EINVAL;
+			dev_info(info->dev, "%s: cpbooting is %s\n",
+				__func__,
+				cpbooting ?
+				"started. skip path set" : "done. set path");
+			if (!cpbooting) {
+				if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
+					gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+						GPIO_LEVEL_HIGH);
+					dev_info(info->dev,
+						"%s: LTE_GPIO_LEVEL_HIGH"
+						, __func__);
+				} else {
+					dev_err(info->dev,
+						"%s: ERR_LTE_GPIO_SET_HIGH\n"
+						, __func__);
+					return -EINVAL;
+				}
 			}
 #endif
 		}
@@ -209,7 +240,8 @@ static int max77693_muic_set_comp2_comn1_pass2
 			info->muic_data->sw_path = UART_PATH_LTE;
 			val = MAX77693_MUIC_CTRL1_BIN_5_101;
 			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_UART_SEL, GPIO_LEVEL_LOW);
+				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+					GPIO_LEVEL_LOW);
 				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_LOW\n"
 								, __func__);
 			} else {
@@ -224,7 +256,12 @@ static int max77693_muic_set_comp2_comn1_pass2
 				, __func__);
 			return -EINVAL;
 		}
+	} else {
+		dev_err(info->dev, "func: %s invalid path type(%d)\n"
+			, __func__, type);
+		return -EINVAL;
 	}
+
 	cntl1_val = (val << COMN1SW_SHIFT) | (val << COMP2SW_SHIFT);
 	cntl1_msk = COMN1SW_MASK | COMP2SW_MASK;
 
@@ -295,10 +332,12 @@ static int max77693_muic_get_uart_path_pass2
 			return -EINVAL;
 		}
 #endif
+#ifndef CONFIG_LTE_VIA_SWITCH
 		if (info->is_default_uart_path_cp)
 			return UART_PATH_AP;
 		else
 			return UART_PATH_CP;
+#endif
 	} else {
 		return -EINVAL;
 	}
@@ -371,7 +410,7 @@ static ssize_t max77693_muic_show_manualsw(struct device *dev,
 {
 	struct max77693_muic_info *info = dev_get_drvdata(dev);
 
-	dev_info(info->dev, "func:%s info->muic_data->sw_path:%d(%d)\n",
+	dev_info(info->dev, "func:%s ap(0),cp(1),vps(2)sw_path:%d(%d)\n",
 		 __func__, info->muic_data->sw_path,
 			gpio_get_value(GPIO_USB_SEL));/*For debuging*/
 
@@ -417,7 +456,7 @@ static ssize_t max77693_muic_show_adc(struct device *dev,
 	u8 val;
 
 	ret = max77693_read_reg(info->muic, MAX77693_MUIC_REG_STATUS1, &val);
-	dev_info(info->dev, "func:%s ret:%d val:%d\n", __func__, ret, val);
+	dev_info(info->dev, "func:%s ret:%d val:%x\n", __func__, ret, val);
 
 	if (ret) {
 		dev_err(info->dev, "%s: fail to read muic reg\n", __func__);
@@ -532,9 +571,9 @@ static void max77693_muic_set_adcdbset(struct max77693_muic_info *info,
 {
 	int ret;
 	u8 val;
-	dev_info(info->dev, "func:%s value:%d\n", __func__, value);
+	dev_info(info->dev, "func:%s value:%x\n", __func__, value);
 	if (value > 3) {
-		dev_err(info->dev, "%s: invalid value(%d)\n", __func__, value);
+		dev_err(info->dev, "%s: invalid value(%x)\n", __func__, value);
 		return;
 	}
 
@@ -748,6 +787,55 @@ static ssize_t max77693_muic_show_uart_sel(struct device *dev,
 	return sprintf(buf, "UNKNOWN\n");
 }
 
+#ifdef CONFIG_LTE_VIA_SWITCH
+static ssize_t max77693_muic_show_check_cpboot(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	if (cpbooting)
+		return sprintf(buf, "start\n");
+	else
+		return sprintf(buf, "done\n");
+}
+
+static ssize_t max77693_muic_set_check_cpboot(struct device *dev,
+					  struct device_attribute *attr,
+					  const char *buf, size_t count)
+{
+	struct max77693_muic_info *info = dev_get_drvdata(dev);
+
+	if (!strncasecmp(buf, "start", 5)) {
+		if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
+			dev_info(info->dev, "%s: Fix CP-UART path to LTE during CP Booting",
+					__func__);
+			gpio_set_value(GPIO_LTE_VIA_UART_SEL, GPIO_LEVEL_LOW);
+		} else {
+			dev_err(info->dev, "%s: ERR_LTE_GPIO_SET_LOW\n",
+					__func__);
+			return -EINVAL;
+		}
+		cpbooting = 1;
+	} else if (!strncasecmp(buf, "done", 4)) {
+		if (info->muic_data->uart_path == UART_PATH_CP) {
+			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
+				dev_info(info->dev, "%s: Reroute CP-UART path to VIA after CP Booting",
+						__func__);
+				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+						GPIO_LEVEL_HIGH);
+			} else {
+				dev_err(info->dev, "%s: ERR_LTE_GPIO_SET_HIGH\n",
+						__func__);
+				return -EINVAL;
+			}
+		}
+		cpbooting = 0;
+	} else {
+		dev_warn(info->dev, "%s: Wrong command : %s\n", __func__, buf);
+	}
+
+	return count;
+}
+#endif
+
 static DEVICE_ATTR(uart_sel, 0664, max77693_muic_show_uart_sel,
 		max77693_muic_set_uart_sel);
 static DEVICE_ATTR(usb_state, S_IRUGO, max77693_muic_show_usb_state, NULL);
@@ -762,6 +850,11 @@ static DEVICE_ATTR(otg_test, 0664,
 static DEVICE_ATTR(adc_debounce_time, 0664,
 		max77693_muic_show_adc_debounce_time,
 		max77693_muic_set_adc_debounce_time);
+#ifdef CONFIG_LTE_VIA_SWITCH
+static DEVICE_ATTR(check_cpboot, 0664,
+		max77693_muic_show_check_cpboot,
+		max77693_muic_set_check_cpboot);
+#endif
 
 static struct attribute *max77693_muic_attributes[] = {
 	&dev_attr_uart_sel.attr,
@@ -772,6 +865,9 @@ static struct attribute *max77693_muic_attributes[] = {
 	&dev_attr_audio_path.attr,
 	&dev_attr_otg_test.attr,
 	&dev_attr_adc_debounce_time.attr,
+#ifdef CONFIG_LTE_VIA_SWITCH
+	&dev_attr_check_cpboot.attr,
+#endif
 	NULL
 };
 
@@ -779,13 +875,24 @@ static const struct attribute_group max77693_muic_group = {
 	.attrs = max77693_muic_attributes,
 };
 
+#if defined(CONFIG_MACH_M0_CTC)
+/*0 : usb is not conneted to CP	1 : usb is connected to CP */
+int cp_usb_state;
+
+int max7693_muic_cp_usb_state(void)
+{
+	return cp_usb_state;
+}
+EXPORT_SYMBOL(max7693_muic_cp_usb_state);
+#endif
+
 static int max77693_muic_set_usb_path(struct max77693_muic_info *info, int path)
 {
 	struct i2c_client *client = info->muic;
 	struct max77693_muic_data *mdata = info->muic_data;
 	int ret;
 	int gpio_val;
-	u8 cntl1_val, cntl1_msk, cntl2_val;
+	u8 cntl1_val, cntl1_msk;
 	int val;
 	dev_info(info->dev, "func:%s path:%d\n", __func__, path);
 	if (mdata->set_safeout) {
@@ -835,12 +942,25 @@ static int max77693_muic_set_usb_path(struct max77693_muic_info *info, int path)
 	dev_info(info->dev, "%s: Set manual path\n", __func__);
 	max77693_update_reg(client, MAX77693_MUIC_REG_CTRL1, cntl1_val,
 			    cntl1_msk);
+	max77693_update_reg(client, MAX77693_MUIC_REG_CTRL2,
+				CTRL2_CPEn1_LOWPWD0,
+				CTRL2_CPEn_MASK | CTRL2_LOWPWD_MASK);
+
 	cntl1_val = MAX77693_MUIC_CTRL1_BIN_0_000;
 	max77693_read_reg(client, MAX77693_MUIC_REG_CTRL1, &cntl1_val);
 	dev_info(info->dev, "%s: CNTL1(0x%02x)\n", __func__, cntl1_val);
 
+	cntl1_val = MAX77693_MUIC_CTRL1_BIN_0_000;
+	max77693_read_reg(client, MAX77693_MUIC_REG_CTRL2, &cntl1_val);
+	dev_info(info->dev, "%s: CNTL2(0x%02x)\n", __func__, cntl1_val);
+
 	sysfs_notify(&switch_dev->kobj, NULL, "usb_sel");
 	return 0;
+}
+
+int max77693_muic_get_charging_type(void)
+{
+	return gInfo->cable_type;
 }
 
 static int max77693_muic_set_charging_type(struct max77693_muic_info *info,
@@ -893,6 +1013,21 @@ static int max77693_muic_handle_dock_vol_key(struct max77693_muic_info *info,
 			state = 0;
 			info->previous_key = DOCK_KEY_VOL_DOWN_RELEASED;
 			break;
+		case DOCK_KEY_PREV_PRESSED:
+			code = KEY_PREVIOUSSONG;
+			state = 0;
+			info->previous_key = DOCK_KEY_PREV_RELEASED;
+			break;
+		case DOCK_KEY_PLAY_PAUSE_PRESSED:
+			code = KEY_PLAYPAUSE;
+			state = 0;
+			info->previous_key = DOCK_KEY_PLAY_PAUSE_RELEASED;
+			break;
+		case DOCK_KEY_NEXT_PRESSED:
+			code = KEY_NEXTSONG;
+			state = 0;
+			info->previous_key = DOCK_KEY_NEXT_RELEASED;
+			break;
 		default:
 			return 0;
 		}
@@ -902,7 +1037,12 @@ static int max77693_muic_handle_dock_vol_key(struct max77693_muic_info *info,
 	}
 
 	if (pre_key == DOCK_KEY_NONE) {
-		if (adc != ADC_DOCK_VOL_UP && adc != ADC_DOCK_VOL_DN)
+		/*
+		if (adc != ADC_DOCK_VOL_UP && adc != ADC_DOCK_VOL_DN && \
+		adc != ADC_DOCK_PREV_KEY && adc != ADC_DOCK_PLAY_PAUSE_KEY \
+		&& adc != ADC_DOCK_NEXT_KEY)
+		*/
+		if ((adc < 0x03) || (adc > 0x0d))
 			return 0;
 	}
 
@@ -919,7 +1059,22 @@ static int max77693_muic_handle_dock_vol_key(struct max77693_muic_info *info,
 		state = 1;
 		info->previous_key = DOCK_KEY_VOL_DOWN_PRESSED;
 		break;
-	case ADC_DESKDOCK:
+	case ADC_DOCK_PREV_KEY-1 ... ADC_DOCK_PREV_KEY+1:
+		code = KEY_PREVIOUSSONG;
+		state = 1;
+		info->previous_key = DOCK_KEY_PREV_PRESSED;
+		break;
+	case ADC_DOCK_PLAY_PAUSE_KEY-1 ... ADC_DOCK_PLAY_PAUSE_KEY+1:
+		code = KEY_PLAYPAUSE;
+		state = 1;
+		info->previous_key = DOCK_KEY_PLAY_PAUSE_PRESSED;
+		break;
+	case ADC_DOCK_NEXT_KEY-1 ... ADC_DOCK_NEXT_KEY+1:
+		code = KEY_NEXTSONG;
+		state = 1;
+		info->previous_key = DOCK_KEY_NEXT_PRESSED;
+		break;
+	case ADC_DESKDOCK: /* key release routine */
 		if (pre_key == DOCK_KEY_VOL_UP_PRESSED) {
 			code = KEY_VOLUMEUP;
 			state = 0;
@@ -928,6 +1083,18 @@ static int max77693_muic_handle_dock_vol_key(struct max77693_muic_info *info,
 			code = KEY_VOLUMEDOWN;
 			state = 0;
 			info->previous_key = DOCK_KEY_VOL_DOWN_RELEASED;
+		} else if (pre_key == DOCK_KEY_PREV_PRESSED) {
+			code = KEY_PREVIOUSSONG;
+			state = 0;
+			info->previous_key = DOCK_KEY_PREV_RELEASED;
+		} else if (pre_key == DOCK_KEY_PLAY_PAUSE_PRESSED) {
+			code = KEY_PLAYPAUSE;
+			state = 0;
+			info->previous_key = DOCK_KEY_PLAY_PAUSE_RELEASED;
+		} else if (pre_key == DOCK_KEY_NEXT_PRESSED) {
+			code = KEY_NEXTSONG;
+			state = 0;
+			info->previous_key = DOCK_KEY_NEXT_RELEASED;
 		} else {
 			dev_warn(info->dev, "%s:%d should not reach here\n",
 				 __func__, __LINE__);
@@ -951,7 +1118,7 @@ static int max77693_muic_attach_usb_type(struct max77693_muic_info *info,
 {
 	struct max77693_muic_data *mdata = info->muic_data;
 	int ret, path;
-	dev_info(info->dev, "func:%s adc:%d cable_type:%d\n",
+	dev_info(info->dev, "func:%s adc:%x cable_type:%d\n",
 		 __func__, adc, info->cable_type);
 	if (info->cable_type == CABLE_TYPE_MHL_MUIC
 	    || info->cable_type == CABLE_TYPE_MHL_VB_MUIC) {
@@ -1005,6 +1172,17 @@ static int max77693_muic_attach_usb_type(struct max77693_muic_info *info,
 
 	if (mdata->sw_path == CP_USB_MODE) {
 		info->cable_type = CABLE_TYPE_USB_MUIC;
+#if defined(CONFIG_MACH_M0_CTC)
+		if (system_rev < 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 1);
+		} else if (system_rev == 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 1);
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 1);
+		} else {
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 1);
+		}
+		cp_usb_state = 1;
+#endif
 		max77693_muic_set_usb_path(info, CP_USB_MODE);
 		return 0;
 	}
@@ -1028,7 +1206,7 @@ static int max77693_muic_attach_dock_type(struct max77693_muic_info *info,
 {
 	struct max77693_muic_data *mdata = info->muic_data;
 	int path;
-	dev_info(info->dev, "func:%s adc:%d\n", __func__, adc);
+	dev_info(info->dev, "func:%s adc:%x\n", __func__, adc);
 	switch (adc) {
 	case ADC_DESKDOCK:
 		/* Desk Dock */
@@ -1122,14 +1300,23 @@ static void max77693_muic_handle_jig_uart(struct max77693_muic_info *info,
 			else
 				val = MAX77693_MUIC_CTRL1_BIN_5_101;
 #ifdef CONFIG_LTE_VIA_SWITCH
-			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
-							GPIO_LEVEL_HIGH);
-				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_HIGH"
-								, __func__);
-			} else
-				dev_err(info->dev, "%s: ERR_LTE_GPIO_SET_HIGH\n"
+			dev_info(info->dev, "%s: cpbooting is %s\n",
+				__func__,
+				cpbooting ?
+				"started. skip path set" : "done. set path");
+			if (!cpbooting) {
+				if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
+					gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+						GPIO_LEVEL_HIGH);
+					dev_info(info->dev,
+						"%s: LTE_GPIO_LEVEL_HIGH"
 						, __func__);
+				} else {
+					dev_err(info->dev,
+						"%s: ERR_LTE_GPIO_SET_HIGH\n"
+						, __func__);
+				}
+			}
 #endif
 		}
 #ifdef CONFIG_LTE_VIA_SWITCH
@@ -1137,7 +1324,8 @@ static void max77693_muic_handle_jig_uart(struct max77693_muic_info *info,
 			val = MAX77693_MUIC_CTRL1_BIN_5_101;
 			/*TODO must modify H/W rev.5*/
 			if (gpio_is_valid(GPIO_LTE_VIA_UART_SEL)) {
-				gpio_set_value(GPIO_UART_SEL, GPIO_LEVEL_LOW);
+				gpio_set_value(GPIO_LTE_VIA_UART_SEL,
+					GPIO_LEVEL_LOW);
 				dev_info(info->dev, "%s: LTE_GPIO_LEVEL_LOW\n"
 								, __func__);
 			} else
@@ -1152,6 +1340,10 @@ static void max77693_muic_handle_jig_uart(struct max77693_muic_info *info,
 	cntl1_msk = COMN1SW_MASK | COMP2SW_MASK;
 	max77693_update_reg(info->muic, MAX77693_MUIC_REG_CTRL1, cntl1_val,
 			    cntl1_msk);
+
+	max77693_update_reg(info->muic, MAX77693_MUIC_REG_CTRL2,
+				CTRL2_CPEn1_LOWPWD0,
+				CTRL2_CPEn_MASK | CTRL2_LOWPWD_MASK);
 
 	if (vbvolt & STATUS2_VBVOLT_MASK) {
 		if (mdata->host_notify_cb) {
@@ -1181,49 +1373,101 @@ static void max77693_muic_handle_jig_uart(struct max77693_muic_info *info,
 
 void max77693_otg_control(struct max77693_muic_info *info, int enable)
 {
-	u8 reg_data;
+	u8 int_mask, cdetctrl1, chg_cnfg_00;
 	pr_info("%s: enable(%d)\n", __func__, enable);
 
 	if (enable) {
 		/* disable charger interrupt */
 		max77693_read_reg(info->max77693->i2c,
-			MAX77693_CHG_REG_CHG_INT_MASK, &reg_data);
-		chg_int_state = reg_data;
-		reg_data |= (1 << 4);	/* disable chgin intr */
-		reg_data |= (1 << 6);	/* disable chg */
-		reg_data &= ~(1 << 0);	/* enable byp intr */
+			MAX77693_CHG_REG_CHG_INT_MASK, &int_mask);
+		chg_int_state = int_mask;
+		int_mask |= (1 << 4);	/* disable chgin intr */
+		int_mask |= (1 << 6);	/* disable chg */
+		int_mask &= ~(1 << 0);	/* enable byp intr */
 		max77693_write_reg(info->max77693->i2c,
-			MAX77693_CHG_REG_CHG_INT_MASK, reg_data);
+			MAX77693_CHG_REG_CHG_INT_MASK, int_mask);
 
 		/* disable charger detection */
-		/* WORKAROUND: Do not disable charger detecting */
+		max77693_read_reg(info->max77693->muic,
+			MAX77693_MUIC_REG_CDETCTRL1, &cdetctrl1);
+		cdetctrl1 &= ~(1 << 0);
 		max77693_write_reg(info->max77693->muic,
-			MAX77693_MUIC_REG_CDETCTRL1, 0x09);
+			MAX77693_MUIC_REG_CDETCTRL1, cdetctrl1);
 
-		/* OTG on, boost on */
+		/* OTG on, boost on, DIS_MUIC_CTRL=1 */
+		max77693_read_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_CNFG_00, &chg_cnfg_00);
+		chg_cnfg_00 &= ~(CHG_CNFG_00_CHG_MASK
+				| CHG_CNFG_00_OTG_MASK
+				| CHG_CNFG_00_BUCK_MASK
+				| CHG_CNFG_00_BOOST_MASK
+				| CHG_CNFG_00_DIS_MUIC_CTRL_MASK);
+		chg_cnfg_00 |= (CHG_CNFG_00_OTG_MASK
+				| CHG_CNFG_00_BOOST_MASK
+				| CHG_CNFG_00_DIS_MUIC_CTRL_MASK);
 		max77693_write_reg(info->max77693->i2c,
-			MAX77693_CHG_REG_CHG_CNFG_00, 0x2A);
+			MAX77693_CHG_REG_CHG_CNFG_00, chg_cnfg_00);
 	} else {
-		/* OTG off, boost off, (buck on) */
+		/* OTG off, boost off, (buck on),
+		   DIS_MUIC_CTRL = 0 unless CHG_ENA = 1 */
+		max77693_read_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_CNFG_00, &chg_cnfg_00);
+		chg_cnfg_00 &= ~(CHG_CNFG_00_OTG_MASK
+				| CHG_CNFG_00_BOOST_MASK
+				| CHG_CNFG_00_DIS_MUIC_CTRL_MASK);
+		chg_cnfg_00 |= CHG_CNFG_00_BUCK_MASK;
 		max77693_write_reg(info->max77693->i2c,
-			MAX77693_CHG_REG_CHG_CNFG_00, 0x04);
+			MAX77693_CHG_REG_CHG_CNFG_00, chg_cnfg_00);
 
 		/* enable charger detection */
+		max77693_read_reg(info->max77693->muic,
+			MAX77693_MUIC_REG_CDETCTRL1, &cdetctrl1);
+		cdetctrl1 |= (1 << 0);
 		max77693_write_reg(info->max77693->muic,
-			MAX77693_MUIC_REG_CDETCTRL1, 0x0D);
+			MAX77693_MUIC_REG_CDETCTRL1, cdetctrl1);
 
 		/* enable charger interrupt */
 		max77693_write_reg(info->max77693->i2c,
 			MAX77693_CHG_REG_CHG_INT_MASK, chg_int_state);
+		max77693_read_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_INT_MASK, &int_mask);
 	}
+
+	pr_info("%s: INT_MASK(0x%x), CDETCTRL1(0x%x), CHG_CNFG_00(0x%x)\n",
+				__func__, int_mask, cdetctrl1, chg_cnfg_00);
 }
 
+void max77693_powered_otg_control(struct max77693_muic_info *info, int enable)
+{
+	pr_info("%s: enable(%d)\n", __func__, enable);
+
+	if (enable) {
+		/* OTG on, boost on */
+		max77693_write_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_CNFG_00, 0x05);
+
+		max77693_write_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_CNFG_02, 0x0E);
+	} else {
+		/* OTG off, boost off, (buck on) */
+		max77693_write_reg(info->max77693->i2c,
+			MAX77693_CHG_REG_CHG_CNFG_00, 0x04);
+	}
+}
 /* use in mach for otg */
 void otg_control(int enable)
 {
 	pr_debug("%s: enable(%d)\n", __func__, enable);
 
 	max77693_otg_control(gInfo, enable);
+}
+
+/* use in mach for powered-otg */
+void powered_otg_control(int enable)
+{
+	pr_debug("%s: enable(%d)\n", __func__, enable);
+
+	max77693_powered_otg_control(gInfo, enable);
 }
 
 static int max77693_muic_handle_attach(struct max77693_muic_info *info,
@@ -1254,7 +1498,8 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 		}
 	}
 
-	if (info->cable_type == CABLE_TYPE_DESKDOCK_MUIC && adc != ADC_DESKDOCK) {
+	if (info->cable_type == CABLE_TYPE_DESKDOCK_MUIC
+		&& adc != ADC_DESKDOCK) {
 		dev_warn(info->dev, "%s: assume deskdock detach\n", __func__);
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
 
@@ -1284,6 +1529,11 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 			dev_warn(info->dev,
 				 "%s: Ignore irq:%d at MHL detection\n",
 				 __func__, irq);
+			if (vbvolt) {
+				dev_info(info->dev, "%s: call charger_cb"
+					, __func__);
+				max77693_muic_set_charging_type(info, false);
+			}
 			return 0;
 		}
 		max77693_muic_attach_mhl(info, chgtyp);
@@ -1304,6 +1554,7 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 				mdata->usb_cb(USB_OTGHOST_ATTACHED);
 
 			msleep(40);
+
 			max77693_muic_set_usb_path(info, AP_USB_MODE);
 		} else if (chgtyp == CHGTYP_USB ||
 			   chgtyp == CHGTYP_DOWNSTREAM_PORT ||
@@ -1314,38 +1565,56 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 			ret = max77693_muic_set_charging_type(info, false);
 		}
 		break;
+	case ADC_SMARTDOCK:
+		if (info->cable_type == CABLE_TYPE_SMARTDOCK_MUIC) {
+			dev_info(info->dev,
+			"%s: duplicated(SMARTDOCK)\n", __func__);
+				break;
+		}
+		dev_info(info->dev, "func:%s Attach SmartDock\n", __func__);
+		info->cable_type = CABLE_TYPE_SMARTDOCK_MUIC;
+		max77693_muic_set_usb_path(info, AP_USB_MODE);
+		msleep(40);
+		if (mdata->usb_cb && info->is_usb_ready)
+			mdata->usb_cb(USB_POWERED_HOST_ATTACHED);
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_ATTACHED);
+		max77693_muic_set_charging_type(info, false);
+		break;
 	case ADC_JIG_UART_OFF:
 		max77693_muic_handle_jig_uart(info, vbvolt);
+#if defined(CONFIG_SEC_MODEM_M0_TD)
+		gpio_set_value(GPIO_AP_CP_INT1, GPIO_LEVEL_HIGH);
+#endif
 		mdata->jig_state(true);
 		break;
 	case ADC_JIG_USB_OFF:
 	case ADC_JIG_USB_ON:
-		ret = max77693_muic_attach_usb_type(info, adc);
+		if (vbvolt & STATUS2_VBVOLT_MASK) {
+			dev_info(info->dev, "%s: SKIP_JIG_USB\n", __func__);
+			ret = max77693_muic_attach_usb_type(info, adc);
+		}
+#if defined(CONFIG_SEC_MODEM_M0_TD)
+		gpio_set_value(GPIO_AP_CP_INT1, GPIO_LEVEL_HIGH);
+#endif
 		mdata->jig_state(true);
 		break;
 	case ADC_DESKDOCK:
 	case ADC_CARDOCK:
-#if defined(CONFIG_TARGET_LOCALE_NA)
-		if (is_default_esn == 1) {
-			dev_info(info->dev,
-				 "SWITCHING TO CDMA I/F CABLE Mode\n");
-			max77693_muic_handle_jig_uart(info, vbvolt);
-		} else
-#endif
-		{
-			max77693_muic_attach_dock_type(info, adc);
-			if (chgtyp == CHGTYP_USB ||
-			    chgtyp == CHGTYP_DOWNSTREAM_PORT ||
-			    chgtyp == CHGTYP_DEDICATED_CHGR ||
-			    chgtyp == CHGTYP_500MA || chgtyp == CHGTYP_1A)
-				ret =
-				    max77693_muic_set_charging_type(info,
-								    false);
-			else if (chgtyp == CHGTYP_NO_VOLTAGE && !chgdetrun)
-				ret =
-				    max77693_muic_set_charging_type(info, true);
-		}
-		break;
+		max77693_muic_attach_dock_type(info, adc);
+		if (chgtyp == CHGTYP_USB ||
+			chgtyp == CHGTYP_DOWNSTREAM_PORT ||
+			chgtyp == CHGTYP_DEDICATED_CHGR ||
+			chgtyp == CHGTYP_500MA || chgtyp == CHGTYP_1A)
+			ret = max77693_muic_set_charging_type(info, false);
+		else if (chgtyp == CHGTYP_NO_VOLTAGE && !chgdetrun)
+			ret = max77693_muic_set_charging_type(info, !vbvolt);
+			/* For MAX77693 IC doesn`t occur chgtyp IRQ
+			* because of audio noise prevention.
+			* So, If below condition is set,
+			* we do charging at CARDOCK.
+			*/
+			break;
 	case ADC_CEA936ATYPE1_CHG:
 	case ADC_CEA936ATYPE2_CHG:
 	case ADC_OPEN:
@@ -1354,9 +1623,7 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 			if (adc == ADC_CEA936ATYPE1_CHG
 			    || adc == ADC_CEA936ATYPE2_CHG)
 				break;
-			if (mdata->is_mhl_attached
-			    && mdata->is_mhl_attached() &&
-			    info->cable_type == CABLE_TYPE_MHL_MUIC) {
+			if (info->cable_type == CABLE_TYPE_MHL_MUIC) {
 				dev_info(info->dev, "%s: MHL(charging)\n",
 					 __func__);
 				info->cable_type = CABLE_TYPE_MHL_VB_MUIC;
@@ -1364,6 +1631,11 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 								      false);
 				return ret;
 			}
+#ifdef CONFIG_EXTCON
+			if (info->edev)
+				extcon_set_cable_state(info->edev,
+					"USB", true);
+#endif
 			ret = max77693_muic_attach_usb_type(info, adc);
 			break;
 		case CHGTYP_DOWNSTREAM_PORT:
@@ -1372,6 +1644,11 @@ static int max77693_muic_handle_attach(struct max77693_muic_info *info,
 		case CHGTYP_1A:
 			dev_info(info->dev, "%s:TA\n", __func__);
 			info->cable_type = CABLE_TYPE_TA_MUIC;
+#ifdef CONFIG_EXTCON
+			if (info->edev)
+				extcon_set_cable_state(info->edev,
+					"TA", true);
+#endif
 #ifdef CONFIG_USBHUB_USB3803
 			/* setting usb hub in default mode (standby) */
 			usb3803_set_mode(USB_3803_MODE_STANDBY);
@@ -1397,6 +1674,7 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	struct i2c_client *client = info->muic;
 	struct max77693_muic_data *mdata = info->muic_data;
 	enum cable_type_muic prev_ct = CABLE_TYPE_NONE_MUIC;
+	u8 cntl2_val;
 	int ret = 0;
 	dev_info(info->dev, "func:%s\n", __func__);
 	/* Workaround: irq doesn't occur after detaching mHL cable */
@@ -1406,6 +1684,27 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	/* Enable Factory Accessory Detection State Machine */
 	max77693_update_reg(client, MAX77693_MUIC_REG_CTRL2,
 			    (1 << CTRL2_ACCDET_SHIFT), CTRL2_ACCDET_MASK);
+
+	max77693_update_reg(client, MAX77693_MUIC_REG_CTRL2,
+				CTRL2_CPEn0_LOWPWD1,
+				CTRL2_CPEn_MASK | CTRL2_LOWPWD_MASK);
+
+	max77693_read_reg(client, MAX77693_MUIC_REG_CTRL2, &cntl2_val);
+	dev_info(info->dev, "%s: CNTL2(0x%02x)\n", __func__, cntl2_val);
+
+#if defined(CONFIG_MACH_M0_CTC)
+	if (cp_usb_state != 0) {
+		if (system_rev < 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 0);
+		} else if (system_rev == 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 0);
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 0);
+		} else {
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 0);
+		}
+	cp_usb_state = 0;
+	}
+#endif
 
 #ifdef CONFIG_USBHUB_USB3803
 	/* setting usb hub in default mode (standby) */
@@ -1421,11 +1720,6 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	if (mdata->jig_uart_cb)
 		mdata->jig_uart_cb(UART_PATH_AP);
 #endif
-	if (mdata->is_mhl_attached && mdata->is_mhl_attached()
-	    && info->cable_type == CABLE_TYPE_MHL_MUIC) {
-		dev_info(info->dev, "%s: MHL attached. Do Nothing\n", __func__);
-		return 0;
-	}
 
 	switch (info->cable_type) {
 	case CABLE_TYPE_OTG_MUIC:
@@ -1438,6 +1732,10 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	case CABLE_TYPE_USB_MUIC:
 	case CABLE_TYPE_JIG_USB_OFF_MUIC:
 	case CABLE_TYPE_JIG_USB_ON_MUIC:
+#ifdef CONFIG_EXTCON
+		if (info->edev)
+			extcon_set_cable_state(info->edev, "USB", false);
+#endif
 		dev_info(info->dev, "%s: USB(0x%x)\n", __func__,
 			 info->cable_type);
 		prev_ct = info->cable_type;
@@ -1482,6 +1780,10 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 			mdata->cardock_cb(MAX77693_MUIC_DETACHED);
 		break;
 	case CABLE_TYPE_TA_MUIC:
+#ifdef CONFIG_EXTCON
+		if (info->edev)
+			extcon_set_cable_state(info->edev, "TA", false);
+#endif
 		dev_info(info->dev, "%s: TA\n", __func__);
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
 		ret = max77693_muic_set_charging_type(info, false);
@@ -1495,6 +1797,16 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 	case CABLE_TYPE_JIG_UART_OFF_MUIC:
 		dev_info(info->dev, "%s: JIG UART/BOOTOFF\n", __func__);
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
+		break;
+	case CABLE_TYPE_SMARTDOCK_MUIC:
+		dev_info(info->dev, "%s: SMARTDOCK\n", __func__);
+		info->cable_type = CABLE_TYPE_NONE_MUIC;
+		if (mdata->usb_cb && info->is_usb_ready)
+			mdata->usb_cb(USB_POWERED_HOST_DETACHED);
+		ret = max77693_muic_set_charging_type(info, false);
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_DETACHED);
+		max77693_muic_set_charging_type(info, false);
 		break;
 	case CABLE_TYPE_JIG_UART_OFF_VB_MUIC:
 		dev_info(info->dev, "%s: JIG UART/OFF/VB\n", __func__);
@@ -1510,6 +1822,10 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 		}
 		dev_info(info->dev, "%s: MHL\n", __func__);
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
+		max77693_muic_set_charging_type(info, false);
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_DETACHED);
+
 		break;
 	case CABLE_TYPE_MHL_VB_MUIC:
 		if (irq == info->irq_adc || irq == info->irq_chgtype) {
@@ -1521,10 +1837,8 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 		info->cable_type = CABLE_TYPE_NONE_MUIC;
 		max77693_muic_set_charging_type(info, false);
 
-		if (mdata->is_mhl_attached && mdata->is_mhl_attached()) {
-			if (mdata->mhl_cb && info->is_mhl_ready)
-				mdata->mhl_cb(MAX77693_MUIC_DETACHED);
-		}
+		if (mdata->mhl_cb && info->is_mhl_ready)
+			mdata->mhl_cb(MAX77693_MUIC_DETACHED);
 		break;
 	case CABLE_TYPE_UNKNOWN_MUIC:
 		dev_info(info->dev, "%s: UNKNOWN\n", __func__);
@@ -1542,6 +1856,9 @@ static int max77693_muic_handle_detach(struct max77693_muic_info *info, int irq)
 
 	/* jig state clear */
 	mdata->jig_state(false);
+#if defined(CONFIG_SEC_MODEM_M0_TD)
+	gpio_set_value(GPIO_AP_CP_INT1, GPIO_LEVEL_LOW);
+#endif
 	return ret;
 }
 
@@ -1555,7 +1872,7 @@ static void max77693_muic_detect_dev(struct max77693_muic_info *info, int irq)
 	u8 cntl1_val;
 
 	ret = max77693_read_reg(client, MAX77693_MUIC_REG_CTRL1, &cntl1_val);
-	dev_info(info->dev, "func:%s CONTROL1:%d\n", __func__, cntl1_val);
+	dev_info(info->dev, "func:%s CONTROL1:%x\n", __func__, cntl1_val);
 
 	ret = max77693_bulk_read(client, MAX77693_MUIC_REG_STATUS1, 2, status);
 	dev_info(info->dev, "func:%s irq:%d ret:%d\n", __func__, irq, ret);
@@ -1632,7 +1949,7 @@ static int max77693_muic_irq_init(struct max77693_muic_info *info)
 	u8 val;
 
 	dev_info(info->dev, "func:%s\n", __func__);
-	dev_info(info->dev, "%s: system_rev=%d\n", __func__, system_rev);
+	dev_info(info->dev, "%s: system_rev=%x\n", __func__, system_rev);
 
 	/* INTMASK1  3:ADC1K 2:ADCErr 1:ADCLow 0:ADC */
 	/* INTMASK2  0:Chgtype */
@@ -1720,6 +2037,9 @@ static void max77693_muic_usb_detect(struct work_struct *work)
 			case CABLE_TYPE_OTG_MUIC:
 				mdata->usb_cb(USB_OTGHOST_ATTACHED);
 				break;
+			case CABLE_TYPE_SMARTDOCK_MUIC:
+				mdata->usb_cb(USB_POWERED_HOST_ATTACHED);
+				break;
 			default:
 				break;
 			}
@@ -1800,6 +2120,22 @@ int max77693_muic_get_status1_adc1k_value(void)
 	return adc1k;
 }
 
+int max77693_muic_get_status1_adc_value(void)
+{
+	u8 adc;
+	int ret;
+
+	ret = max77693_read_reg(gInfo->muic,
+		MAX77693_MUIC_REG_STATUS1, &adc);
+	if (ret) {
+		dev_err(gInfo->dev, "%s: fail to read muic reg(%d)\n",
+			__func__, ret);
+		return -EINVAL;
+	}
+
+	return adc & STATUS1_ADC_MASK;
+}
+
 void max77693_update_jig_state(struct max77693_muic_info *info)
 {
 	struct i2c_client *client = info->muic;
@@ -1838,9 +2174,14 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	int ret;
 	pr_info("func:%s\n", __func__);
 	info = kzalloc(sizeof(struct max77693_muic_info), GFP_KERNEL);
+	if (!info) {
+		dev_err(&pdev->dev, "%s: failed to allocate info\n", __func__);
+		ret = -ENOMEM;
+		goto err_return;
+	}
 	input = input_allocate_device();
-	if (!info || !input) {
-		dev_err(&pdev->dev, "%s: failed to allocate state\n", __func__);
+	if (!input) {
+		dev_err(&pdev->dev, "%s: failed to allocate input\n", __func__);
 		ret = -ENOMEM;
 		goto err_kfree;
 	}
@@ -1880,6 +2221,9 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 
 	input_set_capability(input, EV_KEY, KEY_VOLUMEUP);
 	input_set_capability(input, EV_KEY, KEY_VOLUMEDOWN);
+	input_set_capability(input, EV_KEY, KEY_PLAYPAUSE);
+	input_set_capability(input, EV_KEY, KEY_PREVIOUSSONG);
+	input_set_capability(input, EV_KEY, KEY_NEXTSONG);
 
 	ret = input_register_device(input);
 	if (ret) {
@@ -1921,24 +2265,21 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	} else if (max77693->pmic_rev >= MAX77693_REV_PASS2) {
 		/*PASS2 */
 		int switch_sel = get_switch_sel();
-		if (switch_sel & 0x1)
+		if (switch_sel & MAX77693_SWITCH_SEL_1st_BIT_USB)
 			info->muic_data->sw_path = AP_USB_MODE;
 		else
 			info->muic_data->sw_path = CP_USB_MODE;
-		if (switch_sel & 0x2)
+		if (switch_sel & MAX77693_SWITCH_SEL_2nd_BIT_UART)
 			info->muic_data->uart_path = UART_PATH_AP;
 		else {
 			info->muic_data->uart_path = UART_PATH_CP;
 #ifdef CONFIG_LTE_VIA_SWITCH
-			if (switch_sel & 0x3)
-				info->muic_data->uart_path = UART_PATH_CP;
-			else
+			if (switch_sel & MAX77693_SWITCH_SEL_3rd_BIT_LTE_UART)
 				info->muic_data->uart_path = UART_PATH_LTE;
 #endif
 		}
-		pr_info("%s: switch_sel: %d\n", __func__, switch_sel);
+		pr_info("%s: switch_sel: %x\n", __func__, switch_sel);
 	}
-
 	/* create sysfs group */
 	ret = sysfs_create_group(&switch_dev->kobj, &max77693_muic_group);
 	dev_set_drvdata(switch_dev, info);
@@ -1975,6 +2316,10 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&info->mhl_work, max77693_muic_mhl_detect);
 	schedule_delayed_work(&info->mhl_work, msecs_to_jiffies(25000));
 
+#ifdef CONFIG_EXTCON
+	info->edev = extcon_get_extcon_dev("usb-connector");
+#endif
+
 	return 0;
 
  fail:
@@ -1989,9 +2334,10 @@ static int __devinit max77693_muic_probe(struct platform_device *pdev)
 	mutex_destroy(&info->mutex);
  err_input:
 	platform_set_drvdata(pdev, NULL);
- err_kfree:
 	input_free_device(input);
+ err_kfree:
 	kfree(info);
+ err_return:
 	return ret;
 }
 

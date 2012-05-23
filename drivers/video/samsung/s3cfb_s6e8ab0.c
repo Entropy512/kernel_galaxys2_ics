@@ -195,6 +195,7 @@ read_retry:
 	return ret;
 }
 
+#if 0
 static int get_backlight_level_from_brightness(int brightness)
 {
 	int backlightlevel;
@@ -287,6 +288,7 @@ static int get_backlight_level_from_brightness(int brightness)
 	}
 	return backlightlevel;
 }
+#endif
 
 static int s6e8ax0_gamma_ctl(struct lcd_info *lcd)
 {
@@ -315,7 +317,7 @@ static int s6e8ax0_set_acl(struct lcd_info *lcd)
 				dev_dbg(&lcd->ld->dev, "%s : cur_acl=%d, acl_on\n", __func__, lcd->cur_acl);
 		}
 		switch (lcd->bl) {
-		case 0 ... 1: /* 30cd ~ 40cd */
+		case GAMMA_30CD ... GAMMA_40CD: /* 30cd ~ 40cd */
 			if (lcd->cur_acl != 0) {
 				s6e8ax0_write(lcd, SEQ_ACL_OFF, ARRAY_SIZE(SEQ_ACL_OFF));
 				lcd->cur_acl = 0;
@@ -464,9 +466,8 @@ err_alloc_elvss:
 		kfree(lcd->elvss_table[i-1]);
 		i--;
 	}
-err_alloc_elvss_table:
 	kfree(lcd->elvss_table);
-
+err_alloc_elvss_table:
 	return ret;
 }
 
@@ -505,9 +506,8 @@ err_alloc_gamma:
 		kfree(lcd->gamma_table[i-1]);
 		i--;
 	}
-err_alloc_gamma_table:
 	kfree(lcd->gamma_table);
-
+err_alloc_gamma_table:
 	return ret;
 }
 #endif
@@ -521,7 +521,9 @@ static int update_brightness(struct lcd_info *lcd, u8 force)
 
 	brightness = lcd->bd->props.brightness;
 
-	lcd->bl = get_backlight_level_from_brightness(brightness);
+	lcd->bl = (brightness - candela_table[0]) / 10;
+
+	lcd->bl = (lcd->bl >= ARRAY_SIZE(candela_table)) ? 0 : lcd->bl;
 
 	if ((force) || ((lcd->ldi_enable) && (lcd->current_bl != lcd->bl))) {
 
@@ -695,7 +697,9 @@ static int s6e8ax0_set_brightness(struct backlight_device *bd)
 
 static int s6e8ax0_get_brightness(struct backlight_device *bd)
 {
-	return bd->props.brightness;
+	struct lcd_info *lcd = bl_get_data(bd);
+
+	return candela_table[lcd->bl];
 }
 
 static struct lcd_ops s6e8ax0_lcd_ops = {
@@ -793,8 +797,6 @@ void s6e8ax0_late_resume(void)
 	dev_info(&lcd->ld->dev, "-%s\n", __func__);
 
 	set_dsim_lcd_enabled();
-
-	s5p_dsim_frame_done_interrupt_enable(1);
 
 	return ;
 }
@@ -936,7 +938,8 @@ static int s6e8ax0_probe(struct device *dev)
 
 	if (lcd->connected) {
 		ret = init_gamma_table(lcd);
-		ret += init_elvss_table(lcd);
+		if (lcd->support_elvss)
+			ret += init_elvss_table(lcd);
 
 		if (ret) {
 			lcd->gamma_table = (unsigned char **)gamma22_table_sm2;

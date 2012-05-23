@@ -180,6 +180,13 @@ config LCD_S6E8AA0
 	  If you have an S6E8AA0 MIPI AMOLED LCD Panel, say Y to enable its
 	  LCD control driver.
 
+config LCD_S6E39A0X02
+	tristate "S6E39A0X02 MIPI AMOLED LCD Driver"
+	depends on S5P_MIPI_DSI2 && BACKLIGHT_CLASS_DEVICE
+	default n
+	help
+	  If you have an S6E39A0X02 MIPI AMOLED LCD Panel, say Y to enable its
+	  LCD control driver.
 endif # LCD_CLASS_DEVICE
 
 #

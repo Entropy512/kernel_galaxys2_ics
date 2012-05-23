@@ -634,6 +634,20 @@ config S3C_MEM
 
 	  If unsure, say Y.
 
+config S3C_MEM_CMA_ALLOC
+	bool "Support for /dev/s3c-mem with CMA feature"
+	depends on S3C_MEM && SLP
+
+config VIDEO_SAMSUNG_MEMSIZE_S3C_MEM_CMA
+	int "Memory size in kbytes for S3C_MEM_CMA"
+	depends on S3C_MEM_CMA_ALLOC
+	default "24576"
+
+config VIDEO_SAMSUNG_SLOTSIZE_S3C_MEM_CMA
+	int "Slot size in kbytes for S3C_MEM_CMA slot"
+	depends on S3C_MEM_CMA_ALLOC
+	default "1024"
+
 config EXYNOS_MEM
 	bool "Support for /dev/exynos-mem"
 	default y

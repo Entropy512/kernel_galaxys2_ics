@@ -170,7 +170,7 @@ void spi_main_send_signal(enum SPI_MAIN_MSG_T spi_sigs)
 	spi_wq = spi_os_malloc(sizeof(struct spi_work));
 	spi_wq->signal_code = spi_sigs;
 	INIT_WORK(&spi_wq->work, spi_main_process);
-	queue_work(suspend_work_queue, (struct work_struct *)spi_wq);
+	queue_work(ipc_spi_wq, (struct work_struct *)spi_wq);
 }
 
 
@@ -183,7 +183,7 @@ void spi_main_send_signalfront(enum SPI_MAIN_MSG_T spi_sigs)
 	spi_wq = spi_os_malloc(sizeof(struct spi_work));
 	spi_wq->signal_code = spi_sigs;
 	INIT_WORK(&spi_wq->work, spi_main_process);
-	queue_work_front(suspend_work_queue, (struct work_struct *)spi_wq);
+	queue_work_front(ipc_spi_wq, (struct work_struct *)spi_wq);
 }
 
 
@@ -287,16 +287,19 @@ static void _start_packet_tx(void)
 static void _start_packet_tx_send(void)
 {
 	char *spi_packet_buf = NULL;
+	char *spi_sync_buf = NULL;
 
 	/* change state SPI_MAIN_STATE_TX_WAIT to SPI_MAIN_STATE_TX_SENDING */
 	spi_main_state = SPI_MAIN_STATE_TX_SENDING;
 
-
 	spi_packet_buf = gspi_data_packet_buf;
+	spi_sync_buf = gspi_data_sync_buf;
+
 	spi_os_memset(spi_packet_buf, 0, SPI_DEV_MAX_PACKET_SIZE);
+	spi_os_memset(spi_sync_buf, 0, SPI_DEV_MAX_PACKET_SIZE);
 
 	spi_data_prepare_tx_packet(spi_packet_buf);
-	if (spi_dev_send((void *)spi_packet_buf,
+	if (spi_dev_send((void *)spi_packet_buf, (void *)spi_sync_buf,
 		SPI_DEV_MAX_PACKET_SIZE) != 0) {
 		/* TODO: save failed packet */
 		/* back data to each queue */
@@ -321,6 +324,7 @@ static void _start_packet_tx_send(void)
 static void _start_packet_receive(void)
 {
 	char *spi_packet_buf = NULL;
+	char *spi_sync_buf = NULL;
 	struct spi_data_packet_header	spi_receive_packet_header = {0, };
 	int i = 0;
 
@@ -328,6 +332,9 @@ static void _start_packet_receive(void)
 		return;
 
 	if (spi_dev_get_gpio(spi_dev_gpio_srdy) == SPI_DEV_GPIOLEVEL_LOW)
+		return;
+
+	if (get_console_suspended())
 		return;
 
 	spi_main_state = SPI_MAIN_STATE_RX_WAIT;
@@ -370,9 +377,12 @@ static void _start_packet_receive(void)
 		return;
 
 	spi_packet_buf = gspi_data_packet_buf;
-	spi_os_memset(spi_packet_buf, 0, SPI_DEV_MAX_PACKET_SIZE);
+	spi_sync_buf = gspi_data_sync_buf;
 
-	if (spi_dev_receive((void *)spi_packet_buf,
+	spi_os_memset(spi_packet_buf, 0, SPI_DEV_MAX_PACKET_SIZE);
+	spi_os_memset(spi_sync_buf, 0, SPI_DEV_MAX_PACKET_SIZE);
+
+	if (spi_dev_receive((void *)spi_sync_buf, (void *)spi_packet_buf,
 		SPI_DEV_MAX_PACKET_SIZE) == 0) {
 		/* parsing SPI packet */
 		spi_os_memcpy(&spi_receive_packet_header, spi_packet_buf,
@@ -501,7 +511,7 @@ void spi_main(unsigned long argc, void *argv)
 	spi_dev_set_gpio(spi_dev_gpio_submrdy, SPI_DEV_GPIOLEVEL_HIGH);
 
 	do {
-		spi_os_sleep(20);
+		spi_os_sleep(30);
 	} while (spi_dev_get_gpio(spi_dev_gpio_subsrdy) ==
 		SPI_DEV_GPIOLEVEL_LOW);
 
@@ -528,7 +538,7 @@ void spi_set_restart(void)
 
 	spi_is_restart = 1;
 
-	flush_workqueue(suspend_work_queue);
+	flush_workqueue(ipc_spi_wq);
 
 	spi_data_queue_destroy();
 

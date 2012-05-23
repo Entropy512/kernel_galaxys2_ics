@@ -190,14 +190,14 @@ void __init samsung_gpiolib_add_4bit(struct s3c_gpio_chip *chip)
 {
 	chip->chip.direction_input = samsung_gpiolib_4bit_input;
 	chip->chip.direction_output = samsung_gpiolib_4bit_output;
-	chip->pm = __gpio_pm(&s3c_gpio_pm_4bit);
+	chip->pm = chip->pm ?: __gpio_pm(&s3c_gpio_pm_4bit);
 }
 
 void __init samsung_gpiolib_add_4bit2(struct s3c_gpio_chip *chip)
 {
 	chip->chip.direction_input = samsung_gpiolib_4bit2_input;
 	chip->chip.direction_output = samsung_gpiolib_4bit2_output;
-	chip->pm = __gpio_pm(&s3c_gpio_pm_4bit);
+	chip->pm = chip->pm ?: __gpio_pm(&s3c_gpio_pm_4bit);
 }
 
 void __init samsung_gpiolib_add_4bit_chips(struct s3c_gpio_chip *chip,

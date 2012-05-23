@@ -781,6 +781,10 @@ static void s3c64xx_spi_work(struct work_struct *work)
 	while (!acquire_dma(sdd))
 		msleep(10);
 
+	/* Enable the clock */
+	clk_enable(sdd->src_clk);
+	clk_enable(sdd->clk);
+
 	spin_lock_irqsave(&sdd->lock, flags);
 
 	while (!list_empty(&sdd->queue)
@@ -805,6 +809,10 @@ static void s3c64xx_spi_work(struct work_struct *work)
 	}
 
 	spin_unlock_irqrestore(&sdd->lock, flags);
+
+	/* Disable the clock */
+	clk_disable(sdd->src_clk);
+	clk_disable(sdd->clk);
 
 	/* Free DMA channels */
 	s3c2410_dma_free(sdd->tx_dmach, &s3c64xx_spi_dma_client);
@@ -1115,6 +1123,9 @@ static int __init s3c64xx_spi_probe(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "\tIOmem=[0x%x-0x%x]\tDMA=[Rx-%d, Tx-%d]\n",
 					mem_res->end, mem_res->start,
 					sdd->rx_dmach, sdd->tx_dmach);
+	/* Disable the clock */
+	clk_disable(sdd->src_clk);
+	clk_disable(sdd->clk);
 
 	return 0;
 

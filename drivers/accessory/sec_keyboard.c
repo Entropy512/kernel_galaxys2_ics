@@ -21,6 +21,15 @@ static void sec_keyboard_power(struct work_struct *work)
 	}
 }
 
+static void forced_wakeup(struct sec_keyboard_drvdata *data)
+{
+	input_report_key(data->input_dev,
+		KEY_WAKEUP, 1);
+	input_report_key(data->input_dev,
+		KEY_WAKEUP, 0);
+	input_sync(data->input_dev);
+}
+
 static void sec_keyboard_remapkey(struct work_struct *work)
 {
 	unsigned int keycode = 0;
@@ -155,6 +164,7 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 			if (UNKOWN_KEYLAYOUT != data->pre_kl) {
 				data->kl = data->pre_kl;
 				data->acc_power(1, true);
+				forced_wakeup(data);
 				printk(KERN_DEBUG "[Keyboard] kl : %d\n",
 					data->pre_kl);
 				return 1;
@@ -187,9 +197,10 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 		}
 	}
 
-	if (data->dockconnected)
+	if (data->dockconnected) {
+		forced_wakeup(data);
 		return 1;
-	else	{
+	} else {
 		if (data->pre_connected) {
 			data->dockconnected = false;
 			schedule_delayed_work(&data->power_dwork, HZ/2);
@@ -301,6 +312,11 @@ static int __devinit sec_keyboard_probe(struct platform_device *pdev)
 	struct sec_keyboard_drvdata *ddata;
 	struct input_dev *input;
 	int i, error;
+
+	if (pdata == NULL) {
+		printk(KERN_ERR "%s: no pdata\n", __func__);
+		return -ENODEV;
+	}
 
 	ddata = kzalloc(sizeof(struct sec_keyboard_drvdata), GFP_KERNEL);
 	if (NULL == ddata) {
@@ -445,15 +461,11 @@ static int sec_keyboard_resume(struct platform_device *pdev)
 {
 	struct sec_keyboard_platform_data *pdata = pdev->dev.platform_data;
 	struct sec_keyboard_drvdata *data = platform_get_drvdata(pdev);
-	int keycode = 0;
-	if (pdata->wakeup_key)
-		keycode = pdata->wakeup_key();
-
-	if (KEY_WAKEUP == keycode) {
-		input_report_key(data->input_dev, keycode, 1);
-		input_report_key(data->input_dev, keycode, 0);
-		input_sync(data->input_dev);
+	if (pdata->wakeup_key) {
+		if (KEY_WAKEUP == pdata->wakeup_key())
+			forced_wakeup(data);
 	}
+
 	return 0;
 }
 #endif

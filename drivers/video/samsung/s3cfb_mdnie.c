@@ -70,28 +70,24 @@ int s3c_mdnie_set_size(unsigned int hsize, unsigned int vsize)
 #else
 int s3c_mdnie_mask(void)
 {
-	unsigned int mask;
-	return 0;
 #if 0
+	unsigned int mask;
 	mask = s3c_mdnie_readl(S3C_MDNIE_rR1);
 	mask |= S3C_MDNIE_REG_MASK;
 	s3c_mdnie_writel(S3C_MDNIE_rR1, mask);
-
-	return 0;
 #endif
+	return 0;
 }
 
 int s3c_mdnie_unmask(void)
 {
-	unsigned int mask;
-	return 0;
 #if 0
+	unsigned int mask;
 	mask = s3c_mdnie_readl(S3C_MDNIE_rR1);
 	mask &= ~S3C_MDNIE_REG_MASK;
 	s3c_mdnie_writel(S3C_MDNIE_rR1, mask);
-
-	return 0;
 #endif
+	return 0;
 }
 
 int s3c_mdnie_set_size(unsigned int hsize, unsigned int vsize)

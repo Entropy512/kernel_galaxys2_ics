@@ -1173,6 +1173,8 @@ static inline void dbs_timer_init(struct cpu_dbs_info_s *dbs_info)
 static inline void dbs_timer_exit(struct cpu_dbs_info_s *dbs_info)
 {
 	cancel_delayed_work_sync(&dbs_info->work);
+	cancel_work_sync(&dbs_info->up_work);
+	cancel_work_sync(&dbs_info->down_work);
 }
 
 static int pm_notifier_call(struct notifier_block *this,
@@ -1295,7 +1297,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		}
 		mutex_unlock(&dbs_mutex);
 
-		register_pm_notifier(&pm_notifier);
 		register_reboot_notifier(&reboot_notifier);
 #ifdef CONFIG_HAS_EARLYSUSPEND
 		register_early_suspend(&early_suspend);
@@ -1315,7 +1316,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		unregister_early_suspend(&early_suspend);
 #endif
 		unregister_reboot_notifier(&reboot_notifier);
-		unregister_pm_notifier(&pm_notifier);
 
 		dbs_enable--;
 		mutex_unlock(&dbs_mutex);

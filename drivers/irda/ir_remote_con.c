@@ -22,6 +22,7 @@
 #define MICRO_SEC 1000000
 
 static struct regulator	*regulator;
+static int regulator_status = -1;
 
 struct ir_remocon_data {
 	struct mutex mutex;
@@ -58,6 +59,7 @@ static void ir_remocon_send(struct ir_remocon_data *data)
 			goto out;
 
 		regulator_enable(regulator);
+		regulator_status = 1;
 	}
 
 	if (data->pwr_en != -1)
@@ -67,7 +69,7 @@ static void ir_remocon_send(struct ir_remocon_data *data)
 
 	if (cpu_lv == -1) {
 		if (data->pwr_en == -1)
-			exynos_cpufreq_get_level(500000, &cpu_lv);
+			exynos_cpufreq_get_level(800000, &cpu_lv);
 		else
 			exynos_cpufreq_get_level(800000, &cpu_lv);
 	}
@@ -81,7 +83,7 @@ static void ir_remocon_send(struct ir_remocon_data *data)
 		pr_err("%s: fail to lock cpufreq(limit)\n", __func__);
 
 	if (data->pwr_en == -1)
-		period  = (MICRO_SEC/data->signal[0])-2;
+		period  = (MICRO_SEC/data->signal[0])-3;
 	else
 		period  = (MICRO_SEC/data->signal[0])-1;
 
@@ -134,9 +136,11 @@ static void ir_remocon_send(struct ir_remocon_data *data)
 	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 0);
 
-	if (data->pwr_en == -1) {
+	if ((data->pwr_en == -1) && (regulator_status == 1)) {
 		regulator_force_disable(regulator);
 		regulator_put(regulator);
+
+		regulator_status = -1;
 	}
 out: ;
 }
@@ -153,6 +157,7 @@ static void ir_remocon_send_test(struct ir_remocon_data *data)
 			goto out;
 
 		regulator_enable(regulator);
+		regulator_status = 1;
 	}
 
 	if (data->pwr_en != -1)
@@ -175,9 +180,11 @@ static void ir_remocon_send_test(struct ir_remocon_data *data)
 	if (data->pwr_en != -1)
 		gpio_direction_output(data->pwr_en, 0);
 
-	if (data->pwr_en == -1) {
+	if ((data->pwr_en == -1) && (regulator_status == 1)) {
 		regulator_force_disable(regulator);
 		regulator_put(regulator);
+
+		regulator_status = -1;
 	}
 out: ;
 }
@@ -284,7 +291,7 @@ static int __devinit ir_remocon_probe(struct platform_device *pdev)
 		error = -ENOMEM;
 		goto err_free_mem;
 	}
-#if defined(CONFIG_MACH_P2) || defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P2) || defined(CONFIG_MACH_P4NOTE)
 	data->gpio = GPIO_IRDA_CONTROL;
 	data->pwr_en = -1;
 #endif

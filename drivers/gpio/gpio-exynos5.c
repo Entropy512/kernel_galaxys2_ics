@@ -166,6 +166,15 @@ static struct s3c_gpio_chip exynos5_gpio_common_4bit[] = {
 			.label	= "GPC3",
 		},
 	}, {
+		.base   = (S5P_VA_GPIO1 + 0x2E0),
+		.eint_offset = 0x34,
+		.group	= 22,
+		.chip	= {
+			.base	= EXYNOS5_GPC4(0),
+			.ngpio	= EXYNOS5_GPIO_C4_NR,
+			.label	= "GPC4",
+		},
+	}, {
 		.base   = (S5P_VA_GPIO1 + 0x160),
 		.eint_offset = 0x2C,
 		.group	= 11,
@@ -611,23 +620,19 @@ static __init int exynos5_gpiolib_init(void)
 
 	samsung_gpiolib_add_4bit_chips(exynos5_gpio_common_4bit, nr_chips);
 
-	/* Only 5210 GPIO part */
-	if (soc_is_exynos5210()) {
-		chip = exynos5210_gpio_4bit;
-		nr_chips = ARRAY_SIZE(exynos5210_gpio_4bit);
-
-		for (i = 0; i < nr_chips; i++, chip++) {
-			if (chip->config == NULL)
-				chip->config = &gpio_cfg;
-			if (chip->base == NULL)
-				pr_err("No allocation of base address for [common gpio]");
-		}
-
-		samsung_gpiolib_add_4bit_chips(exynos5210_gpio_4bit, nr_chips);
-	}
-
+#if defined(CONFIG_CPU_EXYNOS5250) && defined(CONFIG_S5P_GPIO_INT)
 	s5p_register_gpioint_bank(IRQ_GPIO_XA, 0, IRQ_GPIO1_NR_GROUPS);
-	s5p_register_gpioint_bank(IRQ_GPIO_XB, IRQ_GPIO1_NR_GROUPS, IRQ_GPIO2_NR_GROUPS);
+	s5p_register_gpioint_bank(IRQ_GPIO_XB,
+				  IRQ_GPIO1_NR_GROUPS,
+				  IRQ_GPIO2_NR_GROUPS);
+	s5p_register_gpioint_bank(IRQ_GPIO_C2C,
+				  IRQ_GPIO1_NR_GROUPS + IRQ_GPIO2_NR_GROUPS,
+				  IRQ_GPIO3_NR_GROUPS);
+	s5p_register_gpioint_bank(IRQ_GPIO,
+				  IRQ_GPIO1_NR_GROUPS + IRQ_GPIO2_NR_GROUPS +
+				  IRQ_GPIO3_NR_GROUPS,
+				  IRQ_GPIO4_NR_GROUPS);
+#endif
 
 	return 0;
 }
