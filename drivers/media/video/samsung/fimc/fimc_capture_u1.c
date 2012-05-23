@@ -15,7 +15,8 @@
 #include <linux/string.h>
 #include <linux/platform_device.h>
 #include <linux/videodev2.h>
-#include <linux/videodev2_samsung.h>
+#include <linux/videodev2_exynos_media.h>
+#include <linux/videodev2_exynos_camera.h>
 #include <linux/clk.h>
 #include <linux/mm.h>
 #include <linux/io.h>
@@ -762,7 +763,12 @@ int fimc_enum_fmt_vid_capture(struct file *file, void *fh,
 	struct fimc_control *ctrl = ((struct fimc_prv_data *)fh)->ctrl;
 	int i = f->index;
 
-	printk(KERN_INFO "%s++\n", __func__);
+	/* printk(KERN_INFO "%s++\n", __func__); */
+
+	if (i >= ARRAY_SIZE(capture_fmts)) {
+		fimc_err("%s: There is no support format index %d\n", __func__, i);
+		return -EINVAL;
+	}
 
 	mutex_lock(&ctrl->v4l2_lock);
 
@@ -771,7 +777,7 @@ int fimc_enum_fmt_vid_capture(struct file *file, void *fh,
 
 	mutex_unlock(&ctrl->v4l2_lock);
 
-	printk(KERN_INFO "%s--\n", __func__);
+	/* printk(KERN_INFO "%s--\n", __func__); */
 	return 0;
 }
 
@@ -882,6 +888,9 @@ static int fimc_calc_frame_ratio(struct fimc_control *ctrl,
 		cap->mbus_fmt.width = cap->sensor_output_width;
 		cap->mbus_fmt.height = cap->sensor_output_height;
 		cap->sensor_output_width = cap->sensor_output_height = 0;
+		pr_info("fimc: forced sensor output size: (%d, %d) to (%d, %d)\n",
+			cap->mbus_fmt.width, cap->mbus_fmt.height,
+			cap->fmt.width, cap->fmt.height);
 	} else if (cap->vt_mode) {
 		cap->mbus_fmt.width = 640;
 		cap->mbus_fmt.height = 480;
@@ -895,25 +904,37 @@ static int fimc_check_hd_mode(struct fimc_control *ctrl, struct v4l2_format *f)
 {
 	struct fimc_global *fimc = get_fimc_dev();
 	struct fimc_capinfo *cap = ctrl->cap;
+	u32 hd_mode = 0;
+	int ret = -EINVAL;
 
 	if (!cap->movie_mode || (fimc->active_camera != 0))
 		return 0;
 
-	if (!cap->video_width) {
-		cap->video_width = f->fmt.pix.width;
-		return 0;
-	}
+	if (f->fmt.pix.width == 1280 || cap->sensor_output_width == 1280)
+		hd_mode = 1;
 
-	printk(KERN_DEBUG "%s: cap->video_width=%d, new width=%d\n",
-			__func__, cap->video_width, f->fmt.pix.width);
+	printk(KERN_DEBUG "%s:movie_mode=%d, hd_mode=%d\n",
+			__func__, cap->movie_mode, hd_mode);
 
-	if (((cap->video_width == 1280) && (f->fmt.pix.width != 1280)) ||
-	    ((cap->video_width != 1280) && (f->fmt.pix.width == 1280))) {
-		fimc_warn("%s: mode change, power down\n", __func__);
+	if (((cap->movie_mode == 2) && !hd_mode) ||
+	    ((cap->movie_mode == 1) && hd_mode)) {
+		fimc_warn("%s: mode change, power(%d) down\n",
+			__func__, ctrl->cam->initialized);
+		cap->movie_mode = hd_mode ? 2 : 1;
+
 		if (ctrl->cam->initialized) {
-			v4l2_subdev_call(ctrl->cam->sd, core, reset, 0);
-			if (ctrl->cam->cam_power)
-				ctrl->cam->cam_power(0);
+			struct v4l2_control c;
+
+			subdev_call(ctrl, core, reset, 0);
+			c.id = V4L2_CID_CAMERA_SENSOR_MODE;
+			c.value = cap->movie_mode;
+			subdev_call(ctrl, core, s_ctrl, &c);
+
+			if (ctrl->cam->cam_power) {
+				ret = ctrl->cam->cam_power(0);
+				if (unlikely(ret))
+					return ret;
+			}
 
 			/* shutdown the MCLK */
 			clk_disable(ctrl->cam->clk);
@@ -922,8 +943,6 @@ static int fimc_check_hd_mode(struct fimc_control *ctrl, struct v4l2_format *f)
 			ctrl->cam->initialized = 0;
 		}
 	}
-
-	cap->video_width = f->fmt.pix.width;
 
 	return 0;
 }
@@ -946,11 +965,7 @@ int fimc_s_fmt_vid_capture(struct file *file, void *fh, struct v4l2_format *f)
 
 	/* rotaton, flip, dtp_mode, movie_mode and vt_mode,
 	 * sensor_output_width,height should be maintained.(by TN) */
-#if defined(CONFIG_MACH_PX) && defined(CONFIG_VIDEO_HD_SUPPORT)
-	memset(cap, 0, sizeof(*cap) - sizeof(u32) * 8);
-#else
 	memset(cap, 0, sizeof(*cap) - sizeof(u32) * 7);
-#endif
 
 	mutex_lock(&ctrl->v4l2_lock);
 
@@ -966,10 +981,20 @@ int fimc_s_fmt_vid_capture(struct file *file, void *fh, struct v4l2_format *f)
 		if (cap->movie_mode || cap->vt_mode ||
 		    cap->fmt.priv == V4L2_PIX_FMT_MODE_HDR) {
 #if defined(CONFIG_MACH_PX) && defined(CONFIG_VIDEO_HD_SUPPORT)
-			fimc_check_hd_mode(ctrl, f);
+			ret = fimc_check_hd_mode(ctrl, f);
+			if (unlikely(ret)) {
+				fimc_err("%s: error, check_hd_mode\n",
+					__func__);
+				return ret;
+			}
 #endif
 			fimc_calc_frame_ratio(ctrl, cap);
 		}
+#if defined(CONFIG_MACH_U1_BD) || defined(CONFIG_MACH_Q1_BD)
+		else {
+			fimc_calc_frame_ratio(ctrl, cap);
+		}
+#endif
 
 		if (!(mbus_fmt->width && mbus_fmt->height)) {
 			mbus_fmt->width = cap->fmt.width;
@@ -1554,11 +1579,8 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 #if defined(CONFIG_VIDEO_HD_SUPPORT)
 		printk(KERN_INFO "%s: CAMERA_SENSOR_MODE=%d\n",
 				__func__, c->value);
-#ifdef CONFIG_VIDEO_S5K5CCGX_P2
-		if ((fimc->active_camera == 0) && (c->value < 2))
-#endif /* CONFIG_VIDEO_S5K5CCGX_P2 */
-			if (!ctrl->cam->initialized)
-				ret = fimc_init_camera(ctrl);
+		if (!ctrl->cam->initialized)
+			ret = fimc_init_camera(ctrl);
 #endif /* CONFIG_VIDEO_HD_SUPPORT */
 		break;
 
@@ -1606,9 +1628,6 @@ int fimc_s_ctrl_capture(void *fh, struct v4l2_control *c)
 	case V4L2_CID_CAMERA_SENSOR_OUTPUT_SIZE:
 		ctrl->cap->sensor_output_width = (u32)c->value >> 16;
 		ctrl->cap->sensor_output_height = (u32)c->value & 0x0FFFF;
-		printk(KERN_DEBUG "sensor output size: %dx%d\n",
-			ctrl->cap->sensor_output_width,
-			ctrl->cap->sensor_output_height);
 		break;
 
 	default:
@@ -2146,7 +2165,8 @@ int fimc_qbuf_capture(void *fh, struct v4l2_buffer *b)
 					FIMC_FRAMECNT_SEQ_ENABLE);
 			cap->bufs[b->index].state = VIDEOBUF_QUEUED;
 			if (ctrl->status == FIMC_BUFFER_STOP) {
-				printk(KERN_INFO "fimc_qbuf_capture start again\n");
+				printk(KERN_INFO "fimc_qbuf_capture start fimc%d again\n",
+					ctrl->id);
 				fimc_start_capture(ctrl);
 				ctrl->status = FIMC_STREAMON;
 			}

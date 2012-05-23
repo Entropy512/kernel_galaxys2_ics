@@ -28,7 +28,8 @@
 #include <linux/workqueue.h>
 #include <linux/pm_runtime.h>
 #include <media/v4l2-device.h>
-#include <linux/videodev2_samsung.h>
+#include <linux/videodev2_exynos_media.h>
+#include <linux/videodev2_exynos_camera.h>
 #include <linux/delay.h>
 #include <linux/cma.h>
 #include <plat/fimc.h>
@@ -48,12 +49,14 @@ void s3c_fimc_irq_work(struct work_struct *work)
 {
 	struct fimc_control *ctrl = container_of(work, struct fimc_control,
 			work_struct);
-	int ret;
+	int ret, irq_cnt;
 
-	if (ctrl->irq_cnt.counter > 0) {
+	irq_cnt = atomic_read(&ctrl->irq_cnt);
+	if (irq_cnt > 0) {
 		do {
 			ret = atomic_dec_and_test((atomic_t *)&ctrl->irq_cnt);
-			pm_runtime_put_sync(ctrl->dev);
+			if (atomic_read(&ctrl->dev->power.usage_count) > 0)
+				pm_runtime_put_sync(ctrl->dev);
 		} while (ret != 1);
 	}
 }
@@ -136,30 +139,98 @@ static inline u32 fimc_irq_out_single_buf(struct fimc_control *ctrl,
 
 		return wakeup;
 	}
+	ctx->status = FIMC_STREAMON_IDLE;
 
 	/* Attach done buffer to outgoing queue. */
 	ret = fimc_push_outq(ctrl, ctx, ctrl->out->idxs.active.idx);
 	if (ret < 0)
-		fimc_err("Failed: fimc_push_outq\n");
+		fimc_err("%s:Failed: fimc_push_outq\n", __func__);
 
 	/* Detach buffer from incomming queue. */
 	ret = fimc_pop_inq(ctrl, &ctx_num, &next);
 	if (ret == 0) {		/* There is a buffer in incomming queue. */
 		if (ctx_num != ctrl->out->last_ctx) {
-			ctx = &ctrl->out->ctx[ctx_num];
+			struct fimc_buf_set buf_set;	/* destination addr */
+			u32 format, width, height, y_size, c_size, rot;
+			int i, cfg;
+
+
+		    	ctx = &ctrl->out->ctx[ctx_num];
 			ctrl->out->last_ctx = ctx->ctx_num;
 			fimc_outdev_set_ctx_param(ctrl, ctx);
+
+			format = ctx->fbuf.fmt.pixelformat;
+			width = ctx->fbuf.fmt.width;
+			height = ctx->fbuf.fmt.height;
+			y_size = width * height;
+			c_size = y_size >> 2;
+			rot = ctx->rotate;
+
+			memset(&buf_set, 0x00, sizeof(buf_set));
+
+			switch (format) {
+				case V4L2_PIX_FMT_RGB32:
+				case V4L2_PIX_FMT_RGB565:
+				case V4L2_PIX_FMT_YUYV:
+					buf_set.base[FIMC_ADDR_Y] =
+						(dma_addr_t)ctx->fbuf.base;
+					break;
+				case V4L2_PIX_FMT_YUV420:
+					buf_set.base[FIMC_ADDR_Y] =
+						(dma_addr_t)ctx->fbuf.base;
+					buf_set.base[FIMC_ADDR_CB] =
+						buf_set.base[FIMC_ADDR_Y] + y_size;
+					buf_set.base[FIMC_ADDR_CR] =
+						buf_set.base[FIMC_ADDR_CB] + c_size;
+					break;
+				case V4L2_PIX_FMT_NV12:
+				case V4L2_PIX_FMT_NV21:
+					buf_set.base[FIMC_ADDR_Y] =
+						(dma_addr_t)ctx->fbuf.base;
+					buf_set.base[FIMC_ADDR_CB] =
+						buf_set.base[FIMC_ADDR_Y] + y_size;
+					break;
+				case V4L2_PIX_FMT_NV12M:
+					buf_set.base[FIMC_ADDR_Y] = (dma_addr_t)ctx->fbuf.base;
+					buf_set.base[FIMC_ADDR_CB] =
+						ALIGN(buf_set.base[FIMC_ADDR_Y] + y_size, PAGE_SIZE - 1);
+					break;
+				case V4L2_PIX_FMT_NV12T:
+					if (rot == 0 || rot == 180)
+						fimc_get_nv12t_size(width, height, &y_size, &c_size);
+					else
+						fimc_get_nv12t_size(height, width, &y_size, &c_size);
+					buf_set.base[FIMC_ADDR_Y] =
+						(dma_addr_t)ctx->fbuf.base;
+					buf_set.base[FIMC_ADDR_CB] =
+						buf_set.base[FIMC_ADDR_Y] + y_size;
+					break;
+				default:
+					fimc_err("%s: Invalid pixelformt : %d\n", __func__, format);
+					return -EINVAL;
+			}
+			cfg = fimc_hwget_output_buf_sequence(ctrl);
+
+			for (i = 0; i < FIMC_PHYBUFS; i++) {
+				if (check_bit(cfg, i))
+					fimc_hwset_output_address(ctrl, &buf_set, i);
+			}
 		}
 
 		fimc_outdev_set_src_addr(ctrl, ctx->src[next].base);
-		ret = fimc_outdev_start_camif(ctrl);
+		ret = fimc_output_set_dst_addr(ctrl, ctx, next);
 		if (ret < 0)
-			fimc_err("Fail: fimc_start_camif\n");
+			fimc_err("%s:Fail: fimc_output_set_dst_addr\n", __func__);
 
 		ctrl->out->idxs.active.ctx = ctx_num;
 		ctrl->out->idxs.active.idx = next;
+
 		ctx->status = FIMC_STREAMON;
 		ctrl->status = FIMC_STREAMON;
+
+		ret = fimc_outdev_start_camif(ctrl);
+		if (ret < 0)
+			fimc_err("%s:Fail: fimc_start_camif\n", __func__);
 	} else {	/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -176,9 +247,7 @@ static inline u32 fimc_irq_out_single_buf(struct fimc_control *ctrl,
 static inline u32 fimc_irq_out_multi_buf(struct fimc_control *ctrl,
 					 struct fimc_ctx *ctx)
 {
-	struct fimc_buf_set buf_set;	/* destination addr */
-	int ret = -1, ctx_num, next, i;
-	int cfg;
+	int ret = -1, ctx_num, next;
 	u32 wakeup = 1;
 
 	if (ctx->status == FIMC_READY_OFF) {
@@ -191,11 +260,12 @@ static inline u32 fimc_irq_out_multi_buf(struct fimc_control *ctrl,
 
 		return wakeup;
 	}
+	ctx->status = FIMC_STREAMON_IDLE;
 
 	/* Attach done buffer to outgoing queue. */
 	ret = fimc_push_outq(ctrl, ctx, ctrl->out->idxs.active.idx);
 	if (ret < 0)
-		fimc_err("Failed: fimc_push_outq\n");
+		fimc_err("%s:Failed: fimc_push_outq\n", __func__);
 
 	/* Detach buffer from incomming queue. */
 	ret = fimc_pop_inq(ctrl, &ctx_num, &next);
@@ -207,51 +277,19 @@ static inline u32 fimc_irq_out_multi_buf(struct fimc_control *ctrl,
 		}
 
 		fimc_outdev_set_src_addr(ctrl, ctx->src[next].base);
-
-		memset(&buf_set, 0x00, sizeof(buf_set));
-
-		switch (ctx->fbuf.fmt.pixelformat) {
-		case V4L2_PIX_FMT_RGB32:
-			buf_set.base[FIMC_ADDR_Y]
-				= ctx->dst[next].base[FIMC_ADDR_Y];
-			break;
-		case V4L2_PIX_FMT_YUV420:
-			buf_set.base[FIMC_ADDR_Y]
-				= ctx->dst[next].base[FIMC_ADDR_Y];
-			buf_set.base[FIMC_ADDR_CB]
-				= ctx->dst[next].base[FIMC_ADDR_CB];
-			buf_set.base[FIMC_ADDR_CR]
-				= ctx->dst[next].base[FIMC_ADDR_CR];
-			break;
-		case V4L2_PIX_FMT_NV12:		/* fall through */
-		case V4L2_PIX_FMT_NV21:		/* fall through */
-		case V4L2_PIX_FMT_NV12T:
-			buf_set.base[FIMC_ADDR_Y]
-				= ctx->dst[next].base[FIMC_ADDR_Y];
-			buf_set.base[FIMC_ADDR_CB]
-				= ctx->dst[next].base[FIMC_ADDR_CB];
-			break;
-		default:
-			fimc_err("%s: Invalid pixelformt : %d\n",
-				__func__, ctx->fbuf.fmt.pixelformat);
-			return -EINVAL;
-		}
-
-		cfg = fimc_hwget_output_buf_sequence(ctrl);
-
-		for (i = 0; i < FIMC_PHYBUFS; i++) {
-			if (check_bit(cfg, i))
-				fimc_hwset_output_address(ctrl, &buf_set, i);
-		}
-
-		ret = fimc_outdev_start_camif(ctrl);
+		ret = fimc_output_set_dst_addr(ctrl, ctx, next);
 		if (ret < 0)
-			fimc_err("Fail: fimc_start_camif\n");
+			fimc_err("%s:Fail: fimc_output_set_dst_addr\n", __func__);
 
 		ctrl->out->idxs.active.ctx = ctx_num;
 		ctrl->out->idxs.active.idx = next;
 		ctx->status = FIMC_STREAMON;
 		ctrl->status = FIMC_STREAMON;
+
+		ret = fimc_outdev_start_camif(ctrl);
+		if (ret < 0)
+			fimc_err("%s:Fail: fimc_start_camif\n", __func__);
+
 	} else {	/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -325,15 +363,17 @@ static inline u32 fimc_irq_out_dma(struct fimc_control *ctrl,
 			if (check_bit(cfg, i))
 				fimc_hwset_output_address(ctrl, &buf_set, i);
 		}
-		ret = fimc_outdev_start_camif(ctrl);
-		if (ret < 0)
-			fimc_err("Fail: fimc_start_camif\n");
 
 		ctrl->out->idxs.active.ctx = ctx_num;
 		ctrl->out->idxs.active.idx = next;
 
 		ctx->status = FIMC_STREAMON;
 		ctrl->status = FIMC_STREAMON;
+
+		ret = fimc_outdev_start_camif(ctrl);
+		if (ret < 0)
+			fimc_err("Fail: fimc_start_camif\n");
+
 	} else {		/* There is no buffer in incomming queue. */
 		ctrl->out->idxs.active.ctx = -1;
 		ctrl->out->idxs.active.idx = -1;
@@ -399,10 +439,18 @@ static inline void fimc_irq_out(struct fimc_control *ctrl)
 	struct fimc_ctx *ctx;
 	u32 wakeup = 1;
 	int ctx_num = ctrl->out->idxs.active.ctx;
-	ctx = &ctrl->out->ctx[ctx_num];
 
 	/* Interrupt pendding clear */
 	fimc_hwset_clear_irq(ctrl);
+
+	/* check context num */
+	if (ctx_num < 0 || ctx_num >= FIMC_MAX_CTXS) {
+		fimc_err("fimc_irq_out: invalid ctx (ctx=%d)\n", ctx_num);
+		wake_up(&ctrl->wq);
+		return;
+	}
+
+	ctx = &ctrl->out->ctx[ctx_num];
 
 	switch (ctx->overlay.mode) {
 	case FIMC_OVLY_NONE_SINGLE_BUF:
@@ -420,6 +468,8 @@ static inline void fimc_irq_out(struct fimc_control *ctrl)
 			wakeup = fimc_irq_out_fimd(ctrl, ctx);
 		break;
 	default:
+		fimc_err("[ctx=%d] fimc_irq_out: wrong overlay.mode (%d)\n",
+				ctx_num, ctx->overlay.mode);
 		break;
 	}
 
@@ -489,8 +539,10 @@ static inline void fimc_irq_cap(struct fimc_control *ctrl)
 	}
 #endif
 	fimc_hwset_clear_irq(ctrl);
-	if (fimc_hwget_overflow_state(ctrl))
+	if (fimc_hwget_overflow_state(ctrl)) {
+		ctrl->restart = true;
 		return;
+	}
 
 	if (pdata->hw_ver >= 0x51) {
 		if (is_frame_end_irq || ctrl->status == FIMC_BUFFER_STOP) {
@@ -649,6 +701,9 @@ static struct fimc_control *fimc_register_controller(struct platform_device *pde
 	ctrl->log = FIMC_LOG_DEFAULT;
 	ctrl->power_status = FIMC_POWER_OFF;
 
+#ifdef CONFIG_VIDEO_SAMSUNG_USE_DMA_MEM
+	sprintf(ctrl->cma_name, "%s", FIMC_CMA_NAME);
+#else
 	/* CMA */
 #ifdef CONFIG_ION_EXYNOS
 	/* In Midas project, FIMC2 reserve memory is used by ION driver. */
@@ -675,6 +730,7 @@ static struct fimc_control *fimc_register_controller(struct platform_device *pde
 	printk(KERN_DEBUG "ctrl->mem.size = 0x%x\n", ctrl->mem.size);
 	printk(KERN_DEBUG "ctrl->mem.base = 0x%x\n", ctrl->mem.base);
 	ctrl->mem.curr = ctrl->mem.base;
+#endif
 	ctrl->status = FIMC_STREAMOFF;
 
 	switch (pdata->hw_ver) {
@@ -728,11 +784,6 @@ static struct fimc_control *fimc_register_controller(struct platform_device *pde
 		return NULL;
 	}
 
-	/* irq */
-	ctrl->irq = platform_get_irq(pdev, 0);
-	if (request_irq(ctrl->irq, fimc_irq, IRQF_DISABLED, ctrl->name, ctrl))
-		fimc_err("%s: request_irq failed\n", __func__);
-
 	if (soc_is_exynos4210())
 		fimc_src_clk = clk_get(&pdev->dev, "mout_mpll");
 	else
@@ -780,7 +831,8 @@ static int fimc_unregister_controller(struct platform_device *pdev)
 	pdata = to_fimc_plat(&pdev->dev);
 	ctrl = get_fimc_ctrl(id);
 
-	free_irq(ctrl->irq, ctrl);
+	if (ctrl->irq)
+		free_irq(ctrl->irq, ctrl);
 	mutex_destroy(&ctrl->lock);
 	mutex_destroy(&ctrl->v4l2_lock);
 
@@ -1256,13 +1308,27 @@ static int fimc_release(struct file *filp)
 		fimc_streamoff_capture((void *)ctrl);
 
 	/* FIXME: turning off actual working camera */
-	if (ctrl->cam) {
+	if (ctrl->cap && ctrl->cam) {
 		/* Unload the subdev (camera sensor) module,
 		 * reset related status flags */
 		fimc_release_subdev(ctrl);
 		fimc_is_release_subdev(ctrl);
+#if (defined(CONFIG_EXYNOS_DEV_PD) && defined(CONFIG_PM_RUNTIME))
+		if (ctrl->power_status == FIMC_POWER_ON)
+			pm_runtime_put_sync(ctrl->dev);
+#endif
+	} else if (ctrl->is.sd) {
+		fimc_is_release_subdev(ctrl);
 	}
-
+	if (atomic_read(&ctrl->in_use) == 0) {
+#if (!defined(CONFIG_EXYNOS_DEV_PD) || !defined(CONFIG_PM_RUNTIME))
+		if (pdata->clk_off) {
+			pdata->clk_off(to_platform_device(ctrl->dev),
+					&ctrl->clk);
+			ctrl->power_status = FIMC_POWER_OFF;
+		}
+#endif
+	}
 	if (ctrl->out) {
 		if (ctx->status != FIMC_STREAMOFF) {
 			ret = fimc_outdev_stop_streaming(ctrl, ctx);
@@ -1334,12 +1400,21 @@ static int fimc_release(struct file *filp)
 			}
 		}
 
+		/* reset inq & outq of context */
+		for (i = 0; i < FIMC_OUTBUFS; i++) {
+			ctx->inq[i] = -1;
+			ctx->outq[i] = -1;
+		}
+
 		if (atomic_read(&ctrl->in_use) == 0) {
 			ctrl->status = FIMC_STREAMOFF;
 			fimc_outdev_init_idxs(ctrl);
 
 			ctrl->mem.curr = ctrl->mem.base;
-
+#ifdef CONFIG_VIDEO_SAMSUNG_USE_DMA_MEM
+			if (ctrl->mem.base)
+				cma_free(ctrl->mem.base);
+#endif
 			kfree(ctrl->out);
 			ctrl->out = NULL;
 
@@ -1353,6 +1428,10 @@ static int fimc_release(struct file *filp)
 	if (ctrl->cap) {
 		cap = ctrl->cap;
 		ctrl->mem.curr = ctrl->mem.base;
+#ifdef CONFIG_VIDEO_SAMSUNG_USE_DMA_MEM
+		if (ctrl->mem.base)
+			cma_free(ctrl->mem.base);
+#endif
 		kfree(filp->private_data);
 		filp->private_data = NULL;
 		if (pdata->hw_ver >= 0x51)
@@ -1365,10 +1444,6 @@ static int fimc_release(struct file *filp)
 		kfree(ctrl->cap);
 		ctrl->cap = NULL;
 	}
-
-#if (defined(CONFIG_EXYNOS_DEV_PD) && defined(CONFIG_PM_RUNTIME))
-	flush_workqueue(ctrl->fimc_irq_wq);
-#endif
 
 	/*
 	 * Close window for FIMC if window is enabled.
@@ -1465,7 +1540,11 @@ static int fimc_init_global(struct platform_device *pdev)
 		}
 
 		/* mclk */
+#if defined(CONFIG_MACH_MIDAS) || defined(CONFIG_SLP)
+		cam->clk = clk_get(&pdev->dev, cam->get_clk_name());
+#else
 		cam->clk = clk_get(&pdev->dev, cam->clk_name);
+#endif
 		if (IS_ERR(cam->clk)) {
 			fimc_err("%s: failed to get mclk source\n", __func__);
 			return -EINVAL;
@@ -1491,6 +1570,30 @@ static int fimc_init_global(struct platform_device *pdev)
 
 	return 0;
 }
+
+#ifdef CONFIG_DRM_EXYNOS_FIMD_WB
+static BLOCKING_NOTIFIER_HEAD(fimc_notifier_client_list);
+
+int fimc_register_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(
+			&fimc_notifier_client_list, nb);
+}
+EXPORT_SYMBOL(fimc_register_client);
+
+int fimc_unregister_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(
+			&fimc_notifier_client_list, nb);
+}
+EXPORT_SYMBOL(fimc_unregister_client);
+
+int fimc_send_event(unsigned long val, void *v)
+{
+	return blocking_notifier_call_chain(
+			&fimc_notifier_client_list, val, v);
+}
+#endif
 
 static int fimc_show_log_level(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -1701,6 +1804,9 @@ static int __devinit fimc_probe(struct platform_device *pdev)
 		fimc_err("%s: v4l2 device register failed\n", __func__);
 		goto err_fimc;
 	}
+	ctrl->vd->v4l2_dev = &ctrl->v4l2_dev;
+
+	ctrl->vd->v4l2_dev = &ctrl->v4l2_dev;
 
 	/* things to initialize once */
 	if (!fimc_dev->initialized) {
@@ -1744,15 +1850,20 @@ static int __devinit fimc_probe(struct platform_device *pdev)
 	}
 
 	INIT_WORK(&ctrl->work_struct, s3c_fimc_irq_work);
-	ctrl->irq_cnt.counter = 0;
+	atomic_set(&ctrl->irq_cnt, 0);
 
 	ctrl->power_status = FIMC_POWER_OFF;
 	pm_runtime_enable(&pdev->dev);
 #endif
-#ifdef CONFIG_BUSFREQ_OPP
+#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
 	/* To lock bus frequency in OPP mode */
 	ctrl->bus_dev = dev_get(EXYNOS_BUSFREQ_NAME);
 #endif
+
+	/* irq */
+	ctrl->irq = platform_get_irq(pdev, 0);
+	if (request_irq(ctrl->irq, fimc_irq, IRQF_DISABLED, ctrl->name, ctrl))
+		fimc_err("%s: request_irq failed\n", __func__);
 
 	return 0;
 
