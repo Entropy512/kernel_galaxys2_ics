@@ -17,7 +17,7 @@
 #include <linux/atomic.h>
 #include <linux/dma-mapping.h>
 #include <asm/cacheflush.h>
-#include <plat/sysmmu.h>
+#include <plat/s5p-sysmmu.h>
 #ifdef CONFIG_PM_RUNTIME
 #include <plat/devs.h>
 #include <linux/pm_runtime.h>
@@ -77,8 +77,7 @@ void fimg2d4x_bitblt(struct fimg2d_control *info)
 
 		if (cmd->image[IDST].addr.type != ADDR_PHYS) {
 			pgd = (unsigned long *)ctx->mm->pgd;
-			exynos_sysmmu_enable(info->dev,
-					(unsigned long)virt_to_phys(pgd));
+			s5p_sysmmu_enable(info->dev, (unsigned long)virt_to_phys(pgd));
 			fimg2d_debug("sysmmu enable: pgd %p ctx %p seq_no(%u)\n",
 					pgd, ctx, cmd->seq_no);
 		}
@@ -96,15 +95,19 @@ void fimg2d4x_bitblt(struct fimg2d_control *info)
 		perf_end(cmd->ctx, PERF_BLIT);
 #endif
 		if (cmd->image[IDST].addr.type != ADDR_PHYS) {
-			exynos_sysmmu_disable(info->dev);
+			s5p_sysmmu_disable(info->dev);
 			fimg2d_debug("sysmmu disable\n");
 		}
 blitend:
-		fimg2d_del_command(info, cmd);
+		spin_lock(&info->bltlock);
+		fimg2d_dequeue(&cmd->node);
+		kfree(cmd);
+		atomic_dec(&ctx->ncmd);
 
 		/* wake up context */
 		if (!atomic_read(&ctx->ncmd))
 			wake_up(&ctx->wait_q);
+		spin_unlock(&info->bltlock);
 	}
 
 	atomic_set(&info->active, 0);
@@ -116,19 +119,6 @@ blitend:
 #endif
 
 	fimg2d_debug("exit blitter\n");
-}
-
-static inline int is_opaque(enum color_format fmt)
-{
-	switch (fmt) {
-	case CF_ARGB_8888:
-	case CF_ARGB_1555:
-	case CF_ARGB_4444:
-		return 0;
-
-	default:
-		return 1;
-	}
 }
 
 static int fast_op(struct fimg2d_bltcmd *cmd)

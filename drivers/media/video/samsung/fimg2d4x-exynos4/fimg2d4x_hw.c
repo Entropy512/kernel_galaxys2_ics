@@ -345,7 +345,7 @@ void fimg2d4x_enable_dithering(struct fimg2d_control *info)
 	wr(cfg, FIMG2D_BITBLT_COMMAND_REG);
 }
 
-#define MAX_PRECISION 16
+#define MAX_PRECISION		16
 #define DEFAULT_SCALE_RATIO	0x10000
 
 /**

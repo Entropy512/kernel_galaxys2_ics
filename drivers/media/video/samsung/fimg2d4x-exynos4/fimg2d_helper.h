@@ -16,9 +16,6 @@
 #include <linux/sched.h>
 #include "fimg2d.h"
 
-#define rect_w(r)	((r)->x2 - (r)->x1)
-#define rect_h(r)	((r)->y2 - (r)->y1)
-
 static inline char *perfname(enum perf_desc id)
 {
 	switch (id) {
@@ -45,6 +42,40 @@ static inline char *imagename(enum image_object image)
 	default:
 		return NULL;
 	}
+}
+
+static inline int is_opaque(enum color_format fmt)
+{
+	switch (fmt) {
+	case CF_ARGB_8888:
+	case CF_ARGB_1555:
+	case CF_ARGB_4444:
+		return 0;
+
+	case CF_XRGB_8888:
+	case CF_XRGB_1555:
+	case CF_XRGB_4444:
+		return 1;
+
+	case CF_RGB_565:
+	case CF_RGB_888:
+		return 1;
+
+	default:
+		break;
+	}
+
+	return 1;
+}
+
+static inline unsigned int rect_w(struct fimg2d_rect *r)
+{
+	return r->x2 - r->x1;
+}
+
+static inline unsigned int rect_h(struct fimg2d_rect *r)
+{
+	return r->y2 - r->y1;
 }
 
 static inline long elapsed_usec(struct fimg2d_context *ctx, enum perf_desc desc)
@@ -111,7 +142,10 @@ static inline void perf_clear(struct fimg2d_context *ctx)
 		ctx->perf[i].valid = 0;
 }
 
+int pixel2offset(int pixel, enum color_format cf);
+int width2bytes(int width, enum color_format cf);
 void perf_print(struct fimg2d_context *ctx, int seq_no);
+void fimg2d_print_params(struct fimg2d_blit __user *u);
 void fimg2d_dump_command(struct fimg2d_bltcmd *cmd);
 
 #endif /* __FIMG2D_HELPER_H */

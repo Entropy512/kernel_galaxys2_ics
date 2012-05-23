@@ -67,10 +67,6 @@ int g2d_check_params(g2d_params *params)
 	g2d_flag * flag     = &params->flag;
 
 	/* source */
-	if (0 > src_rect->x || 0 > src_rect->y) {
-		return -1;
-	}
-
 	if (0 == src_rect->h || 0 == src_rect->w) {
 		return -1;
 	}
@@ -80,13 +76,9 @@ int g2d_check_params(g2d_params *params)
 	}
 
 	/* destination */
-	if (0 > dst_rect->x || 0 > dst_rect->y) {
-		return -1;
-	}
-
 	if (0 == dst_rect->h || 0 == dst_rect->w) {
 		return -1;
-	}
+	}		
 
 	if (8000 < dst_rect->x+dst_rect->w || 8000 < dst_rect->y+dst_rect->h) {
 		return -1;

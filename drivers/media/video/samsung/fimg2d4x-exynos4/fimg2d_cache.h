@@ -77,8 +77,7 @@ static inline bool is_outer_flushrange(size_t hole)
 		return false;	/* line-by-line flush */
 }
 
-static inline void fimg2d_dma_sync_inner(unsigned long addr, size_t size,
-		int dir)
+static inline void fimg2d_dma_sync_inner(unsigned long addr, size_t size, int dir)
 {
 	if (dir == DMA_TO_DEVICE)
 		dmac_map_area((void *)addr, size, dir);
@@ -86,16 +85,12 @@ static inline void fimg2d_dma_sync_inner(unsigned long addr, size_t size,
 		dmac_flush_range((void *)addr, (void *)(addr + size));
 }
 
-static inline void fimg2d_dma_unsync_inner(unsigned long addr, size_t size,
-		int dir)
+static inline void fimg2d_dma_unsync_inner(unsigned long addr, size_t size, int dir)
 {
 	if (dir == DMA_TO_DEVICE)
 		dmac_unmap_area((void *)addr, size, dir);
 }
 
-void fimg2d_clean_outer_pagetable(struct mm_struct *mm, unsigned long addr,
-		size_t size);
-void fimg2d_dma_sync_outer(struct mm_struct *mm, unsigned long addr,
-		size_t size, enum cache_opr opr);
-enum pt_status fimg2d_check_pagetable(struct mm_struct *mm, unsigned long addr,
-		size_t size);
+void fimg2d_clean_outer_pagetable(struct mm_struct *mm, unsigned long addr, size_t size);
+void fimg2d_dma_sync_outer(struct mm_struct *mm, unsigned long addr, size_t size, enum cache_opr opr);
+enum pt_status fimg2d_check_pagetable(struct mm_struct *mm, unsigned long addr, size_t size);

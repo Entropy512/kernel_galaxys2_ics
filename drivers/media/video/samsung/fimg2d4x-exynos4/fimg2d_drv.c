@@ -29,7 +29,7 @@
 #include <asm/cacheflush.h>
 #include <plat/cpu.h>
 #include <plat/fimg2d.h>
-#include <plat/sysmmu.h>
+#include <plat/s5p-sysmmu.h>
 #include <mach/dev.h>
 #ifdef CONFIG_PM_RUNTIME
 #include <linux/pm_runtime.h>
@@ -63,7 +63,7 @@ static irqreturn_t fimg2d_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int fimg2d_sysmmu_fault_handler(enum exynos_sysmmu_inttype itype,
+static int fimg2d_sysmmu_fault_handler(enum S5P_SYSMMU_INTERRUPT_TYPE itype,
 		unsigned long pgtable_base, unsigned long fault_addr)
 {
 	struct fimg2d_bltcmd *cmd;
@@ -196,7 +196,7 @@ static long fimg2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (copy_from_user(&dst, (void *)blit.dst, sizeof(dst)))
 				return -EFAULT;
 
-#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
+#ifdef CONFIG_BUSFREQ_OPP
 #if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
 			dev_lock(info->bus_dev, info->dev, 160160);
 #endif
@@ -215,7 +215,7 @@ static long fimg2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if ((blit.dst) && (dst.addr.type == ADDR_USER))
 			up_write(&page_alloc_slow_rwsem);
 
-#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
+#ifdef CONFIG_BUSFREQ_OPP
 #if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
 			dev_unlock(info->bus_dev, info->dev);
 #endif
@@ -238,9 +238,7 @@ static long fimg2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 
 	default:
-#if 0
 		printk(KERN_ERR "[%s] unknown ioctl\n", __func__);
-#endif
 		ret = -EFAULT;
 		break;
 	}
@@ -320,7 +318,7 @@ static int fimg2d_probe(struct platform_device *pdev)
 	if (!res) {
 		printk(KERN_ERR "FIMG2D failed to get resource\n");
 		ret = -ENOENT;
-		goto err_region;
+		goto err_res;
 	}
 
 	info->mem = request_mem_region(res->start, resource_size(res),
@@ -346,7 +344,7 @@ static int fimg2d_probe(struct platform_device *pdev)
 	if (!info->irq) {
 		printk(KERN_ERR "FIMG2D failed to get irq resource\n");
 		ret = -ENOENT;
-		goto err_irq;
+		goto err_map;
 	}
 	fimg2d_debug("irq: %d\n", info->irq);
 
@@ -369,13 +367,13 @@ static int fimg2d_probe(struct platform_device *pdev)
 	fimg2d_debug("enable runtime pm\n");
 #endif
 
-#if defined(CONFIG_BUSFREQ_OPP) || defined(CONFIG_BUSFREQ_LOCK_WRAPPER)
+#ifdef CONFIG_BUSFREQ_OPP
 #if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
 	/* To lock bus frequency in OPP mode */
 	info->bus_dev = dev_get("exynos-busfreq");
 #endif
 #endif
-	exynos_sysmmu_set_fault_handler(info->dev, fimg2d_sysmmu_fault_handler);
+	s5p_sysmmu_set_fault_handler(info->dev, fimg2d_sysmmu_fault_handler);
 	fimg2d_debug("register sysmmu page fault handler\n");
 
 	/* misc register */
@@ -398,10 +396,12 @@ err_irq:
 	iounmap(info->regs);
 
 err_map:
-	release_resource(info->mem);
 	kfree(info->mem);
 
 err_region:
+	release_resource(info->mem);
+
+err_res:
 	destroy_workqueue(info->work_q);
 
 err_setup:
