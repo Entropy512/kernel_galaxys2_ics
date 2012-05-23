@@ -11,6 +11,7 @@
  */
 #include <linux/i2c.h>
 #include <linux/io.h>
+#include <linux/err.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
 
@@ -157,8 +158,9 @@ static int s5p_ddc_read(u8 reg, int bytes, u8 *dest)
 	};
 
 	do {
-		if (!s5p_hdmi_reg_get_hpd_status() ||
-		    s5p_hdmi_ctrl_status() == false || on_stop_process)
+		if (s5p_hdmi_ctrl_status() == false ||
+		    !s5p_hdmi_reg_get_hpd_status() ||
+		    on_stop_process)
 			goto ddc_read_err;
 
 		ret = i2c_transfer(i2c->adapter, msg, 2);
@@ -197,8 +199,9 @@ static int s5p_ddc_write(u8 reg, int bytes, u8 *src)
 	memcpy(&msg[1], src, bytes);
 
 	do {
-		if (!s5p_hdmi_reg_get_hpd_status() ||
-		    s5p_hdmi_ctrl_status() == false || on_stop_process)
+		if (s5p_hdmi_ctrl_status() == false ||
+		    !s5p_hdmi_reg_get_hpd_status() ||
+		    on_stop_process)
 			goto ddc_write_err;
 
 		ret = i2c_master_send(i2c, msg, bytes + 1);
@@ -222,16 +225,51 @@ ddc_write_err:
 	return -1;
 }
 
+static ssize_t sysfs_hdcp_ddc_i2c_num_show(struct class *class,
+		struct class_attribute *attr, char *buf)
+{
+	int size;
+	int ddc_i2c_num = ddc_port->adapter->nr;
+
+	pr_info("%s() ddc_i2c_num : %d\n",
+			__func__, ddc_i2c_num);
+	size = sprintf(buf, "DDC %d\n", ddc_i2c_num);
+
+	return size;
+}
+
+static CLASS_ATTR(ddc_i2c_num, 0664 , sysfs_hdcp_ddc_i2c_num_show, NULL);
+
 static int __devinit s5p_ddc_probe(struct i2c_client *client,
 			const struct i2c_device_id *dev_id)
 {
 	int ret = 0;
+	struct class *sec_hdcp;
 
 	ddc_port = client;
 
+	sec_hdcp = class_create(THIS_MODULE, "hdcp");
+	if (IS_ERR(sec_hdcp)) {
+		pr_err("Failed to create class(sec_hdcp)!\n");
+		ret = -ENOMEM;
+		goto err_exit1;
+	}
+
+	ret = class_create_file(sec_hdcp, &class_attr_ddc_i2c_num);
+	if (ret) {
+		pr_err("Failed to create device file in sysfs entries!\n");
+		ret = -ENOMEM;
+		goto err_exit2;
+	}
+
 	dev_info(&client->adapter->dev, "attached s5p_ddc "
 		"into i2c adapter successfully\n");
+	return ret;
 
+err_exit2:
+	class_destroy(sec_hdcp);
+
+err_exit1:
 	return ret;
 }
 
@@ -608,21 +646,22 @@ static int s5p_hdmi_check_repeater(void)
 
 		bcaps = readb(hdmi_base + S5P_HDMI_HDCP_BCAPS);
 
-		if (bcaps & KSV_FIFO_READY) {
-			tvout_dbg("repeater : ksv fifo not ready");
-			tvout_dbg(", retries : %d\n", cnt);
+		if (bcaps & KSV_FIFO_READY)
 			break;
-		}
 
 		msleep(KSV_FIFO_CHK_DELAY);
 
 		cnt++;
 	} while (cnt < KSV_FIFO_RETRY_CNT);
 
-	if (cnt == KSV_FIFO_RETRY_CNT)
+	if (cnt == KSV_FIFO_RETRY_CNT) {
+		tvout_dbg("repeater : ksv fifo not ready, timeout error");
+		tvout_dbg(", retries : %d\n", cnt);
 		return REPEATER_TIMEOUT_ERROR;
+	}
 
 	tvout_dbg("repeater : ksv fifo ready\n");
+	tvout_dbg(", retries : %d\n", cnt);
 
 
 	if (s5p_ddc_read(HDCP_BStatus, BSTATUS_SIZE, status) < 0)

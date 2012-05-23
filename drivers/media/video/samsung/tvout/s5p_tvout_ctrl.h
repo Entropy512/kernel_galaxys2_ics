@@ -74,6 +74,8 @@ extern wait_queue_head_t s5ptv_wq;
  ***************************************/
 extern int s5p_tvif_ctrl_set_audio(bool en);
 extern void s5p_tvif_audio_channel(int channel);
+extern void s5p_tvif_q_color_range(int range);
+extern int s5p_tvif_get_q_range(void);
 extern int s5p_tvif_ctrl_set_av_mute(bool en);
 extern int s5p_tvif_ctrl_get_std_if(
 		enum s5p_tvout_disp_mode *std, enum s5p_tvout_o_mode *inf);

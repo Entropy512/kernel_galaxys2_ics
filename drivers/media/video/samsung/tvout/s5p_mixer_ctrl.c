@@ -227,13 +227,14 @@ static void s5p_mixer_ctrl_clock(bool on)
 	/* power control function is not implemented yet */
 	if (on) {
 		clk_enable(s5p_mixer_ctrl_private.clk[MUX].ptr);
-
 #ifdef CONFIG_ARCH_EXYNOS4
 		s5p_tvout_pm_runtime_get();
 #endif
 
-
 		clk_enable(s5p_mixer_ctrl_private.clk[ACLK].ptr);
+
+		// Restore mixer_base address
+		s5p_mixer_init(s5p_mixer_ctrl_private.reg_mem.base);
 	} else {
 		clk_disable(s5p_mixer_ctrl_private.clk[ACLK].ptr);
 
@@ -241,8 +242,10 @@ static void s5p_mixer_ctrl_clock(bool on)
 		s5p_tvout_pm_runtime_put();
 #endif
 
-
 		clk_disable(s5p_mixer_ctrl_private.clk[MUX].ptr);
+
+		// Set mixer_base address to NULL
+		s5p_mixer_init(NULL);
 	}
 }
 
@@ -856,6 +859,8 @@ int s5p_mixer_ctrl_start(
 	enum s5p_tvout_disp_mode disp, enum s5p_tvout_o_mode out)
 {
 	int i;
+
+	int csc = MIXER_RGB601_16_235;
 	enum s5p_mixer_burst_mode burst = s5p_mixer_ctrl_private.burst;
 	enum s5p_tvout_endian endian = s5p_mixer_ctrl_private.endian;
 	struct clk *sclk_mixer = s5p_mixer_ctrl_private.clk[MUX].ptr;
@@ -881,7 +886,7 @@ int s5p_mixer_ctrl_start(
 			s5p_mixer_ctrl_private.running = true;
 		}
 
-		s5p_mixer_init_csc_coef_default(MIXER_CSC_601_FR);
+		csc = MIXER_RGB601_0_255;
 		break;
 
 	case TVOUT_HDMI_RGB:
@@ -906,14 +911,21 @@ int s5p_mixer_ctrl_start(
 
 		switch (disp) {
 
-		case TVOUT_480P_60_16_9:
 		case TVOUT_480P_60_4_3:
+			if (s5p_tvif_get_q_range() || out == TVOUT_HDMI_RGB)
+				csc = MIXER_RGB601_0_255;
+			else
+				csc = MIXER_RGB601_16_235;
+			break;
+		case TVOUT_480P_60_16_9:
 		case TVOUT_480P_59:
 		case TVOUT_576P_50_16_9:
 		case TVOUT_576P_50_4_3:
-			s5p_mixer_init_csc_coef_default(MIXER_CSC_601_FR);
+			if (s5p_tvif_get_q_range() && out != TVOUT_HDMI_RGB)
+				csc = MIXER_RGB601_0_255;
+			else
+				csc = MIXER_RGB601_16_235;
 			break;
-
 		case TVOUT_720P_60:
 		case TVOUT_720P_50:
 		case TVOUT_720P_59:
@@ -924,7 +936,10 @@ int s5p_mixer_ctrl_start(
 		case TVOUT_1080P_30:
 		case TVOUT_1080P_59:
 		case TVOUT_1080P_50:
-			s5p_mixer_init_csc_coef_default(MIXER_CSC_709_FR);
+			if (!s5p_tvif_get_q_range() || out == TVOUT_HDMI_RGB)
+				csc = MIXER_RGB709_16_235;
+			else
+				csc = MIXER_RGB709_0_255;
 			break;
 #ifdef CONFIG_HDMI_14A_3D
 		case TVOUT_720P_60_SBS_HALF:
@@ -932,7 +947,10 @@ int s5p_mixer_ctrl_start(
 		case TVOUT_720P_50_TB:
 		case TVOUT_1080P_24_TB:
 		case TVOUT_1080P_23_TB:
-			s5p_mixer_init_csc_coef_default(MIXER_CSC_709_FR);
+			if (!s5p_tvif_get_q_range() || out == TVOUT_HDMI_RGB)
+				csc = MIXER_RGB709_16_235;
+			else
+				csc = MIXER_RGB709_0_255;
 			break;
 
 #endif
@@ -963,7 +981,10 @@ int s5p_mixer_ctrl_start(
 
 	tvout_dbg("tvout standard = 0x%X, output mode = %d\n", disp, out);
 	/* error handling will be implemented */
-	s5p_mixer_init_display_mode(disp, out);
+	tvout_dbg(KERN_INFO "Color range mode set : %d\n",
+		s5p_tvif_get_q_range());
+	s5p_mixer_init_csc_coef_default(csc);
+	s5p_mixer_init_display_mode(disp, out, csc);
 
 	for (i = MIXER_BG_COLOR_0; i <= MIXER_BG_COLOR_2; i++) {
 		s5p_mixer_set_bg_color(i,
@@ -1029,6 +1050,11 @@ int s5p_mixer_ctrl_constructor(struct platform_device *pdev)
 		goto err_on_irq;
 	}
 
+	/* Initializing wait queue for mixer vsync interrupt */
+	init_waitqueue_head(&s5ptv_wq);
+
+	s5p_mixer_init(s5p_mixer_ctrl_private.reg_mem.base);
+
 	ret = request_irq(
 			s5p_mixer_ctrl_private.irq.no,
 			s5p_mixer_ctrl_private.irq.handler,
@@ -1040,11 +1066,6 @@ int s5p_mixer_ctrl_constructor(struct platform_device *pdev)
 			s5p_mixer_ctrl_private.irq.name);
 		goto err_on_irq;
 	}
-
-	/* Initializing wait queue for mixer vsync interrupt */
-	init_waitqueue_head(&s5ptv_wq);
-
-	s5p_mixer_init(s5p_mixer_ctrl_private.reg_mem.base);
 
 	return 0;
 
@@ -1074,6 +1095,7 @@ void s5p_mixer_ctrl_destructor(void)
 		if (s5p_mixer_ctrl_private.clk[i].ptr) {
 			clk_disable(s5p_mixer_ctrl_private.clk[i].ptr);
 			clk_put(s5p_mixer_ctrl_private.clk[i].ptr);
+			s5p_mixer_init(NULL);
 		}
 	}
 }
