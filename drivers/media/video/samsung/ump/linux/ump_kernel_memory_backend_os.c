@@ -149,6 +149,7 @@ static int os_allocate(void* ctx, ump_dd_mem * descriptor)
 		}
 		if (NULL == new_page)
 		{
+			MSG_ERR(("UMP memory allocated: Out of Memory !!\n"));
 			break;
 		}
 
@@ -181,7 +182,9 @@ static int os_allocate(void* ctx, ump_dd_mem * descriptor)
 
 	if (left)
 	{
-		DBG_MSG(1, ("Failed to allocate needed pages\n"));
+		MSG_ERR(("Failed to allocate needed pages\n"));
+		MSG_ERR(("UMP memory allocated: %d kB  Configured maximum OS memory usage: %d kB\n",
+				 (pages_allocated * _MALI_OSK_CPU_PAGE_SIZE)/1024, (info->num_pages_max* _MALI_OSK_CPU_PAGE_SIZE)/1024));
 
 		while(pages_allocated)
 		{
