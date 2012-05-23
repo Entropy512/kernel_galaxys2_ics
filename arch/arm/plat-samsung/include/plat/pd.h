@@ -17,6 +17,7 @@ struct samsung_pd_info {
 	int (*disable)(struct device *dev);
 	int (*save)(struct device *dev);
 	int (*restore)(struct device *dev);
+	void (*set_bts)(void);
 	void __iomem *base;
 	void *data;
 };

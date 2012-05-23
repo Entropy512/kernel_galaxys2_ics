@@ -98,6 +98,9 @@ static int samsung_pd_runtime_resume(struct device *dev)
 	if (pdata->enable)
 		ret = pdata->enable(dev);
 
+	if (pdata->set_bts)
+		pdata->set_bts();
+
 	dev_dbg(dev, "runtime resumed\n");
 	return ret;
 }

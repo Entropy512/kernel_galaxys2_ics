@@ -73,7 +73,7 @@ struct mdnie_platform_data {
 };
 
 /* workaround: fix it later */
-void s6e8aa0_update_panel_cond(int high_freq);
+void s6e8aa0_panel_cond(int high_freq);
 
 #ifdef CONFIG_MDNIE_SUPPORT
 /**
