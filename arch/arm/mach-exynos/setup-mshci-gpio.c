@@ -140,6 +140,9 @@ void exynos4_setup_mshci_set_power(struct platform_device *dev, int en)
 
 	if (pdata->int_power_gpio) {
 		if (en) {
+#ifdef CONFIG_MACH_Q1_BD
+			mdelay(20);
+#endif
 			/*CMD/CLK*/
 			for (gpio = EXYNOS4_GPK0(0); gpio < EXYNOS4_GPK0(2);
 					gpio++) {
@@ -163,6 +166,11 @@ void exynos4_setup_mshci_set_power(struct platform_device *dev, int en)
 			pr_info("%s : internal MMC Card ON samsung-mshc.\n",
 					__func__);
 		} else {
+#if defined(CONFIG_MACH_M0_CTC)
+			s3c_gpio_cfgpin(pdata->int_power_gpio, S3C_GPIO_OUTPUT);
+			s3c_gpio_setpull(pdata->int_power_gpio,
+					S3C_GPIO_PULL_NONE);
+#endif
 			gpio_set_value(pdata->int_power_gpio, 0);
 
 			/*CMD/CLK*/

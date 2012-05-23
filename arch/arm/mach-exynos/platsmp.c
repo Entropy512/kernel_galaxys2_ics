@@ -33,6 +33,9 @@
 
 #include <plat/cpu.h>
 #include <plat/exynos4.h>
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+#include <plat/regs-watchdog.h>
+#endif
 
 extern void exynos_secondary_startup(void);
 extern unsigned int gic_bank_offset;
@@ -79,6 +82,10 @@ void __cpuinit platform_secondary_init(unsigned int cpu)
 				 (gic_bank_offset * cpu);
 	void __iomem *cpu_base = S5P_VA_GIC_CPU +
 				(gic_bank_offset * cpu);
+
+	/* Enable the full line of zero */
+	if (soc_is_exynos4210() || soc_is_exynos4212() || soc_is_exynos4412())
+		enable_cache_foz();
 
 	/*
 	 * if any interrupts are already enabled for the primary
@@ -131,20 +138,13 @@ static int exynos_power_up_cpu(unsigned int cpu)
 	return 0;
 }
 
-static void enable_foz(void)
-{
-	u32 val;
-	asm volatile(
-	"mrc   p15, 0, %0, c1, c0, 1\n"
-	"orr   %0, %0, #(1 << 3)\n"
-	"mcr   p15, 0, %0, c1, c0, 1"
-	: "=r" (val));
-}
-
 int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned long timeout;
 	int ret;
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	unsigned int tmp_wtcon;
+#endif
 
 	/*
 	 * Set synchronisation state between this boot processor
@@ -152,18 +152,14 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 */
 	spin_lock(&boot_lock);
 
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	tmp_wtcon = __raw_readl(S3C2410_WTCON);
+#endif
+
 	ret = exynos_power_up_cpu(cpu);
 	if (ret) {
 		spin_unlock(&boot_lock);
 		return ret;
-	}
-
-	/*
-	* Enable write full line for zeros mode
-	*/
-	if (soc_is_exynos4210() || soc_is_exynos4212() || soc_is_exynos4412()) {
-		enable_foz();
-		smp_call_function((void (*)(void *))enable_foz, NULL, 0);
 	}
 
 	/*
@@ -201,6 +197,10 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 
 		udelay(10);
 	}
+
+#ifdef CONFIG_SEC_WATCHDOG_RESET
+	__raw_writel(tmp_wtcon, S3C2410_WTCON);
+#endif
 
 	/*
 	 * now the secondary core is starting up let it run its
@@ -278,7 +278,7 @@ void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 		else
 			cpu_boot_info[i].boot_base = S5P_VA_SYSRAM;
 #endif
-		if (soc_is_exynos4212() || soc_is_exynos4412())
+		if (soc_is_exynos4412())
 			cpu_boot_info[i].boot_base += (0x4 * i);
 		cpu_boot_info[i].power_base = S5P_ARM_CORE_CONFIGURATION(i);
 	}

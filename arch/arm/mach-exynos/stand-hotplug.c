@@ -37,16 +37,25 @@
 #include <mach/regs-gpio.h>
 #include <mach/regs-irq.h>
 
-#if defined(CONFIG_MACH_P11) || defined(CONFIG_MACH_P10)
-#define TRANS_LOAD_H0 30
-#define TRANS_LOAD_L1 20
+#if defined(CONFIG_MACH_P10)
+#define TRANS_LOAD_H0 5
+#define TRANS_LOAD_L1 2
 #define TRANS_LOAD_H1 100
+
+#define BOOT_DELAY	30
+#define CHECK_DELAY_ON	(.5*HZ * 8)
+#define CHECK_DELAY_OFF	(.5*HZ)
+
 #endif
 
 #if defined(CONFIG_MACH_U1) || defined(CONFIG_MACH_PX)
 #define TRANS_LOAD_H0 30
 #define TRANS_LOAD_L1 20
 #define TRANS_LOAD_H1 100
+
+#define BOOT_DELAY	60
+#define CHECK_DELAY_ON	(.5*HZ * 4)
+#define CHECK_DELAY_OFF	(.5*HZ)
 #endif
 
 #if defined(CONFIG_MACH_MIDAS) || defined(CONFIG_MACH_SMDK4X12)
@@ -62,11 +71,14 @@
 #define TRANS_LOAD_L2 15
 #define TRANS_LOAD_H2 45
 #define TRANS_LOAD_L3 20
+
+#define BOOT_DELAY	60
+#define CHECK_DELAY_ON	(.5*HZ * 4)
+#define CHECK_DELAY_OFF	(.5*HZ)
 #endif
 
 #define TRANS_RQ 2
 #define TRANS_LOAD_RQ 20
-#define CHECK_DELAY	(.5*HZ)
 
 #define CPU_OFF 0
 #define CPU_ON  1
@@ -87,7 +99,7 @@ static struct delayed_work hotplug_work;
 static unsigned int max_performance;
 static unsigned int freq_min = -1UL;
 
-static unsigned int hotpluging_rate = CHECK_DELAY;
+static unsigned int hotpluging_rate = CHECK_DELAY_OFF;
 module_param_named(rate, hotpluging_rate, uint, 0644);
 static unsigned int user_lock;
 module_param_named(lock, user_lock, uint, 0644);
@@ -136,6 +148,20 @@ static DEFINE_PER_CPU(struct cpu_time_info, hotplug_cpu_time);
    timer(softirq) context but in process context */
 static DEFINE_MUTEX(hotplug_lock);
 
+bool hotplug_out_chk(unsigned int nr_online_cpu, unsigned int threshold_up,
+		unsigned int avg_load, unsigned int cur_freq)
+{
+#if defined(CONFIG_MACH_P10)
+	return ((nr_online_cpu > 1) &&
+		(avg_load < threshold_up &&
+		cur_freq <= freq_min));
+#else
+	return ((nr_online_cpu > 1) &&
+		(avg_load < threshold_up ||
+		cur_freq <= freq_min));
+#endif
+}
+
 static inline enum flag
 standalone_hotplug(unsigned int load, unsigned long nr_rq_min, unsigned int cpu_rq_min)
 {
@@ -160,16 +186,16 @@ standalone_hotplug(unsigned int load, unsigned long nr_rq_min, unsigned int cpu_
 
 	avg_load = (unsigned int)((cur_freq * load) / max_performance);
 
-	if (nr_online_cpu > 1 && (avg_load < threshold[nr_online_cpu - 1][0] ||
-				  cur_freq <= freq_min)) {
-
+	if (hotplug_out_chk(nr_online_cpu, threshold[nr_online_cpu - 1][0],
+			    avg_load, cur_freq)) {
 		return HOTPLUG_OUT;
 		/* If total nr_running is less than cpu(on-state) number, hotplug do not hotplug-in */
 	} else if (nr_running() > nr_online_cpu &&
 		   avg_load > threshold[nr_online_cpu - 1][1] && cur_freq > freq_min) {
 
 		return HOTPLUG_IN;
-
+#if defined(CONFIG_MACH_P10)
+#else
 	} else if (nr_online_cpu > 1 && nr_rq_min < trans_rq) {
 
 		struct cpu_time_info *tmp_info;
@@ -178,6 +204,7 @@ standalone_hotplug(unsigned int load, unsigned long nr_rq_min, unsigned int cpu_
 		/*If CPU(cpu_rq_min) load is less than trans_load_rq, hotplug-out*/
 		if (tmp_info->load < trans_load_rq)
 			return HOTPLUG_OUT;
+#endif
 	}
 
 	return HOTPLUG_NOP;
@@ -218,6 +245,11 @@ static void hotplug_timer(struct work_struct *work)
 		if (wall_time < idle_time)
 			goto no_hotplug;
 
+#ifdef CONFIG_TARGET_LOCALE_P2TMO_TEMP
+		/*For once Divide-by-Zero issue*/
+		if (wall_time == 0)
+			wall_time++;
+#endif
 		tmp_info->load = 100 * (wall_time - idle_time) / wall_time;
 
 		load += tmp_info->load;
@@ -246,12 +278,12 @@ static void hotplug_timer(struct work_struct *work)
 		DBG_PRINT("cpu%d turning on!\n", select_off_cpu);
 		cpu_up(select_off_cpu);
 		DBG_PRINT("cpu%d on\n", select_off_cpu);
-		hotpluging_rate = CHECK_DELAY * 4;
+		hotpluging_rate = CHECK_DELAY_ON;
 	} else if (flag_hotplug == HOTPLUG_OUT && cpu_online(cpu_rq_min) == CPU_ON) {
 		DBG_PRINT("cpu%d turnning off!\n", cpu_rq_min);
 		cpu_down(cpu_rq_min);
 		DBG_PRINT("cpu%d off!\n", cpu_rq_min);
-		hotpluging_rate = CHECK_DELAY;
+		hotpluging_rate = CHECK_DELAY_OFF;
 	} 
 
 no_hotplug:
@@ -323,7 +355,7 @@ static int __init exynos4_pm_hotplug_init(void)
 
 	INIT_DELAYED_WORK(&hotplug_work, hotplug_timer);
 
-	queue_delayed_work_on(0, hotplug_wq, &hotplug_work, 60 * HZ);
+	queue_delayed_work_on(0, hotplug_wq, &hotplug_work, BOOT_DELAY * HZ);
 #ifdef CONFIG_CPU_FREQ
 	table = cpufreq_frequency_get_table(0);
 

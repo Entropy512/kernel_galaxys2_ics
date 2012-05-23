@@ -14,6 +14,12 @@ config TARGET_LOCALE_KOR
 config TARGET_LOCALE_NAATT_TEMP
 	bool "NAGSM"
 
+config TARGET_LOCALE_P2EUR_TEMP
+	bool "P2EUR"
+
+config TARGET_LOCALE_P2TMO_TEMP
+	bool "P2TMO"
+
 config TARGET_LOCALE_EUR_U1_NFC
 	bool "Europe Open NFC"
 
@@ -23,6 +29,21 @@ config TARGET_LOCALE_NTT
 config TARGET_LOCALE_CHN
 	bool "Chinese"
 
+config TARGET_LOCALE_USA
+	bool "USA"
+
+endchoice
+
+choice
+	prompt "C1 USA Target Carrier"
+	depends on MACH_C1 && (TARGET_LOCALE_EUR || TARGET_LOCALE_USA)
+	default MACH_C1_USA_ATT
+
+config MACH_C1_USA_ATT
+	bool "ATT"
+
+config MACH_C1_USA_VZW
+	bool "VZW"
 endchoice
 
 choice
@@ -71,6 +92,15 @@ config MACH_M0_KOR_LGT
 endchoice
 
 choice
+	prompt "P4 KOR Target Carrier"
+	depends on MACH_P4 && TARGET_LOCALE_KOR
+	default MACH_P4_KOR_ANY
+
+config MACH_P4_KOR_ANY
+	bool "P4 KOR OPEN Board"
+endchoice
+
+choice
 	prompt "M0 Chinese Target Carrier"
 	depends on MACH_M0 && TARGET_LOCALE_CHN
 
@@ -80,4 +110,19 @@ config MACH_M0_CMCC
 config MACH_M0_CHNOPEN
 	bool "M0 CHN OPEN board"
 
+config MACH_M0_HKTW
+	bool "M0 CHN HKTW board"
+
+config MACH_M0_CTC
+	bool "M0 CHN CTC board"
+
 endchoice
+
+choice
+	prompt "Q1 Chinese Target Carrier"
+	depends on MACH_U1 && TARGET_LOCALE_CHN
+
+config MACH_Q1_CMCC_BD
+	bool "Q1 CHN CMCC board"
+endchoice
+

@@ -23,6 +23,7 @@
 #include <plat/regs-sdhci.h>
 #include <plat/sdhci.h>
 
+#if defined(CONFIG_ARCH_EXYNOS4)
 void exynos4_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)
 {
 	struct s3c_sdhci_platdata *pdata = dev->dev.platform_data;
@@ -201,6 +202,9 @@ void exynos4_setup_sdhci3_cfg_gpio(struct platform_device *dev, int width)
 	}
 }
 
+#endif /* CONFIG_ARCH_EXYNOS4 */
+
+#if defined(CONFIG_ARCH_EXYNOS5)
 void exynos5_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)
 {
 	struct s3c_sdhci_platdata *pdata = dev->dev.platform_data;
@@ -300,13 +304,6 @@ void exynos5_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
 		s3c_gpio_cfgpin(EXYNOS5_GPC2(2), S3C_GPIO_SFN(2));
 		s3c_gpio_setpull(EXYNOS5_GPC2(2), S3C_GPIO_PULL_UP);
 		s5p_gpio_set_drvstr(gpio, S5P_GPIO_DRVSTR_LV4);
-
-		/* In SMDK5210 Rev0.0 Board, SD_CDn Pin connection have been changed by Jumper
-		Therfore, the following GPX2[0] configuration is requiered. */
-		/*
-		s3c_gpio_cfgpin(EXYNOS5_GPX2(0), S3C_GPIO_SFN(0));
-		s3c_gpio_setpull(EXYNOS5_GPX2(0), S3C_GPIO_PULL_NONE);
-		*/
 	}
 }
 
@@ -335,3 +332,5 @@ void exynos5_setup_sdhci3_cfg_gpio(struct platform_device *dev, int width)
 		s5p_gpio_set_drvstr(gpio, S5P_GPIO_DRVSTR_LV4);
 	}
 }
+
+#endif /* CONFIG_ARCH_EXYNOS5 */

@@ -218,6 +218,10 @@ enum exynos4212_gpio_number {
 #include "gpio-u1.h"
 #endif
 
+#if defined(CONFIG_MACH_U1CAMERA_BD)
+#include "gpio-u1camera.h"
+#endif
+
 #if defined(CONFIG_MACH_Q1_BD)
 #include "gpio-q1.h"
 #endif

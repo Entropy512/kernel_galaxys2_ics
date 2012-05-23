@@ -1,4 +1,4 @@
-/* linux/arch/arm/mach-exynos/busfreq_opp.c
+/* linux/arch/arm/mach-exynos/busfreq_opp_exynos4.c
  *
  * Copyright (c) 2011 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com/
@@ -40,7 +40,10 @@
 #include <mach/regs-mem.h>
 #include <mach/cpufreq.h>
 #include <mach/dev.h>
-#include <mach/busfreq.h>
+#include <mach/busfreq_exynos4.h>
+#include <mach/smc.h>
+
+#include <mach/asv.h>
 
 #include <plat/map-s5p.h>
 #include <plat/cpu.h>
@@ -49,11 +52,12 @@
 #define BUSFREQ_DEBUG	1
 
 static DEFINE_MUTEX(busfreq_lock);
-BLOCKING_NOTIFIER_HEAD(exynos_busfreq_notifier_list);
 
 struct busfreq_control {
 	struct opp *opp_lock;
 	struct device *dev;
+	struct busfreq_data *data;
+	bool init_done;
 };
 
 static struct busfreq_control bus_ctrl;
@@ -107,67 +111,81 @@ struct opp *step_down(struct busfreq_data *data, int step)
 	return opp;
 }
 
+static unsigned int _target(struct busfreq_data *data, struct opp *new)
+{
+	unsigned int index;
+	unsigned int voltage;
+	unsigned long newfreq;
+	unsigned long currfreq;
+
+	newfreq = opp_get_freq(new);
+	currfreq = opp_get_freq(data->curr_opp);
+
+	index = data->get_table_index(new);
+
+	if (newfreq == 0 || newfreq == currfreq || data->use == false)
+		return data->get_table_index(data->curr_opp);
+
+	voltage = opp_get_voltage(new);
+
+	if (data->check_tc_volt)
+		data->check_tc_volt(&voltage);
+
+	if (newfreq > currfreq) {
+		regulator_set_voltage(data->vdd_mif, voltage,
+				voltage + 25000);
+		voltage = data->get_int_volt(index);
+
+		if (data->check_tc_volt)
+			data->check_tc_volt(&voltage);
+
+		regulator_set_voltage(data->vdd_int, voltage,
+				voltage + 25000);
+		/*if (data->busfreq_prepare)
+			data->busfreq_prepare(index);*/
+	}
+	if (data->set_qos)
+		data->set_qos(index);
+
+	data->target(index);
+
+	if (newfreq < currfreq) {
+		/*if (data->busfreq_post)
+			data->busfreq_post(index);*/
+		regulator_set_voltage(data->vdd_mif, voltage,
+				voltage + 25000);
+		voltage = data->get_int_volt(index);
+
+		if (data->check_tc_volt)
+			data->check_tc_volt(&voltage);
+
+		regulator_set_voltage(data->vdd_int, voltage,
+				voltage + 25000);
+	}
+	data->curr_opp = new;
+
+	return index;
+}
+
 static void exynos_busfreq_timer(struct work_struct *work)
 {
 	struct delayed_work *delayed_work = to_delayed_work(work);
 	struct busfreq_data *data = container_of(delayed_work, struct busfreq_data,
 			worker);
 	struct opp *opp;
-	unsigned int voltage;
-	unsigned long currfreq;
-	unsigned long newfreq;
-	unsigned int index = 0;
+	unsigned int index;
 
 	opp = data->monitor(data);
+
+	ppmu_start(data->dev);
+
+	mutex_lock(&busfreq_lock);
 
 	if (bus_ctrl.opp_lock)
 		opp = bus_ctrl.opp_lock;
 
-	ppmu_start(data->dev);
+	index = _target(data, opp);
 
-	newfreq = opp_get_freq(opp);
-
-	index = data->get_table_index(opp);
-
-	mutex_lock(&busfreq_lock);
-
-	if (opp == data->curr_opp || newfreq == 0 || data->use == false)
-		goto out;
-
-	currfreq = opp_get_freq(data->curr_opp);
-
-	voltage = opp_get_voltage(opp);
-	if (newfreq > currfreq) {
-		if (!IS_ERR(data->vdd_mif)) {
-			regulator_set_voltage(data->vdd_mif, voltage,
-					voltage + 25000);
-			voltage = data->get_int_volt(index);
-		}
-		regulator_set_voltage(data->vdd_int, voltage,
-				voltage + 25000);
-		/*if (data->busfreq_prepare)
-			data->busfreq_prepare(index);*/
-	}
-#if defined(CONFIG_ARCH_EXYNOS4)	
-	if (data->set_qos)
-		data->set_qos(index);
-#endif
-	data->target(index);
-
-	if (newfreq < currfreq) {
-		/*if (data->busfreq_post)
-			data->busfreq_post(index);*/
-		if (!IS_ERR(data->vdd_mif)) {
-			regulator_set_voltage(data->vdd_mif, voltage,
-					voltage + 25000);
-			voltage = data->get_int_volt(index);
-		}
-		regulator_set_voltage(data->vdd_int, voltage,
-				voltage + 25000);
-	}
-	data->curr_opp = opp;
-
-out:
 	update_busfreq_stat(data, index);
 	mutex_unlock(&busfreq_lock);
 	queue_delayed_work(system_freezable_wq, &data->worker, data->sampling_rate);
@@ -179,21 +197,12 @@ static int exynos_buspm_notifier_event(struct notifier_block *this,
 	struct busfreq_data *data = container_of(this, struct busfreq_data,
 			exynos_buspm_notifier);
 
-	unsigned long voltage = opp_get_voltage(data->max_opp);
-	unsigned long freq = opp_get_freq(data->max_opp);
-	unsigned int index = 0;
-
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
+		mutex_lock(&busfreq_lock);
+		_target(data, data->max_opp);
+		mutex_unlock(&busfreq_lock);
 		data->use = false;
-		if (!IS_ERR(data->vdd_mif)) {
-			regulator_set_voltage(data->vdd_mif, voltage,
-					voltage + 25000);
-			voltage = data->get_int_volt(freq);
-		}
-		regulator_set_voltage(data->vdd_int, voltage, voltage + 25000);
-		index = data->get_table_index(data->max_opp);
-		data->target(index);
 		return NOTIFY_OK;
 	case PM_POST_RESTORE:
 	case PM_POST_SUSPEND:
@@ -213,76 +222,12 @@ static int exynos_busfreq_reboot_event(struct notifier_block *this,
 	unsigned long voltage = opp_get_voltage(data->max_opp);
 	unsigned long freq = opp_get_freq(data->max_opp);
 
-	if (!IS_ERR(data->vdd_mif)) {
-		regulator_set_voltage(data->vdd_mif, voltage,
-				voltage + 25000);
-		voltage = data->get_int_volt(freq);
-	}
+	regulator_set_voltage(data->vdd_mif, voltage, voltage + 25000);
+	voltage = data->get_int_volt(freq);
 	regulator_set_voltage(data->vdd_int, voltage, voltage + 25000);
 	data->use = false;
 
 	printk(KERN_INFO "REBOOT Notifier for BUSFREQ\n");
-	return NOTIFY_DONE;
-}
-
-static int exynos_busfreq_request_event(struct notifier_block *this,
-		unsigned long newfreq, void *device)
-{
-	struct busfreq_data *data = container_of(this, struct busfreq_data,
-			exynos_request_notifier);
-	struct opp *opp = opp_find_freq_ceil(data->dev, &newfreq);
-	unsigned long curr_freq;
-	unsigned int index, voltage;
-
-	index = data->get_table_index(opp);
-
-	if (newfreq == 0 || data->use == false)
-		return -EINVAL;
-
-	mutex_lock(&busfreq_lock);
-
-	curr_freq = opp_get_freq(data->curr_opp);
-	if (curr_freq >= newfreq) {
-		mutex_unlock(&busfreq_lock);
-		return NOTIFY_DONE;
-	}
-
-	voltage = opp_get_voltage(opp);
-	if (newfreq > curr_freq) {
-		if (!IS_ERR(data->vdd_mif)) {
-			regulator_set_voltage(data->vdd_mif, voltage,
-					voltage + 25000);
-			voltage = data->get_int_volt(index);
-		}
-		regulator_set_voltage(data->vdd_int, voltage,
-				voltage + 25000);
-		/*if (data->busfreq_prepare)
-			data->busfreq_prepare(index);*/
-	}
-
-#if defined(CONFIG_ARCH_EXYNOS4)	
-	if (data->set_qos)
-		data->set_qos(index);
-#endif
-	data->target(index);
-
-	if (newfreq < curr_freq) {
-		/*if (data->busfreq_post)
-			data->busfreq_post(index);*/
-		if (!IS_ERR(data->vdd_mif)) {
-			regulator_set_voltage(data->vdd_mif, voltage,
-					voltage + 25000);
-			voltage = data->get_int_volt(index);
-		}
-		regulator_set_voltage(data->vdd_int, voltage,
-				voltage + 25000);
-	}
-	data->curr_opp = opp;
-
-	update_busfreq_stat(data, index);
-
-	mutex_unlock(&busfreq_lock);
-	printk(KERN_DEBUG "REQUEST Notifier for BUSFREQ\n");
 	return NOTIFY_DONE;
 }
 
@@ -306,7 +251,7 @@ static ssize_t show_level_lock(struct device *device,
 
 	freq = bus_ctrl.opp_lock == NULL ? 0 : opp_get_freq(bus_ctrl.opp_lock);
 
-	len = sprintf(buf, "Current Freq(MIN/INT) : %lu\n", opp_get_freq(data->curr_opp));
+	len = sprintf(buf, "Current Freq(MIF/INT) : %lu\n", opp_get_freq(data->curr_opp));
 	len += sprintf(buf + len, "Current Lock Freq(MIF/INT) : %lu\n", freq);
 
 	return len;
@@ -359,41 +304,235 @@ static ssize_t show_time_in_state(struct device *device,
 	return len;
 }
 
-static DEVICE_ATTR(curr_freq, 0666, show_level_lock, store_level_lock);
-static DEVICE_ATTR(lock_list, 0666, show_locklist, NULL);
-static DEVICE_ATTR(time_in_state, 0666, show_time_in_state, NULL);
+static ssize_t show_up_threshold(struct device *device,
+		 struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", up_threshold);
+
+	return len;
+}
+static ssize_t store_up_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &up_threshold);
+	return count;
+}
+
+static ssize_t show_ppmu_threshold(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", ppmu_threshold);
+
+	return len;
+}
+static ssize_t store_ppmu_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &ppmu_threshold);
+	return count;
+}
+
+static ssize_t show_idle_threshold(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", idle_threshold);
+
+	return len;
+}
+static ssize_t store_idle_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &idle_threshold);
+	return count;
+}
+
+static ssize_t show_up_cpu_threshold(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", up_cpu_threshold);
+
+	return len;
+}
+static ssize_t store_up_cpu_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &up_cpu_threshold);
+	return count;
+}
+
+static ssize_t show_max_cpu_threshold(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", max_cpu_threshold);
+
+	return len;
+}
+static ssize_t store_max_cpu_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &max_cpu_threshold);
+	return count;
+}
+
+static ssize_t show_cpu_slope_size(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", cpu_slope_size);
+
+	return len;
+}
+static ssize_t store_cpu_slope_size(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &cpu_slope_size);
+	return count;
+}
+
+static ssize_t show_dmc_max_threshold(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", dmc_max_threshold);
+
+	return len;
+}
+static ssize_t store_dmc_max_threshold(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &dmc_max_threshold);
+	if (dmc_max_threshold < 1)
+		dmc_max_threshold = 1;
+	return count;
+}
+
+static ssize_t show_load_history_size(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	len = sprintf(buf, "%d\n", load_history_size);
+
+	return len;
+}
+static ssize_t store_load_history_size(struct device *device,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int ret;
+
+	ret = sscanf(buf, "%d", &load_history_size);
+	if (load_history_size < 1)
+		load_history_size = 1;
+	if (load_history_size > LOAD_HISTORY_SIZE)
+		load_history_size = LOAD_HISTORY_SIZE;
+	return count;
+}
+
+static DEVICE_ATTR(curr_freq, 0664, show_level_lock, store_level_lock);
+static DEVICE_ATTR(lock_list, 0664, show_locklist, NULL);
+static DEVICE_ATTR(time_in_state, 0664, show_time_in_state, NULL);
+static DEVICE_ATTR(up_threshold, 0664, show_up_threshold, store_up_threshold);
+static DEVICE_ATTR(ppmu_threshold, 0664, show_ppmu_threshold,
+					store_ppmu_threshold);
+static DEVICE_ATTR(idle_threshold, 0664, show_idle_threshold,
+					store_idle_threshold);
+static DEVICE_ATTR(up_cpu_threshold, 0664, show_up_cpu_threshold,
+					store_up_cpu_threshold);
+static DEVICE_ATTR(max_cpu_threshold, 0664, show_max_cpu_threshold,
+					store_max_cpu_threshold);
+static DEVICE_ATTR(cpu_slope_size, 0664, show_cpu_slope_size,
+					store_cpu_slope_size);
+static DEVICE_ATTR(dmc_max_threshold, 0664, show_dmc_max_threshold,
+					store_dmc_max_threshold);
+static DEVICE_ATTR(load_history_size, 0664, show_load_history_size,
+					store_load_history_size);
 
 static struct attribute *busfreq_attributes[] = {
 	&dev_attr_curr_freq.attr,
 	&dev_attr_lock_list.attr,
 	&dev_attr_time_in_state.attr,
+	&dev_attr_up_threshold.attr,
+	&dev_attr_ppmu_threshold.attr,
+	&dev_attr_idle_threshold.attr,
+	&dev_attr_up_cpu_threshold.attr,
+	&dev_attr_max_cpu_threshold.attr,
+	&dev_attr_cpu_slope_size.attr,
+	&dev_attr_dmc_max_threshold.attr,
+	&dev_attr_load_history_size.attr,
+
 	NULL
 };
 
-int exynos_request_register(struct notifier_block *n)
+void exynos_request_apply(unsigned long freq)
 {
-	return blocking_notifier_chain_register(&exynos_busfreq_notifier_list, n);
-}
+	struct opp *opp;
+	unsigned int index;
 
-void exynos_request_apply(unsigned long freq, struct device *dev)
-{
-	blocking_notifier_call_chain(&exynos_busfreq_notifier_list, freq, dev);
+	mutex_lock(&busfreq_lock);
+
+	if (!bus_ctrl.init_done)
+		goto out;
+
+	opp = bus_ctrl.data->curr_opp;
+
+	opp = opp_find_freq_ceil(bus_ctrl.data->dev, &freq);
+
+	if (bus_ctrl.opp_lock)
+		opp = bus_ctrl.opp_lock;
+
+	if (opp_get_freq(bus_ctrl.data->curr_opp) >= opp_get_freq(opp))
+		goto out;
+
+	index = _target(bus_ctrl.data, opp);
+
+	update_busfreq_stat(bus_ctrl.data, index);
+
+out:
+	mutex_unlock(&busfreq_lock);
 }
 
 static __devinit int exynos_busfreq_probe(struct platform_device *pdev)
 {
 	struct busfreq_data *data;
-	unsigned int val;
+	unsigned int val = 0;
 
-	if (!soc_is_exynos5250()) {
-		val = __raw_readl(S5P_VA_DMC0 + 0x4);
-		val = (val >> 8) & 0xf;
+#ifdef CONFIG_ARM_TRUSTZONE
+	exynos_smc_readsfr(EXYNOS4_PA_DMC0_4212 + 0x4, &val);
+#else
+	val = __raw_readl(S5P_VA_DMC0 + 0x4);
+#endif
+	val = (val >> 8) & 0xf;
 
-		/* Check Memory Type Only support -> 0x5: 0xLPDDR2 */
-		if (val != 0x05) {
-			pr_err("[ %x ] Memory Type Undertermined.\n", val);
-			return -ENODEV;
-		}
+	/* Check Memory Type Only support -> 0x5: 0xLPDDR2 */
+	if (val != 0x05) {
+		pr_err("[ %x ] Memory Type Undertermined.\n", val);
+		return -ENODEV;
 	}
 
 	data = kzalloc(sizeof(struct busfreq_data), GFP_KERNEL);
@@ -407,34 +546,29 @@ static __devinit int exynos_busfreq_probe(struct platform_device *pdev)
 	data->exynos_reboot_notifier.notifier_call =
 		exynos_busfreq_reboot_event;
 	data->busfreq_attr_group.attrs = busfreq_attributes;
-	data->exynos_request_notifier.notifier_call =
-		exynos_busfreq_request_event;
 
-	if (soc_is_exynos5250()) {
-		data->init = exynos5250_init;
-		data->target = exynos5250_target;
-		data->get_int_volt = exynos5250_get_int_volt;
-		data->get_table_index = exynos5250_get_table_index;
-		data->monitor = exynos5250_monitor;
-		data->busfreq_suspend = exynos5250_suspend;
-		data->busfreq_resume = exynos5250_resume;
-	} else {
+	if (soc_is_exynos4212() || soc_is_exynos4412()) {
 		data->init = exynos4x12_init;
 		data->target = exynos4x12_target;
 		data->get_int_volt = exynos4x12_get_int_volt;
 		data->get_table_index = exynos4x12_get_table_index;
+		data->check_tc_volt = exynos4x12_compensate_temp;
 		data->monitor = exynos4x12_monitor;
 		data->busfreq_prepare = exynos4x12_prepare;
 		data->busfreq_post = exynos4x12_post;
 		data->set_qos = exynos4x12_set_qos;
 		data->busfreq_suspend = exynos4x12_suspend;
 		data->busfreq_resume = exynos4x12_resume;
+	} else {
+		pr_err("Unsupport device type.\n");
+		goto err_busfreq;
 	}
 
 	data->dev = &pdev->dev;
 	data->sampling_rate = usecs_to_jiffies(100000);
 	bus_ctrl.opp_lock =  NULL;
 	bus_ctrl.dev =  data->dev;
+	bus_ctrl.data =  data;
 
 	INIT_DELAYED_WORK(&data->worker, exynos_busfreq_timer);
 
@@ -466,12 +600,10 @@ static __devinit int exynos_busfreq_probe(struct platform_device *pdev)
 	}
 
 	data->use = true;
+	bus_ctrl.init_done = true;
 
 	if (register_reboot_notifier(&data->exynos_reboot_notifier))
 		pr_err("Failed to setup reboot notifier\n");
-
-	if (exynos_request_register(&data->exynos_request_notifier))
-		pr_err("Failed to setup request notifier\n");
 
 	platform_set_drvdata(pdev, data);
 

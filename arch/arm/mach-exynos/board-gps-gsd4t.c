@@ -4,11 +4,11 @@
 #include <linux/platform_device.h>
 #include <mach/gpio.h>
 #include <plat/gpio-cfg.h>
+#include <mach/board-gps.h>
 
-extern struct class *sec_class;
 static struct device *gps_dev;
 
-static int __init u1_gps_init(void)
+static int __init gps_gsd4t_init(void)
 {
 	BUG_ON(!sec_class);
 	gps_dev = device_create(sec_class, NULL, 0, NULL, "gps");
@@ -18,12 +18,6 @@ static int __init u1_gps_init(void)
 	s3c_gpio_setpull(GPIO_GPS_RXD, S3C_GPIO_PULL_UP);
 	s3c_gpio_cfgpin(GPIO_GPS_TXD, S3C_GPIO_SFN(GPIO_GPS_TXD_AF));
 	s3c_gpio_setpull(GPIO_GPS_TXD, S3C_GPIO_PULL_NONE);
-#ifdef CONFIG_MACH_Q1_BD
-	s3c_gpio_cfgpin(GPIO_GPS_CTS, S3C_GPIO_SFN(GPIO_GPS_CTS_AF));
-	s3c_gpio_setpull(GPIO_GPS_CTS, S3C_GPIO_PULL_NONE);
-	s3c_gpio_cfgpin(GPIO_GPS_RTS, S3C_GPIO_SFN(GPIO_GPS_RTS_AF));
-	s3c_gpio_setpull(GPIO_GPS_RTS, S3C_GPIO_PULL_NONE);
-#endif
 
 	if (gpio_request(GPIO_GPS_nRST, "GPS_nRST"))
 		WARN(1, "fail to request gpio (GPS_nRST)\n");
@@ -31,6 +25,7 @@ static int __init u1_gps_init(void)
 	s3c_gpio_setpull(GPIO_GPS_nRST, S3C_GPIO_PULL_UP);
 	s3c_gpio_cfgpin(GPIO_GPS_nRST, S3C_GPIO_OUTPUT);
 	gpio_direction_output(GPIO_GPS_nRST, 1);
+
 #ifdef CONFIG_TARGET_LOCALE_NTT
 	if (system_rev >= 11) {
 		if (gpio_request(GPIO_GPS_PWR_EN, "GPS_PWR_EN"))
@@ -92,4 +87,4 @@ static int __init u1_gps_init(void)
 	return 0;
 }
 
-device_initcall(u1_gps_init);
+device_initcall(gps_gsd4t_init);

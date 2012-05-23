@@ -25,11 +25,14 @@
 #include <linux/irq.h>
 #include <linux/gpio.h>
 #include <linux/slab.h>
+#include <linux/kobject.h>
+
 #include <asm/irq.h>
 
 #include <mach/regs-tmu.h>
 #include <mach/cpufreq.h>
 #include <mach/map.h>
+#include <mach/smc.h>
 #include <plat/s5p-tmu.h>
 #include <plat/map-s5p.h>
 #include <plat/gpio-cfg.h>
@@ -37,20 +40,77 @@
 
 #define CONFIG_TMU_DEBUG
 
+/* for factory mode */
+#define CONFIG_TMU_SYSFS
+
 /* flags that throttling or trippint is treated */
 #define THROTTLE_FLAG (0x1 << 0)
 #define WARNING_FLAG (0x1 << 1)
 #define TRIPPING_FLAG	(0x1 << 2)
 #define MEM_THROTTLE_FLAG (0x1 << 4)
 
+#define TIMING_AREF_OFFSET	0x30
+
 static struct workqueue_struct  *tmu_monitor_wq;
 
 static DEFINE_MUTEX(tmu_lock);
 
+#ifdef CONFIG_ARCH_EXYNOS4
+struct s5p_tmu_info_extend {
+	void __iomem *tmu_base;
+	unsigned char te1; /* triminfo_25 */
+};
+static struct s5p_tmu_info_extend info_ex;
+
+unsigned int get_curr_temp_extend(void)
+{
+	unsigned char curr_temp_code;
+	int temperature;
+
+	if (!info_ex.tmu_base) {
+		/* Called before tmu driver is loaded, can't read current_temp
+		 * So return 0 for minimum voltage.
+		*/
+		pr_info("called before loading tmu driver!\n");
+		return 0;
+	}
+
+	if (!info_ex.tmu_base) {
+		/* Called before tmu driver is loaded, can't read current_temp
+		 * So return 0 for minimum voltage.
+		*/
+		pr_info("called before loading tmu driver!\n");
+		return 0;
+	}
+
+	/* After reading temperature code from register, compensating
+	 * its value and calculating celsius temperatue,
+	 * get current temperatue.
+	*/
+	curr_temp_code =
+		__raw_readl(info_ex.tmu_base + EXYNOS4_TMU_CURRENT_TEMP) & 0xff;
+	pr_debug("CURRENT_TEMP = 0x%02x\n", curr_temp_code);
+
+	/* compensate and calculate current temperature */
+	temperature = curr_temp_code - info_ex.te1 + TMU_DC_VALUE;
+	if (temperature < 0) {
+		/* temperature code range are extended btn min 0 & 125 */
+		pr_info("current temp is under %d celsius degree!\n", temperature);
+		temperature = 0;
+	}
+
+	return (unsigned int)temperature;
+}
+EXPORT_SYMBOL_GPL(get_curr_temp_extend);
+#endif
+
 static unsigned int get_curr_temp(struct s5p_tmu_info *info)
 {
 	unsigned char curr_temp_code;
-	unsigned int temperature;
+	int temperature;
+
+	if (!info)
+		return -EAGAIN;
 
 	/* After reading temperature code from register, compensating
 	 * its value and calculating celsius temperatue,
@@ -59,19 +119,11 @@ static unsigned int get_curr_temp(struct s5p_tmu_info *info)
 	curr_temp_code =
 		__raw_readl(info->tmu_base + EXYNOS4_TMU_CURRENT_TEMP) & 0xff;
 
-	/*
-	 * If the register value is invalid,
-	 * return minimum temperature
-	 */
-	if (curr_temp_code < 49 || curr_temp_code > 151) {
-		/* Reset value of the register is 0. DO NOT print error log */
-		if (curr_temp_code != 0)
-			pr_err("temperature code(%d) error\n", curr_temp_code);
-		else
-			pr_debug("temperature code is 0\n");
-
-		return TEMP_MIN_CELCIUS;
-	}
+	/* Check range of temprature code with curr_temp_code & efusing info */
+	pr_debug("CURRENT_TEMP = 0x%02x\n", curr_temp_code);
+	if ((curr_temp_code - info->te1) < 0 || (curr_temp_code - info->te1) > 100)
+		pr_err("temperature code is in inaccurate range->"
+			"check if vdd_18_ts is on or room temperature.\n");
 
 	/* compensate and calculate current temperature */
 	temperature = curr_temp_code - info->te1 + TMU_DC_VALUE;
@@ -80,10 +132,51 @@ static unsigned int get_curr_temp(struct s5p_tmu_info *info)
 		pr_info("current temp is under %d celsius degree!\n", TEMP_MIN_CELCIUS);
 		temperature = TEMP_MIN_CELCIUS;
 	}
-	pr_debug("CURRENT_TEMP = 0x%02x\n", curr_temp_code);
-
-	return temperature;
+	return (unsigned int)temperature;
 }
+
+static ssize_t show_temperature(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct s5p_tmu_info *info = dev_get_drvdata(dev);
+	unsigned int temperature;
+
+	if (!dev)
+		return -ENODEV;
+
+	mutex_lock(&tmu_lock);
+
+	temperature = get_curr_temp(info);
+
+	mutex_unlock(&tmu_lock);
+
+	return sprintf(buf, "%d\n", temperature);
+}
+
+static ssize_t show_tmu_state(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct s5p_tmu_info *info = dev_get_drvdata(dev);
+
+	if (!dev)
+		return -ENODEV;
+
+	return sprintf(buf, "%d\n", info->tmu_state);
+}
+
+static ssize_t show_lot_id(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	u32 id1 = 0;
+	u32 id2 = 0;
+	id1 = __raw_readl(S5P_VA_CHIPID + 0x14);
+	id2 = __raw_readl(S5P_VA_CHIPID + 0x18);
+
+	return sprintf(buf, "%08x-%08x\n", id1, id2);
+}
+static DEVICE_ATTR(temperature, 0444, show_temperature, NULL);
+static DEVICE_ATTR(tmu_state, 0444, show_tmu_state, NULL);
+static DEVICE_ATTR(lot_id, 0444, show_lot_id, NULL);
 
 static void print_temperature_params(struct s5p_tmu_info *info)
 {
@@ -130,6 +223,8 @@ static int tmu_limit_on;
 static int freq_limit_1st_throttle;
 static int freq_limit_2nd_throttle;
 static int set_sampling_rate;
+
+static int tmu_print_temp_on_off;
 
 static int __init get_temperature_params(char *str)
 {
@@ -217,13 +312,50 @@ static void exynos4_poll_cur_temp(struct work_struct *work)
 	mutex_lock(&tmu_lock);
 
 	cur_temp = get_curr_temp(info);
-	pr_debug("curr temp in polling_interval = %d\n", cur_temp);
+
+	if (tmu_print_temp_on_off)
+		pr_info("curr temp in polling_interval = %d state = %d\n"
+				, cur_temp, info->tmu_state);
+	else
+		pr_debug("curr temp in polling_interval = %d\n", cur_temp);
 
 	queue_delayed_work_on(0, tmu_monitor_wq, &info->monitor,
 			info->monitor_period);
 
 	mutex_unlock(&tmu_lock);
 }
+
+static ssize_t tmu_show_print_state(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int ret;
+
+	ret = sprintf(buf, "[TMU] tmu_print_temp_on_off=%d\n"
+					, tmu_print_temp_on_off);
+
+	return ret;
+}
+
+static ssize_t tmu_store_print_state(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	int ret = 0;
+
+	if (!strncmp(buf, "0", 1)) {
+		tmu_print_temp_on_off = 0;
+		ret = 0;
+	} else if (!strncmp(buf, "1", 1)) {
+		tmu_print_temp_on_off = 1;
+		ret = 1;
+	} else {
+		dev_err(dev, "Invalid cmd !!\n");
+		return -EINVAL;
+	}
+
+	return ret;
+}
+static DEVICE_ATTR(print_state, S_IRUGO | S_IWUSR,\
+	tmu_show_print_state, tmu_store_print_state);
 #endif
 
 void set_refresh_rate(unsigned int auto_refresh)
@@ -233,13 +365,33 @@ void set_refresh_rate(unsigned int auto_refresh)
 	 * refresh_usec =  (unsigned int)(fMicrosec * 10);
 	 * uRegVal = ((unsigned int)(uRlk * uMicroSec / 100)) - 1;
 	*/
-	pr_info("@@@ set_auto_refresh = 0x%02x\n", auto_refresh);
+	pr_debug("@@@ set_auto_refresh = 0x%02x\n", auto_refresh);
 
+#ifdef CONFIG_ARCH_EXYNOS4
+#ifdef CONFIG_ARM_TRUSTZONE
+	exynos_smc(SMC_CMD_REG,
+		SMC_REG_ID_SFR_W((EXYNOS4_PA_DMC0_4212 + TIMING_AREF_OFFSET)),
+		auto_refresh, 0);
+	exynos_smc(SMC_CMD_REG,
+		SMC_REG_ID_SFR_W((EXYNOS4_PA_DMC1_4212 + TIMING_AREF_OFFSET)),
+		auto_refresh, 0);
+#else
 	/* change auto refresh period in TIMING_AREF register of dmc0  */
-	__raw_writel(auto_refresh, S5P_VA_DMC0 + 0x30);
+	__raw_writel(auto_refresh, S5P_VA_DMC0 + TIMING_AREF_OFFSET);
 
 	/* change auto refresh period in TIMING_AREF regisger of dmc1 */
-	__raw_writel(auto_refresh, S5P_VA_DMC1 + 0x30);
+	__raw_writel(auto_refresh, S5P_VA_DMC1 + TIMING_AREF_OFFSET);
+#endif
+#else	/* CONFIG_ARCH_EXYNOS4 */
+#ifdef CONFIG_ARM_TRUSTZONE
+	exynos_smc(SMC_CMD_REG,
+		SMC_REG_ID_SFR_W((EXYNOS5_PA_DMC + TIMING_AREF_OFFSET)),
+		auto_refresh, 0);
+#else
+	/* change auto refresh period in TIMING_AREF register of dmc */
+	__raw_writel(auto_refresh, S5P_VA_DMC0 + TIMING_AREF_OFFSET);
+#endif
+#endif	/* CONFIG_ARCH_EXYNOS4 */
 }
 
 static void set_temperature_params(struct s5p_tmu_info *info)
@@ -315,7 +467,6 @@ static void exynos4_handler_tmu_state(struct work_struct *work)
 			pr_info("change state: normal->throttle.\n");
 		/* 2. polling end and uevent */
 		} else if ((cur_temp <= data->ts.stop_1st_throttle)
-			&& (trend < 0)
 			&& (cur_temp <= data->ts.stop_mem_throttle)) {
 			if (check_handle & THROTTLE_FLAG) {
 				exynos_cpufreq_upper_limit_free(DVFS_LOCK_ID_TMU);
@@ -341,7 +492,7 @@ static void exynos4_handler_tmu_state(struct work_struct *work)
 			pr_info("change state: 1st throttle->2nd throttle.\n");
 		/* 2. cpufreq limitation and uevent */
 		} else if ((cur_temp >= data->ts.start_1st_throttle) &&
-			(trend > 0) && !(check_handle & THROTTLE_FLAG)) {
+			!(check_handle & THROTTLE_FLAG)) {
 			if (check_handle & WARNING_FLAG) {
 				exynos_cpufreq_upper_limit_free(DVFS_LOCK_ID_TMU);
 				check_handle &= ~(WARNING_FLAG);
@@ -366,8 +517,8 @@ static void exynos4_handler_tmu_state(struct work_struct *work)
 			info->tmu_state = TMU_STATUS_TRIPPED;
 			pr_info("change state: 2nd throttle->trip\n");
 		/* 2. cpufreq limitation and uevent */
-		} else if ((cur_temp >= data->ts.start_2nd_throttle)
-			&& (trend > 0) && !(check_handle & WARNING_FLAG)) {
+		} else if ((cur_temp >= data->ts.start_2nd_throttle) &&
+			!(check_handle & WARNING_FLAG)) {
 			if (check_handle & THROTTLE_FLAG) {
 				exynos_cpufreq_upper_limit_free(DVFS_LOCK_ID_TMU);
 				check_handle &= ~(THROTTLE_FLAG);
@@ -557,6 +708,9 @@ static int exynos4x12_tmu_init(struct s5p_tmu_info *info)
 
 	tmp  = __raw_readl(info->tmu_base + EXYNOS4_TMU_TRIMINFO);
 	info->te1 = tmp & TMU_TRIMINFO_MASK;
+#ifdef CONFIG_ARCH_EXYNOS4
+	info_ex.te1 = info->te1;
+#endif
 
 	/* In case of non e-fusing chip, s/w workaround */
 	if (tmp == 0)
@@ -634,7 +788,7 @@ static irqreturn_t exynos4x12_tmu_irq_handler(int irq, void *id)
 
 	disable_irq_nosync(irq);
 
-	status = __raw_readl(info->tmu_base + EXYNOS4_TMU_INTSTAT) & 0xFF;
+	status = __raw_readl(info->tmu_base + EXYNOS4_TMU_INTSTAT) & 0x1FF;
 	pr_info("EXYNOS4x12_tmu interrupt: INTSTAT = 0x%08x\n", status);
 
 	/* To handle multiple interrupt pending,
@@ -705,6 +859,22 @@ static irqreturn_t exynos4210_tmu_irq_handler(int irq, void *id)
 	return IRQ_HANDLED;
 }
 
+#ifdef CONFIG_TMU_SYSFS
+static ssize_t s5p_tmu_show_curr_temp(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct s5p_tmu_info *info = dev_get_drvdata(dev);
+	unsigned int curr_temp;
+
+	curr_temp = get_curr_temp(info);
+	curr_temp *= 10;
+	pr_info("curr temp = %d\n", curr_temp);
+
+	return sprintf(buf, "%d\n", curr_temp);
+}
+static DEVICE_ATTR(curr_temp, S_IRUGO, s5p_tmu_show_curr_temp, NULL);
+#endif
+
 static int __devinit s5p_tmu_probe(struct platform_device *pdev)
 {
 	struct s5p_tmu_info *info;
@@ -769,14 +939,17 @@ static int __devinit s5p_tmu_probe(struct platform_device *pdev)
 	info->tmu_base = ioremap(res->start, (res->end - res->start) + 1);
 	if (!(info->tmu_base)) {
 		dev_err(&pdev->dev, "failed ioremap()\n");
-		ret = -EINVAL;
+		ret = -ENOMEM;
 		goto err_nomap;
 	}
-
+#ifdef CONFIG_ARCH_EXYNOS4
+	info_ex.tmu_base = info->tmu_base;
+#endif
 	tmu_monitor_wq = create_freezable_workqueue(dev_name(&pdev->dev));
 	if (!tmu_monitor_wq) {
 		pr_info("Creation of tmu_monitor_wq failed\n");
-		return -EFAULT;
+		ret = -ENOMEM;
+		goto err_wq;
 	}
 
 #ifdef CONFIG_TMU_DEBUG
@@ -806,17 +979,66 @@ static int __devinit s5p_tmu_probe(struct platform_device *pdev)
 		goto err_irq;
 	}
 
+	ret = device_create_file(&pdev->dev, &dev_attr_temperature);
+	if (ret != 0) {
+		pr_err("Failed to create temperatue file: %d\n", ret);
+		goto err_sysfs_file1;
+	}
+
+	ret = device_create_file(&pdev->dev, &dev_attr_tmu_state);
+	if (ret != 0) {
+		pr_err("Failed to create tmu_state file: %d\n", ret);
+		goto err_sysfs_file2;
+	}
+	ret = device_create_file(&pdev->dev, &dev_attr_lot_id);
+	if (ret != 0) {
+		pr_err("Failed to create lot id file: %d\n", ret);
+		goto err_sysfs_file3;
+	}
+
 	ret = tmu_initialize(pdev);
 	if (ret)
 		goto err_init;
 
+#ifdef CONFIG_TMU_SYSFS
+	ret = device_create_file(&pdev->dev, &dev_attr_curr_temp);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "Failed to create sysfs group\n");
+		goto err_init;
+	}
+#endif
+
+#ifdef CONFIG_TMU_DEBUG
+	ret = device_create_file(&pdev->dev, &dev_attr_print_state);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to create tmu sysfs group\n\n");
+		return ret;
+	}
+#endif
+
+	/* initialize tmu_state */
+	queue_delayed_work_on(0, tmu_monitor_wq, &info->polling,
+		info->sampling_rate);
+
 	return ret;
 
 err_init:
+	device_remove_file(&pdev->dev, &dev_attr_lot_id);
+
+err_sysfs_file3:
+	device_remove_file(&pdev->dev, &dev_attr_tmu_state);
+
+err_sysfs_file2:
+	device_remove_file(&pdev->dev, &dev_attr_temperature);
+
+err_sysfs_file1:
 	if (info->irq >= 0)
 		free_irq(info->irq, info);
 
 err_irq:
+	destroy_workqueue(tmu_monitor_wq);
+
+err_wq:
 	iounmap(info->tmu_base);
 
 err_nomap:
@@ -838,6 +1060,10 @@ static int __devinit s5p_tmu_remove(struct platform_device *pdev)
 	struct s5p_tmu_info *info = platform_get_drvdata(pdev);
 
 	cancel_delayed_work(&info->polling);
+	destroy_workqueue(tmu_monitor_wq);
+
+	device_remove_file(&pdev->dev, &dev_attr_temperature);
+	device_remove_file(&pdev->dev, &dev_attr_tmu_state);
 
 	if (info->irq >= 0)
 		free_irq(info->irq, info);
@@ -941,4 +1167,9 @@ static int __init s5p_tmu_driver_init(void)
 	return platform_driver_register(&s5p_tmu_driver);
 }
 
+static void __exit s5p_tmu_driver_exit(void)
+{
+	platform_driver_unregister(&s5p_tmu_driver);
+}
 late_initcall(s5p_tmu_driver_init);
+module_exit(s5p_tmu_driver_exit);

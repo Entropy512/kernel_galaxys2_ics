@@ -24,6 +24,10 @@ extern struct max77693_regulator_data max77693_regulators;
 
 #ifdef CONFIG_SLP
 extern int __init midas_nfc_init(int i2c_bus);
+
+/* NTC thermistor */
+extern struct platform_device midas_ncp15wb473_thermistor;
+extern int __init adc_ntc_init(int port);
 #endif
 
 /* wifi */

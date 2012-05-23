@@ -4,11 +4,11 @@
 #include <linux/platform_device.h>
 #include <mach/gpio.h>
 #include <plat/gpio-cfg.h>
+#include <mach/board-gps.h>
 
-extern struct class *sec_class;
 static struct device *gps_dev;
 
-static int __init px_gps_init(void)
+static int __init gps_bcm475x_init(void)
 {
 	int n_rst_pin = 0;
 	int n_rst_nc_pin = 0;
@@ -62,4 +62,4 @@ static int __init px_gps_init(void)
 	return 0;
 }
 
-device_initcall(px_gps_init);
+device_initcall(gps_bcm475x_init);

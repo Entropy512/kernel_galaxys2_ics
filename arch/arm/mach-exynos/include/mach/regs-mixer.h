@@ -100,6 +100,7 @@
 #define S5P_MXR_CFG_PAL				(1 << 1)
 #define S5P_MXR_CFG_SD				(0 << 0)
 #define S5P_MXR_CFG_HD				(1 << 0)
+#define S5P_MXR_CFG_RGB_FORMAT_MASK		(0xFF << 9)
 
 /* MIXER_INT_EN */
 #define S5P_MXR_INT_EN_VSYNC_ENABLE		(1 << 11)

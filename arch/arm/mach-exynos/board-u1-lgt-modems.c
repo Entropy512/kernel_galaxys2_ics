@@ -164,36 +164,6 @@ struct cbp_edpram_ipc_cfg {
 	u16 mbx_cp2ap;
 };
 
-struct cbp_edpram_circ {
-	u16 __iomem *head;
-	u16 __iomem *tail;
-	u8  __iomem *buff;
-	u32          size;
-};
-
-struct cbp_edpram_ipc_device {
-	char name[16];
-	int  id;
-
-	struct cbp_edpram_circ txq;
-	struct cbp_edpram_circ rxq;
-
-	u16 mask_req_ack;
-	u16 mask_res_ack;
-	u16 mask_send;
-};
-
-struct cbp_edpram_ipc_map {
-	u16 __iomem *magic;
-	u16 __iomem *access;
-
-	struct cbp_edpram_ipc_device dev[MAX_CBP_EDPRAM_IPC_DEV];
-
-	u16 __iomem *mbx_ap2cp;
-	u16 __iomem *mbx_cp2ap;
-};
-
-
 struct cbp_edpram_boot_map {
 	u8  __iomem *buff;
 	u16  __iomem *frame_size;
@@ -201,7 +171,7 @@ struct cbp_edpram_boot_map {
 	u16  __iomem *count;
 };
 
-static struct cbp_edpram_ipc_map cbp_ipc_map;
+static struct dpram_ipc_map cbp_ipc_map;
 
 struct _param_nv {
 	unsigned char *addr;
@@ -961,7 +931,7 @@ static int mdm_dload(void *arg, struct modemlink_dpram_control *dpctl)
 		}
 		msleep_interruptible(10);
 		count++;
-		if (count > 1000) {
+		if (count > 2000) {
 			pr_err("[LNK/E]<%s:%d>\n", __func__, __LINE__);
 			vfree(img);
 			kfree(data_param);
@@ -1268,7 +1238,7 @@ static u8 *cbp_edpram_remap_mem_region(struct sromc_cfg *cfg)
 	int			      dp_size = 0;
 	u8 __iomem                   *dp_base = NULL;
 	struct cbp_edpram_ipc_cfg    *ipc_map = NULL;
-	struct cbp_edpram_ipc_device *dev = NULL;
+	struct dpram_ipc_device *dev = NULL;
 
 	dp_addr = cfg->addr;
 	dp_size = cfg->size;

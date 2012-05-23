@@ -14,25 +14,71 @@
 #include <linux/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pm_runtime.h>
+#include <linux/slab.h>
+#include <linux/mm.h>
+
+#include <asm/memory.h>
+#include <asm/cacheflush.h>
 
 #include <plat/devs.h>
 #include <plat/pd.h>
 
 #include <mach/secmem.h>
+#include <mach/cpufreq.h>
+#include <mach/dev.h>
+
+#define DRM_CPU_FREQ	400000
+#define DRM_BUS_FREQ	267160
 
 struct miscdevice secmem;
 struct secmem_crypto_driver_ftn *crypto_driver;
+#if defined(CONFIG_ION)
+extern struct ion_device *ion_exynos;
+#endif
 
+#if defined(CONFIG_MACH_MIDAS)
+static char *secmem_info[] = {
+	"mfc",		/* 0 */
+	"fimc",         /* 1 */
+	"mfc-shm",      /* 2 */
+	"sectbl",       /* 3 */
+	"fimd",		/* 4 */
+	NULL
+};
+#else
 static char *secmem_info[] = {
 	"mfc",		/* 0 */
 	"fimc",		/* 1 */
 	"mfc-shm",	/* 2 */
 	"sectbl",	/* 3 */
 	"video",	/* 4 */
+	"fimd",		/* 5 */
 	NULL
 };
+#endif
 
 static bool drm_onoff = false;
+
+#define SECMEM_IS_PAGE_ALIGNED(addr) (!((addr) & (~PAGE_MASK)))
+
+static int secmem_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	unsigned long size = vma->vm_end - vma->vm_start;
+
+	BUG_ON(!SECMEM_IS_PAGE_ALIGNED(vma->vm_start));
+	BUG_ON(!SECMEM_IS_PAGE_ALIGNED(vma->vm_end));
+
+	vma->vm_flags |= VM_RESERVED;
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+				size, vma->vm_page_prot)) {
+		printk(KERN_ERR "%s : remap_pfn_range() failed!\n", __func__);
+		return -EAGAIN;
+	}
+
+	return 0;
+}
 
 static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -71,7 +117,44 @@ static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (copy_to_user((void __user *)arg, &minfo, sizeof(minfo)))
 			return -EFAULT;
 	}
+#if defined(CONFIG_ION) && defined(CONFIG_CPU_EXYNOS5250)
+	case SECMEM_IOC_GET_FD_PHYS_ADDR:
+	{
+		struct ion_client *client;
+		struct secfd_info fd_info;
+		struct ion_fd_data data;
+		size_t len;
+
+		if (copy_from_user(&fd_info, (int __user *)arg,
+					sizeof(fd_info)))
+			return -EFAULT;
+
+		client = ion_client_create(ion_exynos, -1, "DRM");
+		if (IS_ERR(client))
+			printk(KERN_ERR "%s: Failed to get ion_client of DRM\n",
+				__func__);
+
+		data.fd = fd_info.fd;
+		data.handle = ion_import_fd(client, data.fd);
+		printk(KERN_DEBUG "%s: fd from user space = %d\n",
+				__func__, fd_info.fd);
+		if (IS_ERR(data.handle))
+			printk(KERN_ERR "%s: Failed to get ion_handle of DRM\n",
+				__func__);
+
+		if (ion_phys(client, data.handle, &fd_info.phys, &len))
+			printk(KERN_ERR "%s: Failed to get phys. addr of DRM\n",
+				__func__);
+
+		printk(KERN_DEBUG "%s: physical addr from kernel space = %lu\n",
+				__func__, fd_info.phys);
+		ion_client_destroy(client);
+
+		if (copy_to_user((void __user *)arg, &fd_info, sizeof(fd_info)))
+			return -EFAULT;
 		break;
+	}
+#endif
 	case SECMEM_IOC_GET_DRM_ONOFF:
 		if (copy_to_user((void __user *)arg, &drm_onoff, sizeof(int)))
 			return -EFAULT;
@@ -79,25 +162,48 @@ static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case SECMEM_IOC_SET_DRM_ONOFF:
 	{
 		int val = 0;
+#if 0
+		unsigned int cpufreq;
+#if defined(CONFIG_BUSFREQ_OPP)
+		struct device *bus_dev=NULL;
+		bus_dev = dev_get("exynos-busfreq");
+#endif
+#endif
+
 		if (copy_from_user(&val, (int __user *)arg, sizeof(int)))
 			return -EFAULT;
 
 		if (val) {
+#if 0
+			exynos_cpufreq_get_level(DRM_CPU_FREQ, &cpufreq);
+			exynos_cpufreq_lock(DVFS_LOCK_ID_DRM, cpufreq);
+#if defined(CONFIG_BUSFREQ_OPP)
+			dev_lock(bus_dev, secmem.this_device, DRM_BUS_FREQ);
+#endif
+#endif
 			if (drm_onoff == false) {
 				drm_onoff = true;
 				pm_runtime_forbid((*(secmem.this_device)).parent);
+#if defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412)
 				exynos_pd_enable(&exynos4_device_pd[PD_MFC].dev);
+#endif
 			} else
 				printk(KERN_ERR "%s: DRM is already on\n", __func__);
 		} else {
+#if 0
+			exynos_cpufreq_lock_free(DVFS_LOCK_ID_DRM);
+#if defined(CONFIG_BUSFREQ_OPP)
+			dev_unlock(bus_dev, secmem.this_device);
+#endif
+#endif
 			if (drm_onoff == true) {
 				drm_onoff = false;
 				pm_runtime_allow((*(secmem.this_device)).parent);
 			} else
 				printk(KERN_ERR "%s: DRM is already off\n", __func__);
 		}
-	}
 		break;
+	}
 	case SECMEM_IOC_GET_CRYPTO_LOCK:
 	{
 		int i;
@@ -121,6 +227,41 @@ static long secmem_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return crypto_driver->release();
 		break;
 	}
+	case SECMEM_IOC_GET_ADDR:
+	{
+		struct secmem_region region;
+
+		if (copy_from_user(&region, (void __user *)arg,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+
+		region.virt_addr = kmalloc(region.len, GFP_KERNEL | GFP_DMA);
+		if (!region.virt_addr) {
+			printk(KERN_ERR "%s: Get memory address failed. [size : %ld]\n", __func__, region.len);
+			return -EFAULT;
+		}
+		region.phys_addr = virt_to_phys(region.virt_addr);
+
+		dmac_map_area(region.virt_addr, region.len / sizeof(unsigned long), 2);
+
+		if (copy_to_user((void __user *)arg, &region,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+		break;
+	}
+	case SECMEM_IOC_RELEASE_ADDR:
+	{
+		struct secmem_region region;
+
+		if (copy_from_user(&region, (void __user *)arg,
+					sizeof(struct secmem_region)))
+			return -EFAULT;
+
+		dmac_unmap_area(region.virt_addr, region.len, 2);
+
+		kfree(region.virt_addr);
+		break;
+	}
 	default:
 		return -ENOTTY;
 	}
@@ -142,6 +283,7 @@ EXPORT_SYMBOL(secmem_crypto_deregister);
 
 static struct file_operations secmem_fops = {
 	.unlocked_ioctl = &secmem_ioctl,
+	.mmap		= secmem_mmap,
 };
 
 static int __init secmem_init(void)

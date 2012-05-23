@@ -129,12 +129,24 @@ static int convert_adc_to_temper(struct sec_therm_info *info, unsigned int adc)
 static void notify_change_of_temperature(struct sec_therm_info *info)
 {
 	char temp_buf[20];
+	char siop_buf[20];
 	char *envp[2];
 	int env_offset = 0;
+	int siop_level = -1;
 
 	snprintf(temp_buf, sizeof(temp_buf), "TEMPERATURE=%d",
-			info->curr_temperature);
+		 info->curr_temperature);
 	envp[env_offset++] = temp_buf;
+
+	if (info->pdata->get_siop_level)
+		siop_level =
+		    info->pdata->get_siop_level(info->curr_temperature);
+	if (siop_level >= 0) {
+		snprintf(siop_buf, sizeof(siop_buf), "SIOP_LEVEL=%d",
+			 siop_level);
+		envp[env_offset++] = siop_buf;
+		dev_info(info->dev, "%s: uevent: %s\n", __func__, siop_buf);
+	}
 	envp[env_offset] = NULL;
 
 	dev_info(info->dev, "%s: uevent: %s\n", __func__, temp_buf);

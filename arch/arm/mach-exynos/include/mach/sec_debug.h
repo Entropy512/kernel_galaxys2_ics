@@ -6,6 +6,16 @@
 
 #ifdef CONFIG_SEC_DEBUG
 
+union sec_debug_level_t {
+	struct {
+		u16 kernel_fault;
+		u16 user_fault;
+	} en;
+	u32 uint_val;
+};
+
+extern union sec_debug_level_t sec_debug_level;
+
 extern int sec_debug_init(void);
 
 extern int sec_debug_magic_init(void);
@@ -62,23 +72,48 @@ static inline void sec_gaf_supply_rqinfo(unsigned short curr_offset,
 
 #endif
 
+struct worker;
+struct work_struct;
+
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG
-extern void sec_debug_task_sched_log(int cpu, struct task_struct *task);
-extern void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en);
-extern void sec_debug_sched_log_init(void);
+extern void __sec_debug_task_log(int cpu, struct task_struct *task);
+extern void __sec_debug_irq_log(unsigned int irq, void *fn, int en);
+extern void __sec_debug_work_log(struct worker *worker,
+				 struct work_struct *work, work_func_t f);
+
+static inline void sec_debug_task_log(int cpu, struct task_struct *task)
+{
+	if (sec_debug_level.en.kernel_fault)
+		__sec_debug_task_log(cpu, task);
+}
+
+static inline void sec_debug_irq_log(unsigned int irq, void *fn, int en)
+{
+	if (sec_debug_level.en.kernel_fault)
+		__sec_debug_irq_log(irq, fn, en);
+}
+
+static inline void sec_debug_work_log(struct worker *worker,
+				      struct work_struct *work, work_func_t f)
+{
+	if (sec_debug_level.en.kernel_fault)
+		__sec_debug_work_log(worker, work, f);
+}
 #else
-static inline void sec_debug_task_sched_log(int cpu, struct task_struct *task)
+static inline void sec_debug_task_log(int cpu, struct task_struct *task)
 {
 }
 
-static inline void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en)
+static inline void sec_debug_irq_log(unsigned int irq, void *fn, int en)
 {
 }
 
-static inline void sec_debug_sched_log_init(void)
+static inline void sec_debug_work_log(struct worker *worker,
+				      struct work_struct *work, work_func_t f)
 {
 }
 #endif
+
 #ifdef CONFIG_SEC_DEBUG_IRQ_EXIT_LOG
 extern void sec_debug_irq_last_exit_log(void);
 #else
@@ -128,61 +163,15 @@ static inline void debug_rwsemaphore_up_log(struct rw_semaphore *sem)
 }
 #endif
 
-/* klaatu - schedule log */
-#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
-#define SCHED_LOG_MAX 4096
-
-struct irq_log {
-	int cpu;
-	int irq;
-	void *fn;
-	int en;
+enum sec_debug_aux_log_idx {
+	SEC_DEBUG_AUXLOG_CPU_BUS_CLOCK_CHANGE,
+	SEC_DEBUG_AUXLOG_ITEM_MAX,
 };
 
-struct task_info {
-	char comm[TASK_COMM_LEN];
-	int cpu;
-	pid_t pid;
-};
-
-union task_log {
-	struct task_info task;
-	struct irq_log irq;
-};
-
-struct sched_log {
-	unsigned long long time;
-	union task_log log;
-};
-#endif				/* CONFIG_SEC_DEBUG_SCHED_LOG */
-
-#ifdef CONFIG_SEC_DEBUG_SEMAPHORE_LOG
-#define SEMAPHORE_LOG_MAX 100
-struct sem_debug {
-	struct list_head list;
-	struct semaphore *sem;
-	struct task_struct *task;
-	pid_t pid;
-	int cpu;
-	/* char comm[TASK_COMM_LEN]; */
-};
-
-enum {
-	READ_SEM,
-	WRITE_SEM
-};
-
-#define RWSEMAPHORE_LOG_MAX 100
-struct rwsem_debug {
-	struct list_head list;
-	struct rw_semaphore *sem;
-	struct task_struct *task;
-	pid_t pid;
-	int cpu;
-	int direction;
-	/* char comm[TASK_COMM_LEN]; */
-};
-
-#endif				/* CONFIG_SEC_DEBUG_SEMAPHORE_LOG */
+#ifdef CONFIG_SEC_DEBUG_AUXILIARY_LOG
+extern void sec_debug_aux_log(int idx, char *fmt, ...);
+#else
+#define sec_debug_aux_log(idx, ...) do { } while (0)
+#endif
 
 #endif				/* SEC_DEBUG_H */

@@ -20,8 +20,14 @@
 #include <linux/io.h>
 #include <linux/regulator/machine.h>
 
+#if defined(CONFIG_MACH_M0_CTC)
+#include <linux/mfd/max77693.h>
+#endif
+
 #include <asm/cacheflush.h>
 #include <asm/hardware/cache-l2x0.h>
+#include <asm/cputype.h>
+#include <asm/smp_scu.h>
 
 #include <plat/cpu.h>
 #include <plat/pm.h>
@@ -327,6 +333,9 @@ void exynos4_cpu_suspend(void)
 	}
 
 	outer_flush_all();
+
+	/* Disable the full line of zero */
+	disable_cache_foz();
 #ifdef CONFIG_ARM_TRUSTZONE
 	exynos_smc(SMC_CMD_SLEEP, 0, 0, 0);
 #else
@@ -386,27 +395,6 @@ static int exynos4_pm_add(struct sys_device *sysdev)
 #endif
 
 	return 0;
-}
-
-/* This function copy from linux/arch/arm/kernel/smp_scu.c */
-
-void exynos4_scu_enable(void __iomem *scu_base)
-{
-	u32 scu_ctrl;
-
-	scu_ctrl = __raw_readl(scu_base);
-	/* already enabled? */
-	if (scu_ctrl & 1)
-		return;
-
-	scu_ctrl |= 1;
-	__raw_writel(scu_ctrl, scu_base);
-
-	/*
-	 * Ensure that the data accessed by CPU0 before the SCU was
-	 * initialised is visible to the other CPUs.
-	 */
-	flush_cache_all();
 }
 
 static struct sysdev_driver exynos4_pm_driver = {
@@ -476,6 +464,12 @@ static int exynos4_pm_suspend(void)
 	return 0;
 }
 
+#if !defined(CONFIG_CPU_EXYNOS4210)
+#define CHECK_POINT printk(KERN_DEBUG "%s:%d\n", __func__, __LINE__)
+#else
+#define CHECK_POINT
+#endif
+
 static void exynos4_pm_resume(void)
 {
 	unsigned long tmp;
@@ -490,6 +484,7 @@ static void exynos4_pm_resume(void)
 		tmp |= S5P_CENTRAL_LOWPWR_CFG;
 		__raw_writel(tmp, S5P_CENTRAL_SEQ_CONFIGURATION);
 		/* No need to perform below restore code */
+		pr_info("%s: early_wakeup\n", __func__);
 		goto early_wakeup;
 	}
 
@@ -511,6 +506,23 @@ static void exynos4_pm_resume(void)
 		s3c_pm_do_restore(exynos4x12_regs_save,
 					ARRAY_SIZE(exynos4x12_regs_save));
 
+#if defined(CONFIG_MACH_M0_CTC)
+{
+	if (max7693_muic_cp_usb_state()) {
+		if (system_rev < 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 1);
+		} else if (system_rev == 11) {
+			gpio_direction_output(GPIO_USB_BOOT_EN, 1);
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 1);
+		} else {
+			gpio_direction_output(GPIO_USB_BOOT_EN_REV06, 1);
+		}
+	}
+}
+#endif
+
+	CHECK_POINT;
+
 	if (!exynos4_is_c2c_use())
 		s3c_pm_do_restore_core(exynos4_core_save, ARRAY_SIZE(exynos4_core_save));
 	else {
@@ -525,7 +537,11 @@ static void exynos4_pm_resume(void)
 	/* For the suspend-again to check the value */
 	s3c_suspend_wakeup_stat = __raw_readl(S5P_WAKEUP_STAT);
 
-	exynos4_scu_enable(S5P_VA_SCU);
+	CHECK_POINT;
+
+	scu_enable(S5P_VA_SCU);
+
+	CHECK_POINT;
 
 #ifdef CONFIG_CACHE_L2X0
 #ifdef CONFIG_ARM_TRUSTZONE
@@ -536,11 +552,18 @@ static void exynos4_pm_resume(void)
 				       exynos4_l2cc_save[1].val,
 				       exynos4_l2cc_save[2].val);
 
+	CHECK_POINT;
+
 	exynos_smc(SMC_CMD_L2X0SETUP2,
 			L2X0_DYNAMIC_CLK_GATING_EN | L2X0_STNDBY_MODE_EN,
 			0x7C470001, 0xC200FFFF);
 
+	CHECK_POINT;
+
 	exynos_smc(SMC_CMD_L2X0INVALL, 0, 0, 0);
+
+	CHECK_POINT;
+
 	exynos_smc(SMC_CMD_L2X0CTRL, 1, 0, 0);
 #else
 	s3c_pm_do_restore_core(exynos4_l2cc_save, ARRAY_SIZE(exynos4_l2cc_save));
@@ -548,11 +571,17 @@ static void exynos4_pm_resume(void)
 	/* enable L2X0*/
 	writel_relaxed(1, S5P_VA_L2CC + L2X0_CTRL);
 #endif
+	/* Enable the full line of zero */
+	enable_cache_foz();
 #endif
+
+	CHECK_POINT;
 
 early_wakeup:
 	if (!soc_is_exynos4210())
 		exynos4_reset_assert_ctrl(1);
+
+	CHECK_POINT;
 
 	/* Clear Check mode */
 	__raw_writel(0x0, REG_INFORM1);

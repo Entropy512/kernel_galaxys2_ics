@@ -28,8 +28,11 @@ static void s5p_dsim_enable_d_phy(unsigned char enable)
 {
 	unsigned int reg;
 
-	reg = (readl(S5P_MIPI_DPHY_CONTROL(0))) & ~(1 << 0);
-	reg |= (enable << 0);
+	reg = readl(S5P_MIPI_DPHY_CONTROL(0));
+	if (enable)
+		reg |= S5P_MIPI_DPHY_ENABLE;
+	else if (!(reg & S5P_MIPI_DPHY_SRESETN))
+		reg &= ~S5P_MIPI_DPHY_ENABLE;
 	writel(reg, S5P_MIPI_DPHY_CONTROL(0));
 }
 
@@ -67,6 +70,15 @@ void s5p_dsim_init_d_phy(unsigned int dsim_base)
 
 	/* enable DSI master block */
 	s5p_dsim_enable_dsi_master(1);
+}
+
+void s5p_dsim_exit_d_phy(unsigned int dsim_base)
+{
+	/* enable DSI master block */
+	s5p_dsim_enable_dsi_master(0);
+
+	/* enable D-PHY */
+	s5p_dsim_enable_d_phy(0);
 }
 
 static void exynos4_dsim_setup_24bpp(unsigned int start, unsigned int size,
