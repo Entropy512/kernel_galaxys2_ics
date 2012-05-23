@@ -91,11 +91,30 @@ void s5p_sysmmu_tlb_invalidate(struct device *owner);
  */
 void s5p_sysmmu_set_fault_handler(struct device *sysmmu,
 					s5p_sysmmu_fault_handler_t handler);
+
+/** s5p_sysmmu_set_prefbuf() - Initialize prefetch buffers of System MMU v3
+ *  @owner: The device which need to set the prefetch buffers
+ *  @base0: The start virtual address of the area of the @owner device that the
+ *          first prefetch buffer loads translation descriptors
+ *  @size0: The last virtual address of the area of the @owner device that the
+ *          first prefetch buffer loads translation descriptors.
+ *  @base1: The start virtual address of the area of the @owner device that the
+ *          second prefetch buffer loads translation descriptors. This will be
+ *          ignored if @size1 is 0 and this function assigns the 2 prefetch
+ *          buffers with each half of the area specified by @base0 and @size0
+ *  @size1: The last virtual address of the area of the @owner device that the
+ *          prefetch buffer loads translation descriptors. This can be 0. See
+ *          the description of @base1 for more information with @size1 = 0
+ */
+void s5p_sysmmu_set_prefbuf(struct device *owner,
+				unsigned long base0, unsigned long size0,
+				unsigned long base1, unsigned long size1);
 #else /* !CONFIG_S5P_SYSTEM_MMU */
 #define s5p_sysmmu_enable(owner, pgd) do { } while (0)
 #define s5p_sysmmu_disable(owner) do { } while (0)
 #define s5p_sysmmu_set_tablebase_pgd(owner, pgd) do { } while (0)
 #define s5p_sysmmu_tlb_invalidate(owner) do { } while (0)
 #define s5p_sysmmu_set_fault_handler(sysmmu, handler) do { } while (0)
+#define s5p_sysmmu_set_prefbuf(owner, base, size) do { } while (0)
 #endif
 #endif /* __ASM_PLAT_SYSMMU_H */
