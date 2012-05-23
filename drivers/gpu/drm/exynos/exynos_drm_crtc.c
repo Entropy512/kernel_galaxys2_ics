@@ -34,7 +34,6 @@
 #include "exynos_drm_fb.h"
 #include "exynos_drm_encoder.h"
 #include "exynos_drm_gem.h"
-#include "exynos_drm_buf.h"
 
 #define to_exynos_crtc(x)	container_of(x, struct exynos_drm_crtc,\
 				drm_crtc)
@@ -80,25 +79,22 @@ int exynos_drm_overlay_update(struct exynos_drm_overlay *overlay,
 	struct exynos_drm_gem_buf *buffer;
 	unsigned int actual_w;
 	unsigned int actual_h;
-	unsigned int buf_num;
-	int nr;
+	int nr = exynos_drm_format_num_buffers(fb->pixel_format);
+	int i;
 
-	overlay->pixel_format = fb->pixel_format;
-	buf_num = exynos_drm_fb_get_buf_num(fb);
-
-	for (nr = 0; nr < buf_num; nr++) {
-		buffer = exynos_drm_fb_get_buf(fb, nr);
+	for (i = 0; i < nr; i++) {
+		buffer = exynos_drm_fb_buffer(fb, i);
 		if (!buffer) {
-			DRM_LOG_KMS("buffer:%d is null.\n", nr);
+			DRM_LOG_KMS("buffer is null\n");
 			return -EFAULT;
 		}
 
-		overlay->dma_addrs[nr] = buffer->dma_addr;
-		overlay->vaddrs[nr] = buffer->kvaddr;
+		overlay->dma_addr[i] = buffer->dma_addr;
+		overlay->vaddr[i] = buffer->kvaddr;
 
-		DRM_DEBUG_KMS("buffer:%d vaddr = 0x%lx, dma_addr = 0x%lx\n", nr,
-			(unsigned long)overlay->vaddrs[nr],
-			(unsigned long)overlay->dma_addrs[nr]);
+		DRM_DEBUG_KMS("buffer: %d, vaddr = 0x%lx, dma_addr = 0x%lx\n",
+				i, (unsigned long)overlay->vaddr[i],
+				(unsigned long)overlay->dma_addr[i]);
 	}
 
 	actual_w = min((mode->hdisplay - pos->crtc_x), pos->crtc_w);
@@ -109,8 +105,11 @@ int exynos_drm_overlay_update(struct exynos_drm_overlay *overlay,
 	overlay->fb_y = pos->fb_y;
 	overlay->fb_width = fb->width;
 	overlay->fb_height = fb->height;
+	overlay->src_width = pos->src_w;
+	overlay->src_height = pos->src_h;
 	overlay->bpp = fb->bits_per_pixel;
-	overlay->pitch = fb->pitch;
+	overlay->pitch = fb->pitches[0];
+	overlay->pixel_format = fb->pixel_format;
 
 	/* set overlay range to be displayed. */
 	overlay->crtc_x = pos->crtc_x;
@@ -156,6 +155,8 @@ static int exynos_drm_crtc_update(struct drm_crtc *crtc)
 	pos.crtc_y = 0;
 	pos.crtc_w = fb->width - crtc->x;
 	pos.crtc_h = fb->height - crtc->y;
+	pos.src_w = pos.crtc_w;
+	pos.src_h = pos.crtc_h;
 
 	return exynos_drm_overlay_update(overlay, crtc->fb, mode, &pos);
 }
@@ -252,7 +253,11 @@ exynos_drm_crtc_mode_set(struct drm_crtc *crtc, struct drm_display_mode *mode,
 {
 	DRM_DEBUG_KMS("%s\n", __FILE__);
 
-	mode = adjusted_mode;
+	/*
+	 * copy the mode data adjusted by mode_fixup() into crtc->mode
+	 * so that hardware can be seet to proper mode.
+	 */
+	memcpy(&crtc->mode, adjusted_mode, sizeof(*adjusted_mode));
 
 	return exynos_drm_crtc_update(crtc);
 }
@@ -310,9 +315,6 @@ static int exynos_drm_crtc_page_flip(struct drm_crtc *crtc,
 		 */
 		event->pipe = exynos_crtc->pipe;
 
-		list_add_tail(&event->base.link,
-				&dev_priv->pageflip_event_list);
-
 		ret = drm_vblank_get(dev, exynos_crtc->pipe);
 		if (ret) {
 			DRM_DEBUG("failed to acquire vblank counter\n");
@@ -320,6 +322,9 @@ static int exynos_drm_crtc_page_flip(struct drm_crtc *crtc,
 
 			goto out;
 		}
+
+		list_add_tail(&event->base.link,
+				&dev_priv->pageflip_event_list);
 
 		crtc->fb = fb;
 		ret = exynos_drm_crtc_update(crtc);
@@ -429,9 +434,3 @@ void exynos_drm_crtc_disable_vblank(struct drm_device *dev, int crtc)
 	exynos_drm_fn_encoder(private->crtc[crtc], &crtc,
 			exynos_drm_disable_vblank);
 }
-
-MODULE_AUTHOR("Inki Dae <inki.dae@samsung.com>");
-MODULE_AUTHOR("Joonyoung Shim <jy0922.shim@samsung.com>");
-MODULE_AUTHOR("Seung-Woo Kim <sw0312.kim@samsung.com>");
-MODULE_DESCRIPTION("Samsung SoC DRM CRTC Driver");
-MODULE_LICENSE("GPL");

@@ -1,6 +1,6 @@
 /* exynos_drm_dmabuf.h
  *
- * Copyright (c) 2011 Samsung Electronics Co., Ltd.
+ * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  * Author: Inki Dae <inki.dae@samsung.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -27,15 +27,13 @@
 #define _EXYNOS_DRM_DMABUF_H_
 
 #ifdef CONFIG_DRM_EXYNOS_DMABUF
-int exynos_dmabuf_prime_handle_to_fd(struct drm_device *drm_dev,
-					struct drm_file *file,
-					unsigned int handle, int *fd);
+struct dma_buf *exynos_dmabuf_prime_export(struct drm_device *drm_dev,
+				struct drm_gem_object *obj, int flags);
 
-int exynos_dmabuf_prime_fd_to_handle(struct drm_device *drm_dev,
-					struct drm_file *file,
-					int fd, unsigned int *handle);
+struct drm_gem_object *exynos_dmabuf_prime_import(struct drm_device *drm_dev,
+						struct dma_buf *dma_buf);
 #else
-#define exynos_dmabuf_prime_handle_to_fd	NULL
-#define exynos_dmabuf_prime_fd_to_handle	NULL
+#define exynos_dmabuf_prime_export		NULL
+#define exynos_dmabuf_prime_import		NULL
 #endif
 #endif
