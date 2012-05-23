@@ -1,14 +1,15 @@
 /*
- * Samsung Exynos5 SoC series FIMC-IS driver
+ * Samsung Exynos4 SoC series FIMC-IS video buffer2 interface
  *
- * exynos5 fimc-is misc functions(mipi, fimc-lite control)
+ * main platform driver interface
  *
  * Copyright (c) 2011 Samsung Electronics Co., Ltd
+ * Contact: Younghwan Joo, <yhwan.joo@samsung.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
- */
+*/
 
 #include <linux/delay.h>
 #include <linux/sched.h>
@@ -23,7 +24,8 @@
 #if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
 void *fimc_is_cma_init(struct fimc_is_dev *isp)
 {
-	return vb2_cma_phys_init(&isp->pdev->dev, NULL, 0, false);
+	return vb2_cma_phys_init(&isp->pdev->dev,
+				FIMC_IS_MEM_ISP_BUF, 0, false);
 }
 
 int fimc_is_cma_resume(void *alloc_ctx)
@@ -49,31 +51,35 @@ const struct fimc_is_vb2 fimc_is_vb2_cma = {
 	.set_cacheable	= fimc_is_cma_set_cacheable,
 };
 #elif defined(CONFIG_VIDEOBUF2_ION)
-static void *fimc_is_ion_init(struct fimc_is_dev *isp)
+void *fimc_is_ion_init(struct fimc_is_dev *isp)
 {
-	return vb2_ion_create_context(&isp->pdev->dev, SZ_4K,
-					VB2ION_CTX_IOMMU | VB2ION_CTX_VMCONTIG);
-}
+	struct vb2_ion vb2_ion;
+	struct vb2_drv vb2_drv = {0, };
+	char ion_name[16] = {0,};
 
-static unsigned long plane_addr(struct vb2_buffer *vb, u32 plane_no)
-{
-	void *cookie = vb2_plane_cookie(vb, plane_no);
-	dma_addr_t dva = 0;
+	vb2_ion.dev = &isp->pdev->dev;
+	sprintf(ion_name, "exynos5-fimc-is");
+	vb2_ion.name = ion_name;
+	vb2_ion.contig = true;
+	vb2_ion.cacheable = true;
+	vb2_ion.align = SZ_4K;
 
-	WARN_ON(vb2_ion_dma_address(cookie, &dva) != 0);
+	vb2_drv.use_mmu = true;
 
-	return dva;
+	return vb2_ion_init(&vb2_ion, &vb2_drv);
 }
 
 const struct fimc_is_vb2 fimc_is_vb2_ion = {
 	.ops		= &vb2_ion_memops,
 	.init		= fimc_is_ion_init,
-	.cleanup	= vb2_ion_destroy_context,
-	.plane_addr	= plane_addr,
-	.resume		= vb2_ion_attach_iommu,
-	.suspend	= vb2_ion_detach_iommu,
+	.cleanup	= vb2_ion_cleanup,
+	.plane_addr	= vb2_ion_plane_dvaddr,
+	.resume		= vb2_ion_resume,
+	.suspend	= vb2_ion_suspend,
 	.cache_flush	= vb2_ion_cache_flush,
-	.set_cacheable	= vb2_ion_set_cached,
+	.set_cacheable	= vb2_ion_set_cacheable,
+	.set_sharable	= vb2_ion_set_sharable,
+	.get_kvaddr	= vb2_ion_plane_kvaddr,
 };
 #endif
 

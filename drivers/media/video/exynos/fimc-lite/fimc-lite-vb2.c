@@ -1,4 +1,4 @@
-/* linux/drivers/media/video/exynos/gsc-vb2.c
+/* linux/drivers/media/video/exynos/flite-vb2.c
  *
  * Copyright (c) 2011 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com/
@@ -11,45 +11,44 @@
 */
 
 #include <linux/platform_device.h>
-#include "gsc-core.h"
+#include "fimc-lite-core.h"
 
 #if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
-void *gsc_cma_init(struct gsc_dev *gsc)
+void *flite_cma_init(struct flite_dev *flite)
 {
-	return vb2_cma_phys_init(&gsc->pdev->dev, NULL, 0, false);
+	return vb2_cma_phys_init(&flite->pdev->dev, NULL, 0, false);
 }
 
-int gsc_cma_resume(void *alloc_ctx)
+int flite_cma_resume(void *alloc_ctx)
 {
 	return 1;
 }
-void gsc_cma_suspend(void *alloc_ctx) {}
-void gsc_cma_set_cacheable(void *alloc_ctx, bool cacheable) {}
+void flite_cma_suspend(void *alloc_ctx) {}
+void flite_cma_set_cacheable(void *alloc_ctx, bool cacheable) {}
 
-int gsc_cma_cache_flush(struct vb2_buffer *vb, u32 plane_no)
+int flite_cma_cache_flush(struct vb2_buffer *vb, u32 plane_no)
 {
 	return 0;
 }
 
-const struct gsc_vb2 gsc_vb2_cma = {
+const struct flite_vb2 flite_vb2_cma = {
 	.ops		= &vb2_cma_phys_memops,
-	.init		= gsc_cma_init,
+	.init		= flite_cma_init,
 	.cleanup	= vb2_cma_phys_cleanup,
 	.plane_addr	= vb2_cma_phys_plane_paddr,
-	.resume		= gsc_cma_resume,
-	.suspend	= gsc_cma_suspend,
-	.cache_flush	= gsc_cma_cache_flush,
-	.set_cacheable	= gsc_cma_set_cacheable,
-	.use_sysmmu	= false;
+	.resume		= flite_cma_resume,
+	.suspend	= flite_cma_suspend,
+	.cache_flush	= flite_cma_cache_flush,
+	.set_cacheable	= flite_cma_set_cacheable,
 };
 #elif defined(CONFIG_VIDEOBUF2_ION)
-void *gsc_ion_init(struct gsc_dev *gsc)
+void *flite_ion_init(struct flite_dev *flite)
 {
-	return vb2_ion_create_context(&gsc->pdev->dev, SZ_4K,
+	return vb2_ion_create_context(&flite->pdev->dev, SZ_4K,
 		VB2ION_CTX_VMCONTIG | VB2ION_CTX_IOMMU | VB2ION_CTX_UNCACHED);
 }
 
-static unsigned long gsc_vb2_plane_addr(struct vb2_buffer *vb, u32 plane_no)
+static unsigned long flite_vb2_plane_addr(struct vb2_buffer *vb, u32 plane_no)
 {
 	void *cookie = vb2_plane_cookie(vb, plane_no);
 	dma_addr_t dva = 0;
@@ -58,15 +57,15 @@ static unsigned long gsc_vb2_plane_addr(struct vb2_buffer *vb, u32 plane_no)
 
 	return dva;
 }
-const struct gsc_vb2 gsc_vb2_ion = {
+
+const struct flite_vb2 flite_vb2_ion = {
 	.ops		= &vb2_ion_memops,
-	.init		= gsc_ion_init,
+	.init		= flite_ion_init,
 	.cleanup	= vb2_ion_destroy_context,
-	.plane_addr	= gsc_vb2_plane_addr,
+	.plane_addr	= flite_vb2_plane_addr,
 	.resume		= vb2_ion_attach_iommu,
 	.suspend	= vb2_ion_detach_iommu,
 	.cache_flush	= vb2_ion_cache_flush,
 	.set_cacheable	= vb2_ion_set_cached,
-	.use_sysmmu	= true,
 };
 #endif
