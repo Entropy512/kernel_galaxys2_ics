@@ -1,7 +1,7 @@
 /*
- *  p10_wm1811.c
+ *  sound/soc/samsung/slp_naples_wm1811.c
  *
- *  Copyright (c) 2011 Samsung Electronics Co. Ltd
+ *  Copyright (c) 2012 Samsung Electronics Co. Ltd
  *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the
@@ -16,7 +16,6 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
-#include <linux/mfd/wm8994/registers.h>
 #include <linux/input.h>
 
 #include <sound/soc.h>
@@ -24,13 +23,18 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/jack.h>
+#include <linux/jack.h>
 
 #include <mach/regs-clock.h>
+
+#include <linux/mfd/wm8994/registers.h>
+#include <linux/mfd/wm8994/pdata.h>
 
 #include "i2s.h"
 #include "s3c-i2s-v2.h"
 #include "../codecs/wm8994.h"
 
+#define MANAGE_MCLK1
 
 /* SMDK has a 16.934MHZ crystal attached to WM8994 */
 #define SMDK_WM8994_OSC_FREQ	16934400
@@ -38,19 +42,59 @@
 #define WM8994_DAI_AIF2		1
 #define WM8994_DAI_AIF3		2
 
-#define EAR_SEL EXYNOS4210_GPJ0(4)
-#define MANAGE_MCLK1
+#define WM1811_JACKDET_MODE_NONE  0x0000
+#define WM1811_JACKDET_MODE_JACK  0x0100
+#define WM1811_JACKDET_MODE_MIC   0x0080
+#define WM1811_JACKDET_MODE_AUDIO 0x0180
 
-static bool p10_fll1_active;
+#define WM1811_JACKDET_BTN0	0x04
+#define WM1811_JACKDET_BTN1	0x08
+#define WM1811_JACKDET_BTN2	0x10
 
-static void p10_set_mclk(bool on)
+static const struct wm8958_micd_rate naples_micdet_rates[] = {
+	{ 32768,       true,  1, 4 },
+	{ 32768,       false, 1, 1 },
+	{ 44100 * 256, true,  7, 10 },
+	{ 44100 * 256, false, 7, 10 },
+};
+
+static const struct wm8958_micd_rate naples_jackdet_rates[] = {
+	{ 32768,       true,  0, 1 },
+	{ 32768,       false, 0, 1 },
+	{ 44100 * 256, true,  7, 10 },
+	{ 44100 * 256, false, 7, 10 },
+};
+
+
+static bool naples_fll1_active;
+
+static int main_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	pr_info("%s : Main mic bias event is %d",
+			__func__, SND_SOC_DAPM_EVENT_ON(event));
+	gpio_set_value(GPIO_MIC_BIAS_EN_00, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static int sub_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	pr_info("%s : Sub mic bias event is %d",
+			__func__, SND_SOC_DAPM_EVENT_ON(event));
+	gpio_set_value(GPIO_SUB_MIC_BIAS_EN_00, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static void naples_set_mclk(bool on)
 {
 	u32 val;
 	u32 __iomem *xusbxti_sys_pwr;
 	u32 __iomem *pmu_debug;
 
-	xusbxti_sys_pwr = ioremap(0x10041280, 4);
-	pmu_debug = ioremap(0x10040A00, 4);
+
+	xusbxti_sys_pwr = ioremap(0x10021280, 4);
+	pmu_debug = ioremap(0x10020A00, 4);
 
 	if (on) {
 		val = readl(xusbxti_sys_pwr);
@@ -58,8 +102,8 @@ static void p10_set_mclk(bool on)
 		writel(val, xusbxti_sys_pwr);
 
 		val = readl(pmu_debug);
-		val &= ~(0b11111 << 8);
-		val |= 0b10000 << 8;		/* Selected XUSBXTI */
+		val &= ~(0x000F << 8);
+		val |= 0x0009 << 8;		/* Selected XUSBXTI */
 		val &= ~(0x0001);		/* CLKOUT is enabled */
 		writel(val, pmu_debug);
 	} else {
@@ -78,11 +122,11 @@ static void p10_set_mclk(bool on)
 	mdelay(10);
 }
 
-static void p10_start_fll1(struct snd_soc_dai *aif1_dai)
+static void naples_start_fll1(struct snd_soc_dai *aif1_dai)
 {
 	int ret;
 
-	if (p10_fll1_active)
+	if (naples_fll1_active)
 		return;
 
 	dev_info(aif1_dai->dev, "Moving to audio clocking settings\n");
@@ -100,7 +144,7 @@ static void p10_start_fll1(struct snd_soc_dai *aif1_dai)
 	 * performance.
 	 */
 #ifdef MANAGE_MCLK1
-	p10_set_mclk(1);
+	naples_set_mclk(1);
 #endif
 
 	/* Switch the FLL */
@@ -115,7 +159,7 @@ static void p10_start_fll1(struct snd_soc_dai *aif1_dai)
 	 * power from the reference clock.
 	 */
 	/*
-	p10_set_mclk(0);
+	naples_set_mclk(0);
 	*/
 #endif
 
@@ -127,7 +171,133 @@ static void p10_start_fll1(struct snd_soc_dai *aif1_dai)
 	if (ret < 0)
 		dev_err(aif1_dai->dev, "Unable to switch to FLL1: %d\n", ret);
 
-	p10_fll1_active = true;
+	naples_fll1_active = true;
+}
+
+static void naples_micd_set_rate(struct snd_soc_codec *codec)
+{
+	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
+	int best, i, sysclk, val;
+	bool idle;
+	const struct wm8958_micd_rate *rates;
+	int num_rates;
+
+	idle = !wm8994->jack_mic;
+
+	sysclk = snd_soc_read(codec, WM8994_CLOCKING_1);
+	if (sysclk & WM8994_SYSCLK_SRC)
+		sysclk = wm8994->aifclk[1];
+	else
+		sysclk = wm8994->aifclk[0];
+
+	if (wm8994->jackdet) {
+		rates = naples_jackdet_rates;
+		num_rates = ARRAY_SIZE(naples_jackdet_rates);
+	} else {
+		rates = naples_micdet_rates;
+		num_rates = ARRAY_SIZE(naples_micdet_rates);
+	}
+
+	best = 0;
+	for (i = 0; i < num_rates; i++) {
+		if (rates[i].idle != idle)
+			continue;
+		if (abs(rates[i].sysclk - sysclk) <
+		    abs(rates[best].sysclk - sysclk))
+			best = i;
+		else if (rates[best].idle != idle)
+			best = i;
+	}
+
+	val = rates[best].start << WM8958_MICD_BIAS_STARTTIME_SHIFT
+		| rates[best].rate << WM8958_MICD_RATE_SHIFT;
+
+	snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
+			    WM8958_MICD_BIAS_STARTTIME_MASK |
+			    WM8958_MICD_RATE_MASK, val);
+}
+
+static void naples_micdet(u16 status, void *data)
+{
+	struct snd_soc_codec *codec = data;
+	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
+	int report;
+
+	/* Either nothing present or just starting detection */
+	if (!(status & WM8958_MICD_STS)) {
+		if (!wm8994->jackdet) {
+			/* If nothing present then clear our statuses */
+			dev_dbg(codec->dev, "Detected open circuit\n");
+			wm8994->jack_mic = false;
+			wm8994->mic_detecting = true;
+
+			naples_micd_set_rate(codec);
+
+			snd_soc_jack_report(wm8994->micdet[0].jack, 0,
+					    wm8994->btn_mask |
+					     SND_JACK_HEADSET);
+		}
+		return;
+	}
+
+	/* If the measurement is showing a high impedence we've got a
+	 * microphone.
+	 */
+	if (wm8994->mic_detecting && (status & 0x600)) {
+		dev_info(codec->dev, "Detected microphone\n");
+
+		wm8994->mic_detecting = false;
+		wm8994->jack_mic = true;
+
+		naples_micd_set_rate(codec);
+
+		snd_soc_jack_report(wm8994->micdet[0].jack, SND_JACK_HEADSET,
+				    SND_JACK_HEADSET);
+	}
+
+	if (wm8994->mic_detecting && status & 0x4) {
+		dev_info(codec->dev, "Detected headphone\n");
+		wm8994->mic_detecting = false;
+
+		naples_micd_set_rate(codec);
+
+		snd_soc_jack_report(wm8994->micdet[0].jack, SND_JACK_HEADPHONE,
+				    SND_JACK_HEADSET);
+
+		/* If we have jackdet that will detect removal */
+		if (wm8994->jackdet) {
+			snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
+					    WM8958_MICD_ENA, 0);
+
+			if (wm8994->active_refcount) {
+				snd_soc_update_bits(codec, WM8994_ANTIPOP_2,
+					WM1811_JACKDET_MODE_MASK,
+					WM1811_JACKDET_MODE_AUDIO);
+			} else {
+				snd_soc_update_bits(codec, WM8994_ANTIPOP_2,
+						WM1811_JACKDET_MODE_MASK,
+						WM1811_JACKDET_MODE_JACK);
+			}
+		}
+	}
+
+	/* Report short circuit as a button */
+	if (wm8994->jack_mic) {
+		report = 0;
+		if (status & WM1811_JACKDET_BTN0)
+			report |= SND_JACK_BTN_0;
+
+		if (status & WM1811_JACKDET_BTN1)
+			report |= SND_JACK_BTN_1;
+
+		if (status & WM1811_JACKDET_BTN2)
+			report |= SND_JACK_BTN_2;
+
+		dev_dbg(codec->dev, "Detected Button: %08x (%08X)\n",
+			report, status);
+		snd_soc_jack_report(wm8994->micdet[0].jack, report,
+				    wm8994->btn_mask);
+	}
 }
 
 #ifdef CONFIG_SND_SAMSUNG_I2S_MASTER
@@ -153,7 +323,7 @@ out:
 #endif /* CONFIG_SND_SAMSUNG_I2S_MASTER */
 
 #ifndef CONFIG_SND_SAMSUNG_I2S_MASTER
-static int p10_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
+static int naples_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -181,19 +351,7 @@ static int p10_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		return ret;
 
-#if 0
-	ret = snd_soc_dai_set_sysclk(codec_dai, WM8994_SYSCLK_FLL1,
-					pll_out, SND_SOC_CLOCK_IN);
-	if (ret < 0)
-		return ret;
-
-	ret = snd_soc_dai_set_sysclk(cpu_dai, SAMSUNG_I2S_OPCLK,
-					0, MOD_OPCLK_PCLK);
-	if (ret < 0)
-		return ret;
-#else
-	p10_start_fll1(codec_dai);
-#endif
+	naples_start_fll1(codec_dai);
 
 	if (ret < 0)
 		return ret;
@@ -201,7 +359,7 @@ static int p10_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 #else /* CONFIG_SND_SAMSUNG_I2S_MASTER */
-static int p10_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
+static int naples_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -317,13 +475,13 @@ static int p10_wm1811_aif1_hw_params(struct snd_pcm_substream *substream,
 #endif /* CONFIG_SND_SAMSUNG_I2S_MASTER */
 
 /*
- * P10 WM1811 DAI operations.
+ * naples WM1811 DAI operations.
  */
-static struct snd_soc_ops p10_wm1811_aif1_ops = {
-	.hw_params = p10_wm1811_aif1_hw_params,
+static struct snd_soc_ops naples_wm1811_aif1_ops = {
+	.hw_params = naples_wm1811_aif1_hw_params,
 };
 
-static int p10_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
+static int naples_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -345,7 +503,7 @@ static int p10_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
 
 	/* Set the codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S
-					| SND_SOC_DAIFMT_IB_NF
+					| SND_SOC_DAIFMT_NB_NF
 					| SND_SOC_DAIFMT_CBS_CFS);
 	if (ret < 0)
 		return ret;
@@ -375,101 +533,59 @@ static int p10_wm1811_aif2_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops p10_wm1811_aif2_ops = {
-	.hw_params = p10_wm1811_aif2_hw_params,
+static struct snd_soc_ops naples_wm1811_aif2_ops = {
+	.hw_params = naples_wm1811_aif2_hw_params,
 };
 
-static int p10_wm1811_aif3_hw_params(struct snd_pcm_substream *substream,
+static int naples_wm1811_aif3_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
 	pr_err("%s: enter\n", __func__);
 	return 0;
 }
 
-static struct snd_soc_ops p10_wm1811_aif3_ops = {
-	.hw_params = p10_wm1811_aif3_hw_params,
+static struct snd_soc_ops naples_wm1811_aif3_ops = {
+	.hw_params = naples_wm1811_aif3_hw_params,
 };
 
-static int mic_sel;
-
-static int mic_sel_get(struct snd_kcontrol *kcontrol,
-			struct snd_ctl_elem_value *ucontrol)
-{
-	ucontrol->value.integer.value[0] = mic_sel;
-
-	return 0;
-}
-
-static int mic_sel_set(struct snd_kcontrol *kcontrol,
-			struct snd_ctl_elem_value *ucontrol)
-{
-	int val = ucontrol->value.integer.value[0];
-
-	if (val < 0 || val > 1)
-		return -EINVAL;
-
-	if (val == mic_sel)
-		return 0;
-
-#if 0
-	gpio_set_value(EAR_SEL, val);
-	mic_sel = val;
-#endif
-
-	return 1;
-}
-
-const char *mic_sel_text[] = {
-	"Sub", "Headset"
-};
-
-static const struct soc_enum mic_sel_enum =
-	SOC_ENUM_SINGLE_EXT(2, mic_sel_text);
-
-static const struct snd_kcontrol_new p10_controls[] = {
+static const struct snd_kcontrol_new naples_controls[] = {
 	SOC_DAPM_PIN_SWITCH("HP"),
 	SOC_DAPM_PIN_SWITCH("SPK"),
 	SOC_DAPM_PIN_SWITCH("RCV"),
-	SOC_DAPM_PIN_SWITCH("LINE"),
-
-	SOC_ENUM_EXT("MIC Select", mic_sel_enum, mic_sel_get, mic_sel_set),
 };
 
-const struct snd_soc_dapm_widget p10_dapm_widgets[] = {
+const struct snd_soc_dapm_widget naples_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("HP", NULL),
 	SND_SOC_DAPM_SPK("SPK", NULL),
 	SND_SOC_DAPM_SPK("RCV", NULL),
-	SND_SOC_DAPM_LINE("LINE", NULL),
 
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
-	SND_SOC_DAPM_MIC("Main Mic", NULL),
-	SND_SOC_DAPM_MIC("Sub Mic", NULL),
-
+	SND_SOC_DAPM_MIC("Main Mic", main_mic_bias_event),
+	SND_SOC_DAPM_MIC("Sub Mic", sub_mic_bias_event),
 	SND_SOC_DAPM_INPUT("S5P RP"),
 };
 
-const struct snd_soc_dapm_route p10_dapm_routes[] = {
+const struct snd_soc_dapm_route naples_dapm_routes[] = {
 	{ "HP", NULL, "HPOUT1L" },
 	{ "HP", NULL, "HPOUT1R" },
 
 	{ "SPK", NULL, "SPKOUTLN" },
 	{ "SPK", NULL, "SPKOUTLP" },
 	{ "SPK", NULL, "SPKOUTRN" },
-	{ "SPK", NULL, "SPKOUTRP" },
+	{ "SPK", NULL, "SPKOUTRN" },
 
 	{ "RCV", NULL, "HPOUT2N" },
 	{ "RCV", NULL, "HPOUT2P" },
 
-	{ "LINE", NULL, "LINEOUT1N" },
-	{ "LINE", NULL, "LINEOUT1P" },
-
 	{ "IN1LP", NULL, "MICBIAS1" },
 	{ "IN1LN", NULL, "MICBIAS1" },
-	{ "MICBIAS1", NULL, "Main Mic" },
+	{ "IN1LP", NULL, "Main Mic" },
+	{ "IN1LN", NULL, "Main Mic" },
 
 	{ "IN1RP", NULL, "MICBIAS1" },
 	{ "IN1RN", NULL, "MICBIAS1" },
-	{ "MICBIAS1", NULL, "Sub Mic" },
+	{ "IN1RP", NULL, "Sub Mic" },
+	{ "IN1RN", NULL, "Sub Mic" },
 
 	{ "IN2RP:VXRP", NULL, "MICBIAS2" },
 	{ "MICBIAS2", NULL, "Headset Mic" },
@@ -509,11 +625,11 @@ static void wm1811_mic_work(struct work_struct *work)
 	report = SND_JACK_HEADSET;
 
 	/* Everything else is buttons; just assign slots */
-	if (status & 0x4)
-		report |= SND_JACK_BTN_0;
-	if (status & 0x8)
-		report |= SND_JACK_BTN_1;
 	if (status & 0x10)
+		report |= SND_JACK_BTN_0;
+	if (status & 0x80)
+		report |= SND_JACK_BTN_1;
+	if (status & 0x100)
 		report |= SND_JACK_BTN_2;
 
 	if (report & SND_JACK_MICROPHONE)
@@ -536,9 +652,9 @@ done:
 				SND_JACK_BTN_2 | SND_JACK_HEADSET);
 }
 
-static struct snd_soc_dai_driver p10_ext_dai[] = {
+static struct snd_soc_dai_driver naples_ext_dai[] = {
 	{
-		.name = "p10.cp",
+		.name = "naples.cp",
 		.playback = {
 			.channels_min = 1,
 			.channels_max = 2,
@@ -553,7 +669,7 @@ static struct snd_soc_dai_driver p10_ext_dai[] = {
 		},
 	},
 	{
-		.name = "p10.bt",
+		.name = "naples.bt",
 		.playback = {
 			.channels_min = 1,
 			.channels_max = 2,
@@ -569,63 +685,31 @@ static struct snd_soc_dai_driver p10_ext_dai[] = {
 	},
 };
 
-static int p10_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
+static int naples_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
 {
-#if 0
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
-
-	/* HeadPhone */
-	snd_soc_dapm_enable_pin(dapm, "HPOUT1R");
-	snd_soc_dapm_enable_pin(dapm, "HPOUT1L");
-
-	/* MicIn */
-	snd_soc_dapm_enable_pin(dapm, "IN1LN");
-	snd_soc_dapm_enable_pin(dapm, "IN1RN");
-
-	/* LineIn */
-	snd_soc_dapm_enable_pin(dapm, "IN2LN");
-	snd_soc_dapm_enable_pin(dapm, "IN2RN");
-
-	/* Other pins NC */
-	snd_soc_dapm_nc_pin(dapm, "HPOUT2P");
-	snd_soc_dapm_nc_pin(dapm, "HPOUT2N");
-	snd_soc_dapm_nc_pin(dapm, "SPKOUTLN");
-	snd_soc_dapm_nc_pin(dapm, "SPKOUTLP");
-	snd_soc_dapm_nc_pin(dapm, "SPKOUTRP");
-	snd_soc_dapm_nc_pin(dapm, "SPKOUTRN");
-	snd_soc_dapm_nc_pin(dapm, "LINEOUT1N");
-	snd_soc_dapm_nc_pin(dapm, "LINEOUT1P");
-	snd_soc_dapm_nc_pin(dapm, "LINEOUT2N");
-	snd_soc_dapm_nc_pin(dapm, "LINEOUT2P");
-	snd_soc_dapm_nc_pin(dapm, "IN1LP");
-	snd_soc_dapm_nc_pin(dapm, "IN2LP:VXRN");
-	snd_soc_dapm_nc_pin(dapm, "IN1RP");
-	snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
-
-	snd_soc_dapm_sync(dapm);
-
-	return 0;
-#else
 	struct wm1811_machine_priv *wm1811;
 	struct snd_soc_codec *codec = rtd->codec;
 	struct snd_soc_dai *aif1_dai = rtd->codec_dai;
 	int ret;
 
 #ifndef MANAGE_MCLK1
-	p10_set_mclk(1);
+	naples_set_mclk(1);
 #endif
 
-	ret = snd_soc_add_controls(codec, p10_controls,
-					ARRAY_SIZE(p10_controls));
+	snd_soc_dapm_ignore_suspend(&codec->dapm, "Main Mic");
+	snd_soc_dapm_ignore_suspend(&codec->dapm, "Sub Mic");
+	snd_soc_dapm_ignore_suspend(&codec->dapm, "Headset Mic");
 
-	ret = snd_soc_dapm_new_controls(&codec->dapm, p10_dapm_widgets,
-					   ARRAY_SIZE(p10_dapm_widgets));
+	ret = snd_soc_add_controls(codec, naples_controls,
+					ARRAY_SIZE(naples_controls));
+
+	ret = snd_soc_dapm_new_controls(&codec->dapm, naples_dapm_widgets,
+					   ARRAY_SIZE(naples_dapm_widgets));
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to add DAPM widgets: %d\n", ret);
 
-	ret = snd_soc_dapm_add_routes(&codec->dapm, p10_dapm_routes,
-					   ARRAY_SIZE(p10_dapm_routes));
+	ret = snd_soc_dapm_add_routes(&codec->dapm, naples_dapm_routes,
+					   ARRAY_SIZE(naples_dapm_routes));
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to add DAPM routes: %d\n", ret);
 
@@ -653,7 +737,7 @@ static int p10_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
 
 	INIT_DELAYED_WORK(&wm1811->mic_work, wm1811_mic_work);
 
-	ret = snd_soc_jack_new(codec, "P10 Jack",
+	ret = snd_soc_jack_new(codec, "naples Jack",
 				SND_JACK_HEADSET | SND_JACK_BTN_0 |
 				SND_JACK_BTN_1 | SND_JACK_BTN_2,
 				&wm1811->jack);
@@ -674,48 +758,14 @@ static int p10_wm1811_init_paiftx(struct snd_soc_pcm_runtime *rtd)
 	if (ret < 0)
 		dev_err(codec->dev, "Failed to set KEY_VOLUMEDOWN: %d\n", ret);
 
-	ret = wm8958_mic_detect(codec, &wm1811->jack, NULL, NULL);
+	ret = wm8958_mic_detect(codec, &wm1811->jack, naples_micdet, codec);
 	if (ret < 0)
 		dev_err(codec->dev, "Failed start detection: %d\n", ret);
 
 	return snd_soc_dapm_sync(&codec->dapm);
-
-#endif
 }
 
-static struct snd_soc_dai_link p10_dai[] = {
-	{ /* Sec_Fifo DAI i/f */
-		.name = "Sec_FIFO TX",
-		.stream_name = "Sec_Dai",
-		.cpu_dai_name = "samsung-i2s.4",
-		.codec_dai_name = "wm8994-aif1",
-#ifndef CONFIG_SND_SOC_SAMSUNG_USE_DMA_WRAPPER
-		.platform_name = "samsung-audio-idma",
-#else
-		.platform_name = "samsung-audio",
-#endif
-		.codec_name = "wm8994-codec",
-		.init = p10_wm1811_init_paiftx,
-		.ops = &p10_wm1811_aif1_ops,
-	},
-	{
-		.name = "P10_WM1811 Voice",
-		.stream_name = "Voice Tx/Rx",
-		.cpu_dai_name = "p10.cp",
-		.codec_dai_name = "wm8994-aif2",
-		.platform_name = "snd-soc-dummy",
-		.codec_name = "wm8994-codec",
-		.ops = &p10_wm1811_aif2_ops,
-	},
-	{
-		.name = "P10_WM1811 BT",
-		.stream_name = "BT Tx/Rx",
-		.cpu_dai_name = "p10.bt",
-		.codec_dai_name = "wm8994-aif3",
-		.platform_name = "snd-soc-dummy",
-		.codec_name = "wm8994-codec",
-		.ops = &p10_wm1811_aif3_ops,
-	},
+static struct snd_soc_dai_link naples_dai[] = {
 	{ /* Primary DAI i/f */
 		.name = "WM8994 AIF1",
 		.stream_name = "Pri_Dai",
@@ -723,12 +773,29 @@ static struct snd_soc_dai_link p10_dai[] = {
 		.codec_dai_name = "wm8994-aif1",
 		.platform_name = "samsung-audio",
 		.codec_name = "wm8994-codec",
-		.ops = &p10_wm1811_aif1_ops,
+		.init = naples_wm1811_init_paiftx,
+		.ops = &naples_wm1811_aif1_ops,
+	},
+	{
+		.name = "Naples_WM1811 Voice",
+		.stream_name = "Voice Tx/Rx",
+		.cpu_dai_name = "naples.cp",
+		.codec_dai_name = "wm8994-aif2",
+		.codec_name = "wm8994-codec",
+		.ops = &naples_wm1811_aif2_ops,
+	},
+	{
+		.name = "Naples_WM1811 BT",
+		.stream_name = "BT Tx/Rx",
+		.cpu_dai_name = "naples.bt",
+		.codec_dai_name = "wm8994-aif3",
+		.codec_name = "wm8994-codec",
+		.ops = &naples_wm1811_aif3_ops,
 	},
 };
 
 #if 0	/* To Do */
-static int p10_set_bias_level(struct snd_soc_card *card,
+static int naples_set_bias_level(struct snd_soc_card *card,
 				enum snd_soc_bias_level level)
 {
 	switch (level) {
@@ -737,7 +804,7 @@ static int p10_set_bias_level(struct snd_soc_card *card,
 		* 44.1kHz so we can always activate AIF1 without reclocking.
 		*/
 		if (card->bias_level == SND_SOC_BIAS_STANDBY)
-			p10_start_fll1(aif1_dai);
+			naples_start_fll1(aif1_dai);
 		break;
 
 	default:
@@ -747,7 +814,7 @@ static int p10_set_bias_level(struct snd_soc_card *card,
 	return 0;
 }
 
-static int p10_set_bias_level_post(struct snd_soc_card *card,
+static int naples_set_bias_level_post(struct snd_soc_card *card,
 					 enum snd_soc_bias_level level)
 {
 	int ret;
@@ -791,7 +858,7 @@ static int p10_set_bias_level_post(struct snd_soc_card *card,
 				dev_err(codec->dev,
 					"Failed to stop FLL1\n");
 
-			p10_fll1_active = false;
+			naples_fll1_active = false;
 		}
 		break;
 	default:
@@ -804,68 +871,50 @@ static int p10_set_bias_level_post(struct snd_soc_card *card,
 }
 #endif
 
-static struct snd_soc_card p10 = {
-	.name = "P10_WM1811",
-	.dai_link = p10_dai,
+static struct snd_soc_card naples = {
+	.name = "SLP_Naples_WM1811",
+	.dai_link = naples_dai,
 
 	/* If you want to use sec_fifo device,
-	 * changes the num_link = 2 or ARRAY_SIZE(p10_dai). */
-	.num_links = ARRAY_SIZE(p10_dai),
-
+	 * changes the num_link = 2 or ARRAY_SIZE(naples_dai). */
+	.num_links = ARRAY_SIZE(naples_dai),
 #if 0	/* To Do */
-	.set_bias_level = p10_set_bias_level,
-	.set_bias_level_post = p10_set_bias_level_post
+	.set_bias_level = naples_set_bias_level,
+	.set_bias_level_post = naples_set_bias_level_post
 #endif
 };
 
-static struct platform_device *p10_snd_device;
+static struct platform_device *naples_snd_device;
 
-static int __init p10_audio_init(void)
+static int __init naples_audio_init(void)
 {
 	int ret;
 
-#if 0
-	/* EAR_SEL switches SUB and EAR mics - force to SUB mic */
-	ret = gpio_request(EAR_SEL, "EAR_SEL");
-	if (ret < 0)
-		pr_err("Failed to request EAR_SEL: %d\n", ret);
-
-	ret = gpio_direction_output(EAR_SEL, 0);
-	if (ret < 0)
-		pr_err("Failed to request EAR_SEL: %d\n", ret);
-#endif
-
-	gpio_request_one(GPIO_AMP_L_INT, GPIOF_OUT_INIT_LOW, "AMP_L_INT");
-	gpio_set_value(GPIO_AMP_L_INT, 1);
-
-	gpio_request_one(GPIO_AMP_R_INT, GPIOF_OUT_INIT_LOW, "AMP_R_INT");
-	gpio_set_value(GPIO_AMP_R_INT, 1);
-
-	p10_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!p10_snd_device)
+	naples_snd_device = platform_device_alloc("soc-audio", -1);
+	if (!naples_snd_device)
 		return -ENOMEM;
 
-	ret = snd_soc_register_dais(&p10_snd_device->dev,
-					p10_ext_dai, ARRAY_SIZE(p10_ext_dai));
+	ret = snd_soc_register_dais(&naples_snd_device->dev,
+				naples_ext_dai, ARRAY_SIZE(naples_ext_dai));
 	if (ret != 0)
 		pr_err("Failed to register external DAIs: %d\n", ret);
 
-	platform_set_drvdata(p10_snd_device, &p10);
+	platform_set_drvdata(naples_snd_device, &naples);
 
-	ret = platform_device_add(p10_snd_device);
+	ret = platform_device_add(naples_snd_device);
 	if (ret)
-		platform_device_put(p10_snd_device);
+		platform_device_put(naples_snd_device);
 
 	return ret;
 }
-module_init(p10_audio_init);
+module_init(naples_audio_init);
 
-static void __exit p10_audio_exit(void)
+static void __exit naples_audio_exit(void)
 {
-	platform_device_unregister(p10_snd_device);
+	platform_device_unregister(naples_snd_device);
 }
-module_exit(p10_audio_exit);
+module_exit(naples_audio_exit);
 
-MODULE_AUTHOR("JS. Park <aitdark.park@samsung.com>");
-MODULE_DESCRIPTION("ALSA SoC P10 WM1811");
+MODULE_AUTHOR("Min Lee <min47.lee@samsung.com>");
+MODULE_DESCRIPTION("ALSA SoC naples WM1811");
 MODULE_LICENSE("GPL");
