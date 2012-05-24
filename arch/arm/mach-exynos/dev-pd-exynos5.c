@@ -17,6 +17,9 @@
 
 #include <mach/regs-pmu5.h>
 #include <mach/regs-clock.h>
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+#include <mach/bts-exynos5.h>
+#endif
 
 #include <plat/pd.h>
 
@@ -29,6 +32,9 @@ struct platform_device exynos5_device_pd[] = {
 				.init		= exynos_pd_init,
 				.enable		= exynos_pd_enable,
 				.disable	= exynos_pd_disable,
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+				.set_bts	= set_bts_mfc,
+#endif
 				.base		= EXYNOS5_MFC_CONFIGURATION,
 				.data		= &(struct exynos_pd_data) {
 					.clk_base	= EXYNOS5_CLKGATE_IP_MFC,
@@ -45,6 +51,9 @@ struct platform_device exynos5_device_pd[] = {
 				.init		= exynos_pd_init,
 				.enable		= exynos_pd_enable,
 				.disable	= exynos_pd_disable,
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+				.set_bts	= set_bts_g3d_acp,
+#endif
 				.base		= EXYNOS5_G3D_CONFIGURATION,
 				.data		= &(struct exynos_pd_data) {
 					.clk_base	= EXYNOS5_CLKGATE_IP_G3D,
@@ -77,6 +86,9 @@ struct platform_device exynos5_device_pd[] = {
 				.init		= exynos_pd_init,
 				.enable		= exynos_pd_enable,
 				.disable	= exynos_pd_disable,
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+				.set_bts	= set_bts_isp,
+#endif
 				.base		= EXYNOS5_ISP_CONFIGURATION,
 				.data		= &(struct exynos_pd_data) {
 					.clk_base	= NULL,
@@ -93,6 +105,9 @@ struct platform_device exynos5_device_pd[] = {
 				.init		= exynos_pd_init,
 				.enable		= exynos_pd_enable,
 				.disable	= exynos_pd_disable,
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+				.set_bts	= set_bts_gscl,
+#endif
 				.base		= EXYNOS5_GSCL_CONFIGURATION,
 				.data		= &(struct exynos_pd_data) {
 					.clk_base	= EXYNOS5_CLKGATE_IP_GSCL,
@@ -109,6 +124,9 @@ struct platform_device exynos5_device_pd[] = {
 				.init		= exynos_pd_init,
 				.enable		= exynos_pd_enable,
 				.disable	= exynos_pd_disable,
+#ifdef CONFIG_EXYNOS5_SETUP_BTS
+				.set_bts	= set_bts_disp1,
+#endif
 				.base		= EXYNOS5_DISP1_CONFIGURATION,
 				.data		= &(struct exynos_pd_data) {
 					.clk_base	= EXYNOS5_CLKGATE_IP_DISP1,
