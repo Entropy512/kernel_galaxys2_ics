@@ -110,8 +110,8 @@
 #define DEBUG_PRINT		0
 #define DEBUG_MODE
 
-#define TOUCH_BOOSTER		0
-#define TOUCH_BOOSTER_TIME	3000
+#define TOUCH_BOOSTER		1
+#define SEC_DVFS_LOCK_TIMEOUT	3
 
 #define	X_LINE			20
 #define	Y_LINE			31
@@ -143,8 +143,11 @@ struct melfas_ts_data {
 	struct ts_platform_data *pdata;
 	struct work_struct  work;
 	struct tsp_callbacks cb;
+	struct mutex m_lock;
 #if TOUCH_BOOSTER
 	struct delayed_work  dvfs_work;
+	bool dvfs_lock_status;
+	int cpufreq_level;
 #endif
 	uint32_t flags;
 	bool charging_status;
@@ -169,12 +172,6 @@ static struct multi_touch_info g_Mtouch_info[MELFAS_MAX_TOUCH];
 
 static bool debug_print;
 static int firm_status_data;
-
-#if TOUCH_BOOSTER
-static bool dvfs_lock_status;
-static bool press_status;
-static int cpu_lv = -1;
-#endif
 
 #ifdef DEBUG_MODE
 static bool debug_on;
@@ -826,6 +823,52 @@ static int firmware_update(struct melfas_ts_data *ts)
 	return ret;
 }
 
+#if TOUCH_BOOSTER
+static void free_dvfs_lock(struct work_struct *work)
+{
+
+	struct melfas_ts_data *ts = container_of(work,
+			struct melfas_ts_data, dvfs_work.work);
+
+	mutex_lock(&ts->m_lock);
+	exynos4_busfreq_lock_free(DVFS_LOCK_ID_TSP);
+	exynos_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
+	ts->dvfs_lock_status = false;
+	pr_info("[TSP] DVFS Off!");
+	mutex_unlock(&ts->m_lock);
+}
+
+static void set_dvfs_lock(struct melfas_ts_data *ts, uint32_t on)
+{
+	mutex_lock(&ts->m_lock);
+	if (ts->cpufreq_level <= 0) {
+#ifdef CONFIG_TARGET_LOCALE_P2TMO_TEMP
+		/*dvfs freq is temp modified to resolve dvfs kernel panic*/
+		exynos_cpufreq_get_level(800000, &ts->cpufreq_level);
+#else
+		exynos_cpufreq_get_level(500000, &ts->cpufreq_level);
+#endif
+	}
+	if (on == 0) {
+		if (ts->dvfs_lock_status)
+			schedule_delayed_work(&ts->dvfs_work,
+						SEC_DVFS_LOCK_TIMEOUT * HZ);
+	} else if (on == 1) {
+		cancel_delayed_work(&ts->dvfs_work);
+		if (!ts->dvfs_lock_status) {
+			exynos4_busfreq_lock(DVFS_LOCK_ID_TSP, BUS_L1);
+			exynos_cpufreq_lock(DVFS_LOCK_ID_TSP,
+						ts->cpufreq_level);
+			ts->dvfs_lock_status = true;
+			pr_info("[TSP] DVFS On![%d]", ts->cpufreq_level);
+		}
+	} else if (on == 2) {
+		cancel_delayed_work(&ts->dvfs_work);
+		schedule_work(&ts->dvfs_work.work);
+	}
+	mutex_unlock(&ts->m_lock);
+}
+#endif
 
 static void release_all_fingers(struct melfas_ts_data *ts)
 {
@@ -846,13 +889,8 @@ static void release_all_fingers(struct melfas_ts_data *ts)
 	input_sync(ts->input_dev);
 
 #if TOUCH_BOOSTER
-	if (dvfs_lock_status) {
-		s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
-		dvfs_lock_status = false;
-		press_status = false;
-		pr_info("[TSP] release_all_fingers : DVFS mode exit ");
-	} else
-		pr_info("[TSP] release_all_fingers ");
+	set_dvfs_lock(ts, 2);
+	pr_info("[TSP] release_all_fingers ");
 #endif
 }
 
@@ -1054,37 +1092,10 @@ static void melfas_ts_read_input(struct melfas_ts_data *ts)
 		input_sync(ts->input_dev);
 
 #if TOUCH_BOOSTER
-		if (press_count)
-			press_status = true;
-		else
-			press_status = false;
-
-		cancel_delayed_work(&ts->dvfs_work);
-		schedule_delayed_work(&ts->dvfs_work,
-			msecs_to_jiffies(TOUCH_BOOSTER_TIME));
-
-		if (!dvfs_lock_status && press_status) {
-			if (cpu_lv < 0)
-				cpu_lv =
-				s5pv310_cpufreq_round_idx(CPUFREQ_500MHZ);
-			s5pv310_cpufreq_lock(DVFS_LOCK_ID_TSP, cpu_lv);
-			dvfs_lock_status = true;
-			pr_info("[TSP] TSP DVFS mode enter");
-		}
+		set_dvfs_lock(ts, !!press_count);
 #endif
 	}
 }
-
-#if TOUCH_BOOSTER
-static void set_dvfs_off(struct work_struct *work)
-{
-	if (dvfs_lock_status && !press_status) {
-		s5pv310_cpufreq_lock_free(DVFS_LOCK_ID_TSP);
-		dvfs_lock_status = false;
-		pr_info("[TSP] TSP DVFS mode exit");
-	}
-}
-#endif
 
 static irqreturn_t melfas_ts_irq_handler(int irq, void *handle)
 {
@@ -2045,6 +2056,8 @@ static int melfas_ts_probe(struct i2c_client *client,
 	ts->touch_id = pdata->gpio_touch_id;
 	ts->tsp_status = true;
 
+	mutex_init(&ts->m_lock);
+
 	ts->cb.inform_charger = inform_charger_connection;
 	if (pdata->register_cb)
 		pdata->register_cb(&ts->cb);
@@ -2079,9 +2092,8 @@ static int melfas_ts_probe(struct i2c_client *client,
 
 	__set_bit(EV_ABS, ts->input_dev->evbit);
 	__set_bit(EV_KEY, ts->input_dev->evbit);
-	__set_bit(BTN_TOUCH, ts->input_dev->keybit);
 
-	input_mt_init_slots(ts->input_dev, MELFAS_MAX_TOUCH - 1);
+	input_mt_init_slots(ts->input_dev, MELFAS_MAX_TOUCH);
 	input_set_abs_params(ts->input_dev,
 				ABS_MT_POSITION_X, 0, TS_MAX_X_COORD, 0, 0);
 	input_set_abs_params(ts->input_dev,
@@ -2108,7 +2120,7 @@ static int melfas_ts_probe(struct i2c_client *client,
 		irq = ts->client->irq;
 
 		ret = request_threaded_irq(irq, NULL, melfas_ts_irq_handler,
-					IRQF_TRIGGER_FALLING,
+					IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
 					ts->client->name, ts);
 		if (ret) {
 			pr_err("[TSP] %s: Can't allocate irq %d, ret %d\n",
@@ -2119,7 +2131,9 @@ static int melfas_ts_probe(struct i2c_client *client,
 	}
 
 #if TOUCH_BOOSTER
-	INIT_DELAYED_WORK(&ts->dvfs_work, set_dvfs_off);
+	INIT_DELAYED_WORK(&ts->dvfs_work, free_dvfs_lock);
+	ts->cpufreq_level = -1;
+	ts->dvfs_lock_status = false;
 #endif
 
 	for (i = 0; i < MELFAS_MAX_TOUCH; i++)
@@ -2211,8 +2225,8 @@ static int melfas_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 	}
 #endif
 
-	release_all_fingers(ts);
 	disable_irq(ts->client->irq);
+	release_all_fingers(ts);
 
 	ts->power_off();
 
