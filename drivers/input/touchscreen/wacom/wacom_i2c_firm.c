@@ -19,12 +19,12 @@
 #include <linux/kernel.h>
 unsigned char *Binary;
 
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 const unsigned int Binary_nLength = 0xBFFF;
 const unsigned char Mpu_type = 0x22;
-const unsigned int Firmware_version_of_file = 0x13B;
+const unsigned int Firmware_version_of_file = 0x167;
 unsigned char *firmware_name = "";
-const char Firmware_checksum[] = { 0x1F, 0x12, 0x9A, 0xF5, 0xCB, };
+const char Firmware_checksum[] = { 0x1F, 0x74, 0xc6, 0xe1, 0x13, };
 
 #include "wacom_i2c_firm_p4.h"
 
@@ -42,7 +42,7 @@ const char Firmware_checksum[] = { 0x1F, 0xee, 0x06, 0x4b, 0xdd, };
 void wacom_i2c_set_firm_data(unsigned char *Binary_new)
 {
 	if (Binary_new == NULL) {
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 		Binary = (unsigned char *)Binary_48;
 #elif defined(CONFIG_MACH_Q1_BD)
 		Binary = NULL;
@@ -55,7 +55,7 @@ void wacom_i2c_set_firm_data(unsigned char *Binary_new)
 
 void wacom_i2c_init_firm_data(void)
 {
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 	Binary = (unsigned char *)Binary_48;
 
 #elif defined(CONFIG_MACH_Q1_BD)

@@ -33,41 +33,55 @@
 #define LATTICE_SIZE_Y ((MAX_COORD_Y / CAL_PITCH)+2)
 #endif
 
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 #define MAX_COORD_X WACOM_POSX_MAX
 #define MAX_COORD_Y WACOM_POSY_MAX
 #endif
 
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 #define CONFIG_SAMSUNG_KERNEL_DEBUG_USER
+#endif
 
 /* block wacom coordinate print */
 /* extern int sec_debug_level(void); */
-#ifdef SEC_DVFS_LOCK
-#define SEC_DVFS_LOCK_TIMEOUT 3
-static struct delayed_work dvfs_dwork;
-static void free_dvfs_lock(struct work_struct *work)
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+void free_dvfs_lock(struct work_struct *work)
 {
-	exynos_cpufreq_lock_free(DVFS_LOCK_ID_PEN);
-}
-static void set_dvfs_lock(bool on)
-{
-	static bool enable;
+	struct wacom_i2c *wac_i2c =
+	    container_of(work, struct wacom_i2c, dvfs_work.work);
 
+#ifdef SEC_BUS_LOCK
+#if defined(CONFIG_MACH_P4NOTE)
+	dev_unlock(wac_i2c->bus_dev, wac_i2c->dev);
+#else
+	exynos4_busfreq_lock_free(DVFS_LOCK_ID_PEN);
+#endif
+#endif	/* SEC_BUS_LOCK */
+	exynos_cpufreq_lock_free(DVFS_LOCK_ID_PEN);
+	wac_i2c->dvfs_lock_status = false;
+}
+
+static void set_dvfs_lock(struct wacom_i2c *wac_i2c, bool on)
+{
 	if (on) {
-		cancel_delayed_work(&dvfs_dwork);
-		if (!enable) {
-			unsigned int cpufreq_level;
-			if (!exynos_cpufreq_get_level(800000, &cpufreq_level)) {
-				exynos_cpufreq_lock(DVFS_LOCK_ID_PEN,
-					cpufreq_level);
-				enable = true;
-			}
+		cancel_delayed_work(&wac_i2c->dvfs_work);
+		if (!wac_i2c->dvfs_lock_status) {
+#ifdef SEC_BUS_LOCK
+#if defined(CONFIG_MACH_P4NOTE)
+			dev_lock(wac_i2c->bus_dev,
+				wac_i2c->dev, BUS_LOCK_FREQ);
+#else
+			exynos4_busfreq_lock(DVFS_LOCK_ID_PEN, BUS_L1);
+#endif
+#endif	/* SEC_BUS_LOCK */
+			exynos_cpufreq_lock(DVFS_LOCK_ID_PEN,
+					    wac_i2c->cpufreq_level);
+			wac_i2c->dvfs_lock_status = true;
 		}
 	} else {
-		if (enable)
-			schedule_delayed_work(&dvfs_dwork,
-				SEC_DVFS_LOCK_TIMEOUT * HZ);
-		enable = false;
+		if (wac_i2c->dvfs_lock_status)
+			schedule_delayed_work(&wac_i2c->dvfs_work,
+			      SEC_DVFS_LOCK_TIMEOUT * HZ);
 	}
 }
 #endif
@@ -77,25 +91,61 @@ void forced_release(struct wacom_i2c *wac_i2c)
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
 	printk(KERN_DEBUG "[E-PEN] %s\n", __func__);
 #endif
-	input_report_abs(wac_i2c->input_dev,
-		ABS_PRESSURE, 0);
-	input_report_key(wac_i2c->input_dev,
-		BTN_STYLUS, 0);
-	input_report_key(wac_i2c->input_dev,
-		BTN_TOUCH, 0);
-	input_report_key(wac_i2c->input_dev,
-		wac_i2c->tool, 0);
+	input_report_abs(wac_i2c->input_dev, ABS_PRESSURE, 0);
+	input_report_key(wac_i2c->input_dev, BTN_STYLUS, 0);
+	input_report_key(wac_i2c->input_dev, BTN_TOUCH, 0);
+#if defined(WACOM_IRQ_WORK_AROUND) || defined(WACOM_PDCT_WORK_AROUND)
+	input_report_key(wac_i2c->input_dev, BTN_TOOL_RUBBER, 0);
+	input_report_key(wac_i2c->input_dev, BTN_TOOL_PEN, 0);
+#else
+	input_report_key(wac_i2c->input_dev, wac_i2c->tool, 0);
+#endif
 	input_sync(wac_i2c->input_dev);
 
 	wac_i2c->pen_prox = 0;
 	wac_i2c->pen_pressed = 0;
 	wac_i2c->side_pressed = 0;
+	wac_i2c->pen_pdct = PDCT_NOSIGNAL;
 
-#ifdef SEC_DVFS_LOCK
-	set_dvfs_lock(false);
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	set_dvfs_lock(wac_i2c, false);
 #endif
 
 }
+
+#ifdef WACOM_PDCT_WORK_AROUND
+void forced_hover(struct wacom_i2c *wac_i2c)
+{
+#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
+	printk(KERN_DEBUG "[E-PEN] %s\n", __func__);
+#endif
+	input_report_abs(wac_i2c->input_dev, ABS_X, 0);
+	input_report_abs(wac_i2c->input_dev, ABS_Y, 0);
+	input_report_abs(wac_i2c->input_dev, ABS_PRESSURE, 0);
+	input_report_key(wac_i2c->input_dev, BTN_STYLUS, 0);
+	input_report_key(wac_i2c->input_dev, BTN_TOUCH, 1);
+	input_report_key(wac_i2c->input_dev, BTN_TOOL_PEN, 1);
+	input_sync(wac_i2c->input_dev);
+
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	set_dvfs_lock(wac_i2c, true);
+#endif
+}
+#endif
+
+#ifdef WACOM_IRQ_WORK_AROUND
+void wacom_i2c_pendct_work(struct work_struct *work)
+{
+	struct wacom_i2c *wac_i2c =
+	    container_of(work, struct wacom_i2c, pendct_dwork.work);
+
+	printk(KERN_DEBUG "[E-PEN] %s , %d\n",
+	       __func__, gpio_get_value(wac_i2c->wac_pdata->gpio_pendct));
+
+	if (gpio_get_value(wac_i2c->wac_pdata->gpio_pendct))
+		forced_release(wac_i2c);
+}
+#endif
 
 int wacom_i2c_test(struct wacom_i2c *wac_i2c)
 {
@@ -172,10 +222,6 @@ int wacom_i2c_query(struct wacom_i2c *wac_i2c)
 	int i = 0;
 	int query_limit = 10;
 
-#ifdef SEC_DVFS_LOCK
-	INIT_DELAYED_WORK(&dvfs_dwork, free_dvfs_lock);
-#endif
-
 	buf = COM_QUERY;
 
 	msg[0].addr = wac_i2c->client->addr;
@@ -213,7 +259,8 @@ int wacom_i2c_query(struct wacom_i2c *wac_i2c)
 		i++;
 	} while (i < query_limit);
 
-#if defined(CONFIG_MACH_Q1_BD) || defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_Q1_BD) || defined(CONFIG_MACH_P4NOTE) || \
+	defined(CONFIG_MACH_P4)
 	wac_feature->x_max = (u16) MAX_COORD_X;
 	wac_feature->y_max = (u16) MAX_COORD_Y;
 #else
@@ -363,15 +410,7 @@ void wacom_i2c_coord_average(unsigned short *CoordX, unsigned short *CoordY,
 
 static bool wacom_i2c_coord_range(u16 *x, u16 *y)
 {
-#if 0
-/*
-#if defined(CONFIG_MACH_P4)
-*/
-	*x -= WACOM_POSX_OFFSET;
-	*y -= WACOM_POSY_OFFSET;
-#endif
-	if ((*x <= WACOM_POSX_MAX) &&
-		(*y <= WACOM_POSY_MAX))
+	if ((*x <= WACOM_POSX_MAX) && (*y <= WACOM_POSY_MAX))
 		return true;
 
 	return false;
@@ -387,166 +426,191 @@ int wacom_i2c_coord(struct wacom_i2c *wac_i2c)
 	static u16 tmp;
 	int rdy = 0;
 
+#ifdef WACOM_IRQ_WORK_AROUND
+	cancel_delayed_work(&wac_i2c->pendct_dwork);
+#endif
+
 	data = wac_i2c->wac_feature->data;
 	ret = i2c_master_recv(wac_i2c->client, data, COM_COORD_NUM);
 
-	if (ret >= 0) {
+	if (ret < 0) {
+		printk(KERN_ERR "[E-PEN] %s failed to read i2c.L%d\n", __func__,
+		       __LINE__);
+		return -1;
+	}
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-		pr_debug("[E-PEN] %x, %x, %x, %x, %x, %x, %x\n",
-			 data[0], data[1], data[2], data[3], data[4], data[5],
-			 data[6]);
+	pr_debug("[E-PEN] %x, %x, %x, %x, %x, %x, %x\n",
+		 data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
 #endif
+	if (data[0] & 0x80) {
+		/* enable emr device */
+		if (!wac_i2c->pen_prox) {
 
-		if (data[0] & 0x80) {
-			/* enable emr device */
-			if (!wac_i2c->pen_prox) {
+			wac_i2c->pen_prox = 1;
 
-				wac_i2c->pen_prox = 1;
-
-				if (data[0] & 0x40)
-					wac_i2c->tool = BTN_TOOL_RUBBER;
-				else
-					wac_i2c->tool = BTN_TOOL_PEN;
-#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-				pr_debug("[E-PEN] is in(%d)\n", wac_i2c->tool);
-#endif
-			}
-
-			prox = !!(data[0] & 0x10);
-			stylus = !!(data[0] & 0x20);
-			rubber = !!(data[0] & 0x40);
-			rdy = !!(data[0] & 0x80);
-
-			x = ((u16) data[1] << 8) + (u16) data[2];
-			y = ((u16) data[3] << 8) + (u16) data[4];
-			pressure = ((u16) data[5] << 8) + (u16) data[6];
-
-#ifdef WACOM_IMPORT_FW_ALGO
-			/* Change Position to Active Area */
-			if (x <= origin_offset[0])
-				x = 0;
+			if (data[0] & 0x40)
+				wac_i2c->tool = BTN_TOOL_RUBBER;
 			else
-				x = x - origin_offset[0];
-			if (y <= origin_offset[1])
-				y = 0;
-			else
-				y = y - origin_offset[1];
-#ifdef COOR_WORK_AROUND
-			wacom_i2c_coord_offset(&x, &y);
-			wacom_i2c_coord_average(&x, &y, rdy);
-#endif
-#endif
-
-			if (wac_i2c->wac_pdata->x_invert)
-				x = wac_i2c->wac_feature->x_max - x;
-			if (wac_i2c->wac_pdata->y_invert)
-				y = wac_i2c->wac_feature->y_max - y;
-
-			if (wac_i2c->wac_pdata->xy_switch) {
-				tmp = x;
-				x = y;
-				y = tmp;
-			}
-#ifdef COOR_WORK_AROUND
-			/* Add offset */
-			x = x + tilt_offsetX[user_hand][screen_rotate];
-			y = y + tilt_offsetY[user_hand][screen_rotate];
-#endif
-			if (wacom_i2c_coord_range(&x, &y)) {
-				input_report_abs(wac_i2c->input_dev, ABS_X, x);
-				input_report_abs(wac_i2c->input_dev, ABS_Y, y);
-				input_report_abs(wac_i2c->input_dev,
-						 ABS_PRESSURE, pressure);
-				input_report_key(wac_i2c->input_dev,
-						 BTN_STYLUS, stylus);
-				input_report_key(wac_i2c->input_dev, BTN_TOUCH,
-						 prox);
-				input_report_key(wac_i2c->input_dev,
-						 wac_i2c->tool, 1);
-				input_sync(wac_i2c->input_dev);
-
-				if (prox && !wac_i2c->pen_pressed) {
-#ifdef SEC_DVFS_LOCK
-					set_dvfs_lock(true);
-#endif
+				wac_i2c->tool = BTN_TOOL_PEN;
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-					printk(KERN_DEBUG
-						"[E-PEN] is pressed(%d,%d,%d)(%d)\n",
-						x, y, pressure, wac_i2c->tool);
-#else
-					printk(KERN_DEBUG "[E-PEN] pressed\n");
-#endif
-
-				} else if (!prox && wac_i2c->pen_pressed) {
-#ifdef SEC_DVFS_LOCK
-					set_dvfs_lock(false);
-#endif
-#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-					printk(KERN_DEBUG
-						"[E-PEN] is released(%d,%d,%d)(%d)\n",
-						x, y, pressure, wac_i2c->tool);
-#else
-					printk(KERN_DEBUG "[E-PEN] released\n");
-#endif
-				}
-
-				wac_i2c->pen_pressed = prox;
-
-#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-				if (stylus && !wac_i2c->side_pressed)
-					printk(KERN_DEBUG "[E-PEN] side on");
-				else if (!stylus && wac_i2c->side_pressed)
-					printk(KERN_DEBUG "[E-PEN] side off");
-#endif
-				wac_i2c->side_pressed = stylus;
-			}
-#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-			else
-			   printk("[E-PEN] raw data x=0x%x, y=0x%x\n",
-			   x, y);
-#endif
-		} else {
-#ifdef COOR_WORK_AROUND
-			/* enable emr device */
-			wacom_i2c_coord_average(0, 0, 0);
-#endif
-
-			if (wac_i2c->pen_prox) {
-				/* input_report_abs(wac->input_dev,
-				ABS_X, x); */
-				/* input_report_abs(wac->input_dev,
-				ABS_Y, y); */
-				input_report_abs(wac_i2c->input_dev,
-						 ABS_PRESSURE, 0);
-				input_report_key(wac_i2c->input_dev,
-						 BTN_STYLUS, 0);
-				input_report_key(wac_i2c->input_dev, BTN_TOUCH,
-						 0);
-				input_report_key(wac_i2c->input_dev,
-						 wac_i2c->tool, 0);
-				input_sync(wac_i2c->input_dev);
-
-#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-				if (wac_i2c->pen_pressed
-					|| wac_i2c->side_pressed)
-					printk(KERN_DEBUG "[E-PEN] is out");
-				else
-					printk(KERN_DEBUG "[E-PEN] is out");
-#endif
-			}
-			wac_i2c->pen_prox = 0;
-			wac_i2c->pen_pressed = 0;
-			wac_i2c->side_pressed = 0;
-
-#ifdef SEC_DVFS_LOCK
-			set_dvfs_lock(false);
+			pr_debug("[E-PEN] is in(%d)\n", wac_i2c->tool);
 #endif
 		}
+
+		prox = !!(data[0] & 0x10);
+		stylus = !!(data[0] & 0x20);
+		rubber = !!(data[0] & 0x40);
+		rdy = !!(data[0] & 0x80);
+
+		x = ((u16) data[1] << 8) + (u16) data[2];
+		y = ((u16) data[3] << 8) + (u16) data[4];
+		pressure = ((u16) data[5] << 8) + (u16) data[6];
+
+#ifdef WACOM_IMPORT_FW_ALGO
+		/* Change Position to Active Area */
+		if (x <= origin_offset[0])
+			x = 0;
+		else
+			x = x - origin_offset[0];
+		if (y <= origin_offset[1])
+			y = 0;
+		else
+			y = y - origin_offset[1];
+#ifdef COOR_WORK_AROUND
+		wacom_i2c_coord_offset(&x, &y);
+		wacom_i2c_coord_average(&x, &y, rdy);
+#endif
+#endif
+
+		if (wac_i2c->wac_pdata->x_invert)
+			x = wac_i2c->wac_feature->x_max - x;
+		if (wac_i2c->wac_pdata->y_invert)
+			y = wac_i2c->wac_feature->y_max - y;
+
+		if (wac_i2c->wac_pdata->xy_switch) {
+			tmp = x;
+			x = y;
+			y = tmp;
+		}
+#ifdef COOR_WORK_AROUND
+		/* Add offset */
+		x = x + tilt_offsetX[user_hand][screen_rotate];
+		y = y + tilt_offsetY[user_hand][screen_rotate];
+#endif
+		if (wacom_i2c_coord_range(&x, &y)) {
+			input_report_abs(wac_i2c->input_dev, ABS_X, x);
+			input_report_abs(wac_i2c->input_dev, ABS_Y, y);
+			input_report_abs(wac_i2c->input_dev,
+					 ABS_PRESSURE, pressure);
+			input_report_key(wac_i2c->input_dev,
+					 BTN_STYLUS, stylus);
+			input_report_key(wac_i2c->input_dev, BTN_TOUCH, prox);
+			input_report_key(wac_i2c->input_dev, wac_i2c->tool, 1);
+			input_sync(wac_i2c->input_dev);
+
+			if (prox && !wac_i2c->pen_pressed) {
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+				set_dvfs_lock(wac_i2c, true);
+#endif
+#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
+				printk(KERN_DEBUG
+				       "[E-PEN] is pressed(%d,%d,%d)(%d)\n",
+				       x, y, pressure, wac_i2c->tool);
+#else
+				printk(KERN_DEBUG "[E-PEN] pressed\n");
+#endif
+
+			} else if (!prox && wac_i2c->pen_pressed) {
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+				set_dvfs_lock(wac_i2c, false);
+#endif
+#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
+				printk(KERN_DEBUG
+				       "[E-PEN] is released(%d,%d,%d)(%d)\n",
+				       x, y, pressure, wac_i2c->tool);
+#else
+				printk(KERN_DEBUG "[E-PEN] released\n");
+#endif
+			}
+
+			wac_i2c->pen_pressed = prox;
+
+			if (stylus && !wac_i2c->side_pressed)
+				printk(KERN_DEBUG "[E-PEN] side on\n");
+			else if (!stylus && wac_i2c->side_pressed)
+				printk(KERN_DEBUG "[E-PEN] side off\n");
+
+			wac_i2c->side_pressed = stylus;
+		}
+#if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
+		else
+			printk(KERN_DEBUG "[E-PEN] raw data x=0x%x, y=0x%x\n",
+			x, y);
+#endif
 	} else {
-		printk(KERN_ERR "[E-PEN]: failed to read i2c\n");
-		return -1;
+
+#ifdef WACOM_IRQ_WORK_AROUND
+		if (!gpio_get_value(wac_i2c->wac_pdata->gpio_pendct)) {
+			x = ((u16) data[1] << 8) + (u16) data[2];
+			y = ((u16) data[3] << 8) + (u16) data[4];
+
+			if (data[0] & 0x40)
+				wac_i2c->tool = BTN_TOOL_RUBBER;
+			else
+				wac_i2c->tool = BTN_TOOL_PEN;
+
+			input_report_abs(wac_i2c->input_dev, ABS_X, x);
+			input_report_abs(wac_i2c->input_dev, ABS_Y, y);
+			input_report_abs(wac_i2c->input_dev, ABS_PRESSURE, 0);
+			input_report_key(wac_i2c->input_dev, BTN_STYLUS, 0);
+			input_report_key(wac_i2c->input_dev, BTN_TOUCH, 0);
+			input_report_key(wac_i2c->input_dev, wac_i2c->tool, 1);
+			input_sync(wac_i2c->input_dev);
+		}
+
+		schedule_delayed_work(&wac_i2c->pendct_dwork, HZ / 10);
+
+		return 0;
+#else				/* WACOM_IRQ_WORK_AROUND */
+#ifdef COOR_WORK_AROUND
+		/* enable emr device */
+		wacom_i2c_coord_average(0, 0, 0);
+#endif
+
+#ifdef WACOM_PDCT_WORK_AROUND
+		if (wac_i2c->pen_pdct == PDCT_DETECT_PEN)
+			forced_hover(wac_i2c);
+		else
+#endif
+		if (wac_i2c->pen_prox) {
+			/* input_report_abs(wac->input_dev,
+			   ABS_X, x); */
+			/* input_report_abs(wac->input_dev,
+			   ABS_Y, y); */
+
+			input_report_abs(wac_i2c->input_dev, ABS_PRESSURE, 0);
+			input_report_key(wac_i2c->input_dev, BTN_STYLUS, 0);
+			input_report_key(wac_i2c->input_dev, BTN_TOUCH, 0);
+#if defined(WACOM_PDCT_WORK_AROUND)
+			input_report_key(wac_i2c->input_dev,
+				BTN_TOOL_RUBBER, 0);
+			input_report_key(wac_i2c->input_dev, BTN_TOOL_PEN, 0);
+#else
+			input_report_key(wac_i2c->input_dev, wac_i2c->tool, 0);
+#endif
+			input_sync(wac_i2c->input_dev);
+
+			printk(KERN_DEBUG "[E-PEN] is out");
+		}
+		wac_i2c->pen_prox = 0;
+		wac_i2c->pen_pressed = 0;
+		wac_i2c->side_pressed = 0;
+
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+		set_dvfs_lock(wac_i2c, false);
+#endif
+#endif
 	}
 
 	return 0;
 }
-

@@ -59,7 +59,7 @@
 #define MAX_ADDR_W8501   0x7FFF
 
 #define MAX_BLOCK_514    47
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 #define MPUVER_514       0x22
 #define BLVER_514        0x70
 #else
