@@ -11,6 +11,7 @@
 #include <mach/gpio.h>
 #include "midas.h"
 
+#ifdef CONFIG_SAMSUNG_MHL
 static void sii9234_cfg_gpio(void)
 {
 	printk(KERN_INFO "%s()\n", __func__);
@@ -42,9 +43,13 @@ static void sii9234_cfg_gpio(void)
 	s3c_gpio_setpull(GPIO_MHL_RST, S3C_GPIO_PULL_NONE);
 	gpio_set_value(GPIO_MHL_RST, GPIO_LEVEL_LOW);
 
+#if !defined(CONFIG_MACH_C1_KOR_LGT) && !defined(CONFIG_SAMSUNG_MHL_9290)
+#if !defined(CONFIG_MACH_P4NOTE)
 	s3c_gpio_cfgpin(GPIO_MHL_SEL, S3C_GPIO_OUTPUT);
 	s3c_gpio_setpull(GPIO_MHL_SEL, S3C_GPIO_PULL_NONE);
 	gpio_set_value(GPIO_MHL_SEL, GPIO_LEVEL_LOW);
+#endif
+#endif
 }
 
 static void sii9234_power_onoff(bool on)
@@ -90,6 +95,7 @@ static void sii9234_reset(void)
 }
 
 #ifndef CONFIG_SAMSUNG_USE_11PIN_CONNECTOR
+#ifndef CONFIG_MACH_P4NOTE
 static void mhl_usb_switch_control(bool on)
 {
 	printk(KERN_INFO "%s() [MHL] USB path change : %s\n",
@@ -107,13 +113,15 @@ static void mhl_usb_switch_control(bool on)
 	}
 }
 #endif
+#endif
 
 static struct sii9234_platform_data sii9234_pdata = {
 	.init = sii9234_cfg_gpio,
-#ifndef CONFIG_SAMSUNG_USE_11PIN_CONNECTOR
-	.mhl_sel = mhl_usb_switch_control,
-#else
+#if defined(CONFIG_SAMSUNG_USE_11PIN_CONNECTOR) || \
+		defined(CONFIG_MACH_P4NOTE)
 	.mhl_sel = NULL,
+#else
+	.mhl_sel = mhl_usb_switch_control,
 #endif
 	.hw_onoff = sii9234_power_onoff,
 	.hw_reset = sii9234_reset,
@@ -146,14 +154,31 @@ static struct i2c_board_info i2c_dev_hdmi_ddc __initdata = {
 
 static int __init midas_mhl_init(void)
 {
+	int ret;
 #define I2C_BUS_ID_MHL	15
-	i2c_add_devices(I2C_BUS_ID_MHL, i2c_devs_sii9234,
+	ret = i2c_add_devices(I2C_BUS_ID_MHL, i2c_devs_sii9234,
 			ARRAY_SIZE(i2c_devs_sii9234));
 
+	if (ret < 0) {
+		printk(KERN_ERR "[MHL] adding i2c fail - nodevice\n");
+		return -ENODEV;
+	}
+#if defined(CONFIG_MACH_S2PLUS) || defined(CONFIG_MACH_P4NOTE)
+	sii9234_pdata.ddc_i2c_num = 5;
+#else
 	sii9234_pdata.ddc_i2c_num = (system_rev == 3 ? 16 : 5);
+#endif
 
-	i2c_add_devices(sii9234_pdata.ddc_i2c_num, &i2c_dev_hdmi_ddc, 1);
+#ifdef CONFIG_MACH_SLP_PQ_LTE
+	sii9234_pdata.ddc_i2c_num = 16;
+#endif
+	ret = i2c_add_devices(sii9234_pdata.ddc_i2c_num, &i2c_dev_hdmi_ddc, 1);
+	if (ret < 0) {
+		printk(KERN_ERR "[MHL] adding ddc fail - nodevice\n");
+		return -ENODEV;
+	}
 
 	return 0;
 }
 module_init(midas_mhl_init);
+#endif

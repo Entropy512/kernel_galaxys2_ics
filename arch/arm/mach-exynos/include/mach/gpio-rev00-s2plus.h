@@ -59,8 +59,6 @@ extern void midas_config_sleep_gpio_table(void);
 
 #define GPIO_NFC_SDA_18V	EXYNOS4_GPB(2)
 #define GPIO_NFC_SCL_18V	EXYNOS4_GPB(3)
-#define GPIO_MHL_DSDA_2_8V	EXYNOS4_GPB(2)
-#define GPIO_MHL_DSCL_2_8V	EXYNOS4_GPB(3)
 
 #define GPIO_CAM_SPI_SCLK	EXYNOS4_GPB(4)
 #define GPIO_CAM_SPI_SSN	EXYNOS4_GPB(5)
@@ -350,6 +348,8 @@ extern void midas_config_sleep_gpio_table(void);
 
 
 /****************** DUMMP ********************/
+#define GPIO_MHL_DSDA_2_8V	GPIO_DUMMP
+#define GPIO_MHL_DSCL_2_8V	GPIO_DUMMP
 #define GPIO_WPC_INT		GPIO_DUMMP
 #define GPIO_OTG_EN		GPIO_DUMMP /*don't used pin*/
 #define GPIO_CAM_IO_EN		GPIO_DUMMP

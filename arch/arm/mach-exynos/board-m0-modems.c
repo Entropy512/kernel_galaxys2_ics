@@ -174,36 +174,33 @@ static struct modem_data umts_modem_data = {
 /* HSIC specific function */
 void set_slave_wake(void)
 {
-	int spin = 20;
 	if (gpio_get_value(modem_link_pm_data.gpio_link_hostwake)) {
 		pr_info("[MODEM_IF]Slave Wake\n");
 		if (gpio_get_value(modem_link_pm_data.gpio_link_slavewake)) {
+			pr_info("[MODEM_IF]Slave Wake set _-\n");
 			gpio_direction_output(
 			modem_link_pm_data.gpio_link_slavewake, 0);
 			mdelay(10);
 		}
 		gpio_direction_output(
 			modem_link_pm_data.gpio_link_slavewake, 1);
-		mdelay(10);
-		while (spin--) {
-			if (!gpio_get_value(
-				modem_link_pm_data.gpio_link_hostwake))
-				break;
-			mdelay(10);
-		}
 	}
 }
 
 void set_host_states(struct platform_device *pdev, int type)
 {
+	int val = gpio_get_value(umts_modem_data.gpio_cp_reset);
+
+	if (!val) {
+		pr_info("CP not ready, Active State low\n");
+		return;
+	}
+
 	if (active_ctl.gpio_initialized) {
-		if (type)
-			set_slave_wake();
 		pr_err(LOG_TAG "Active States =%d, %s\n", type, pdev->name);
 		gpio_direction_output(modem_link_pm_data.gpio_link_active,
 			type);
-	} else
-		active_ctl.gpio_request_host_active = 1;
+	}
 }
 
 void set_hsic_lpa_states(int states)
@@ -233,8 +230,7 @@ void set_hsic_lpa_states(int states)
 			break;
 		case STATE_HSIC_LPA_PHY_INIT:
 			gpio_set_value(umts_modem_data.gpio_pda_active, 1);
-			gpio_set_value(modem_link_pm_data.gpio_link_slavewake,
-				1);
+			set_slave_wake();
 			pr_info(LOG_TAG "set hsic lpa phy init: "
 				"slave wake-up (%d)\n",
 				gpio_get_value(
@@ -466,10 +462,6 @@ static void modem_link_pm_config_gpio(void)
 							IRQ_TYPE_EDGE_BOTH);
 
 	active_ctl.gpio_initialized = 1;
-	if (active_ctl.gpio_request_host_active) {
-		pr_err(LOG_TAG "Active States = 1, %s\n", __func__);
-		gpio_direction_output(modem_link_pm_data.gpio_link_active, 1);
-	}
 
 	pr_info(LOG_TAG "modem_link_pm_config_gpio done\n");
 }
