@@ -33,6 +33,16 @@
 #include <linux/gpio.h>
 #include <plat/gpio-cfg.h>
 #include <linux/rtc.h>
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+#endif
+/* adjust full soc */
+#define FULL_SOC_DEFAULT	9850
+#define FULL_SOC_LOW		9700
+#define FULL_SOC_HIGH		10000
+#define FULL_KEEP_SOC		50
+#endif
 
 /* MAX17047 Registers. */
 #define MAX17047_REG_STATUS		0x00
@@ -56,6 +66,10 @@
 #undef	DEBUG_FUELGAUGE_POLLING
 #define MAX17047_POLLING_INTERVAL	10000
 
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+static void max17047_adjust_fullsoc(struct i2c_client *client);
+#endif
+
 struct max17047_fuelgauge_data {
 	struct i2c_client		*client;
 	struct max17047_platform_data	*pdata;
@@ -74,6 +88,18 @@ struct max17047_fuelgauge_data {
 	unsigned int			soc;
 	unsigned int			rawsoc;
 	unsigned int			temperature;
+
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+	int				full_soc;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry			*fg_debugfs_dir;
+#endif
+#endif
+
+#ifdef CONFIG_HIBERNATION
+	u8 *reg_dump;
+#endif
+
 };
 
 static int max17047_i2c_read(struct i2c_client *client, int reg, u8 *buf)
@@ -163,7 +189,7 @@ static int max17047_get_vfocv(struct i2c_client *client)
 
 	pr_debug("%s: VFOCV(0x%02x%02x, %d)\n", __func__,
 		 data[1], data[0], vfocv);
-	return vfocv;
+	return vfocv * 1000;
 }
 
 static int max17047_get_vcell(struct i2c_client *client)
@@ -231,20 +257,50 @@ static int max17047_get_soc(struct i2c_client *client)
 
 	rawsoc = max17047_get_rawsoc(fuelgauge_data->client);
 
-	/* Adjusted soc by adding 0.45 */
-	soc = fuelgauge_data->soc = min((rawsoc + 45) / 100, 100);
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	soc = fuelgauge_data->soc
+		= (rawsoc < 300) ? 0 : ((rawsoc - 300) * 100 / 9200) + 1;
+#else
+#if defined(CONFIG_MACH_C1_KOR_SKT) || \
+	defined(CONFIG_MACH_C1_KOR_KT) || \
+	defined(CONFIG_MACH_C1_KOR_LGT)
+	if (fuelgauge_data->full_soc <= 0)
+		fuelgauge_data->full_soc = FULL_SOC_DEFAULT;
 
-	pr_debug("%s: SOC(%d)\n", __func__, soc);
+	soc = fuelgauge_data->soc =
+		((rawsoc < 0) ? 0 : (min((rawsoc * 100 /
+				fuelgauge_data->full_soc), 100)));
+#elif defined(CONFIG_MACH_M0_KOR_SKT) || \
+	defined(CONFIG_MACH_M0_KOR_KT)
+	if (fuelgauge_data->full_soc <= 0)
+		fuelgauge_data->full_soc = FULL_SOC_DEFAULT;
+
+	soc = fuelgauge_data->soc =
+		((rawsoc < 29) ? 0 : (min(((rawsoc - 29) * 100 /
+				(fuelgauge_data->full_soc - 29)), 100)));
+#else
+	/* prevent minus value and add 0.5% up raw soc */
+	soc = fuelgauge_data->soc =
+		((rawsoc < 29) ? 0 : (min(((rawsoc - 29) * 100 /
+						(10000 - 79)), 100)));
+#endif
+#endif
+
+	pr_debug("%s: SOC(%d, %d)\n", __func__, soc, rawsoc);
 	return soc;
 }
 
 static void max17047_reset_soc(struct i2c_client *client)
 {
+	struct max17047_fuelgauge_data *fuelgauge_data =
+				i2c_get_clientdata(client);
 	u8 data[2];
 	pr_info("%s: Before quick-start - "
-		"VFOCV(%d), VFSOC(%d)\n",
-		__func__, max17047_get_vfocv(client),
-		max17047_get_soc(client));
+		"VFOCV(%d), VFSOC(%d), SOC(%d)\n", __func__,
+				max17047_get_vfocv(client),
+				max17047_get_rawsoc(client),
+				max17047_get_soc(client));
+	max17047_test_read(fuelgauge_data);
 
 	if (max17047_i2c_read(client, MAX17047_REG_MISCCFG, data) < 0)
 		return;
@@ -256,9 +312,11 @@ static void max17047_reset_soc(struct i2c_client *client)
 	msleep(500);
 
 	pr_info("%s: After quick-start - "
-		"VFOCV(%d), VFSOC(%d)\n",
-		__func__, max17047_get_vfocv(client),
-		max17047_get_soc(client));
+		"VFOCV(%d), VFSOC(%d), SOC(%d)\n", __func__,
+				max17047_get_vfocv(client),
+				max17047_get_rawsoc(client),
+				max17047_get_soc(client));
+	max17047_test_read(fuelgauge_data);
 
 	return;
 }
@@ -311,7 +369,24 @@ static void max17047_reg_init(struct max17047_fuelgauge_data *fuelgauge_data)
 	u8 i2c_data[2];
 	pr_debug("%s\n", __func__);
 
-	/* Use MG1 */
+
+#if defined(CONFIG_BATTERY_SAMSUNG_S2PLUS)
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x00;
+	max17047_i2c_write(client, MAX17047_REG_CGAIN, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x03;
+	max17047_i2c_write(client, MAX17047_REG_MISCCFG, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x07;
+	max17047_i2c_write(client, MAX17047_REG_LEARNCFG, i2c_data);
+
+	i2c_data[1] = 0x00;
+	i2c_data[0] = 0x50;
+	max17047_i2c_write(client, MAX17047_REG_RCOMP, i2c_data);
+#else /* Use MG1 */
 	i2c_data[1] = 0x00;
 	i2c_data[0] = 0x00;
 	max17047_i2c_write(client, MAX17047_REG_CGAIN, i2c_data);
@@ -323,6 +398,7 @@ static void max17047_reg_init(struct max17047_fuelgauge_data *fuelgauge_data)
 	i2c_data[1] = 0x07;
 	i2c_data[0] = 0x00;
 	max17047_i2c_write(client, MAX17047_REG_LEARNCFG, i2c_data);
+#endif
 }
 
 #ifdef DEBUG_FUELGAUGE_POLLING
@@ -336,8 +412,8 @@ static void max17047_polling_work(struct work_struct *work)
 	u8 data[2];
 	u8 buf[512];
 
-	max17047_get_vfocv(fuelgauge_data->client);
 	max17047_get_vcell(fuelgauge_data->client);
+	max17047_get_vfocv(fuelgauge_data->client);
 	max17047_get_avgvcell(fuelgauge_data->client);
 	max17047_get_rawsoc(fuelgauge_data->client);
 	max17047_get_soc(fuelgauge_data->client);
@@ -435,6 +511,11 @@ static int max17047_get_property(struct power_supply *psy,
 		case SOC_TYPE_RAW:
 			val->intval = max17047_get_rawsoc(fuelgauge_data->client);
 		break;
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+		case SOC_TYPE_FULL:
+			val->intval = fuelgauge_data->full_soc;
+		break;
+#endif
 		default:
 			val->intval = max17047_get_soc(fuelgauge_data->client);
 		break;
@@ -462,6 +543,15 @@ static int max17047_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CAPACITY:
 		max17047_reset_soc(fuelgauge_data->client);
 		break;
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+	case POWER_SUPPLY_PROP_STATUS:
+		if (val->intval != POWER_SUPPLY_STATUS_FULL)
+			return -EINVAL;
+		pr_info("%s: charger full state!\n", __func__);
+		/* adjust full soc */
+		max17047_adjust_fullsoc(fuelgauge_data->client);
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -472,12 +562,195 @@ static int max17047_set_property(struct power_supply *psy,
 static irqreturn_t max17047_fuelgauge_isr(int irq, void *data)
 {
 	struct max17047_fuelgauge_data *fuelgauge_data = data;
-	pr_info("%s: Fuelgauge alert.\n", __func__);
+	struct power_supply *battery_psy = power_supply_get_by_name("battery");
+	union power_supply_propval value;
+	pr_info("%s: fuelgauge alert\n", __func__);
 
 	max17047_test_read(fuelgauge_data);
 
-	return 1;
+	/* wait 1s */
+	msleep(1000);
+
+	if (!battery_psy) {
+		pr_err("%s: fail to get battery power supply\n", __func__);
+		return IRQ_HANDLED;
+	}
+
+	battery_psy->set_property(battery_psy,
+				POWER_SUPPLY_PROP_STATUS,
+				&value);
+
+	return IRQ_HANDLED;
 }
+
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+static void max17047_adjust_fullsoc(struct i2c_client *client)
+{
+	struct max17047_fuelgauge_data *fuelgauge_data =
+		 i2c_get_clientdata(client);
+	int prev_full_soc = fuelgauge_data->full_soc;
+	int temp_soc = max17047_get_rawsoc(fuelgauge_data->client);
+
+	if (temp_soc < FULL_SOC_LOW)
+		fuelgauge_data->full_soc = FULL_SOC_LOW;
+	else if (temp_soc > FULL_SOC_HIGH)
+		fuelgauge_data->full_soc = (FULL_SOC_HIGH - FULL_KEEP_SOC);
+	else
+		if (temp_soc > (FULL_SOC_LOW + FULL_KEEP_SOC))
+			fuelgauge_data->full_soc = temp_soc - FULL_KEEP_SOC;
+		else
+			fuelgauge_data->full_soc = FULL_SOC_LOW;
+
+	if (prev_full_soc != fuelgauge_data->full_soc)
+		pr_info("%s : full_soc = %d\n", __func__,
+			fuelgauge_data->full_soc);
+}
+
+#ifdef CONFIG_DEBUG_FS
+static int max17047_debugfs_open(struct inode *inode, struct file *filp)
+{
+	filp->private_data = inode->i_private;
+	return 0;
+}
+
+static ssize_t max17047_debugfs_read_registers(struct file *filp,
+	char __user *buffer, size_t count, loff_t *ppos)
+{
+	struct max17047_fuelgauge_data *fuelgauge_data = filp->private_data;
+	struct i2c_client *client = NULL;
+	u8 i2c_data[2];
+	int reg = 0;
+	char *buf;
+	size_t len = 0;
+	ssize_t ret;
+
+	if (!fuelgauge_data) {
+		pr_err("%s : fuelgauge_data is null\n", __func__);
+		return 0;
+	}
+
+	client = fuelgauge_data->client;
+
+	if (*ppos != 0)
+		return 0;
+
+	if (count < sizeof(buf))
+		return -ENOSPC;
+
+	buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	reg = MAX17047_REG_STATUS;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"status(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = MAX17047_REG_CONFIG;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"config(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = MAX17047_REG_RCOMP;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"rcomp(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = MAX17047_REG_CGAIN;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"cgain(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = MAX17047_REG_SALRT_TH;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"salrt(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = MAX17047_REG_MISCCFG;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"misc(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = 0x39;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"tempc0(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = 0x0F;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"remCap(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	reg = 0x10;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"fullCap(0x%x)=%02x%02x ", reg, i2c_data[1], i2c_data[0]);
+
+	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+
+	ret = simple_read_from_buffer(buffer, len, ppos, buf, PAGE_SIZE);
+	kfree(buf);
+
+	return ret;
+}
+
+static const struct file_operations max17047_debugfs_fops = {
+	.owner = THIS_MODULE,
+	.open = max17047_debugfs_open,
+	.read = max17047_debugfs_read_registers,
+};
+
+static ssize_t max17047_debugfs_read_defaultdata(struct file *filp,
+	char __user *buffer, size_t count, loff_t *ppos)
+{
+	struct max17047_fuelgauge_data *fuelgauge_data = filp->private_data;
+	struct i2c_client *client = NULL;
+	u8 i2c_data[2];
+	int reg = 0;
+	char *buf;
+	size_t len = 0;
+	ssize_t ret;
+
+	if (!fuelgauge_data) {
+		pr_err("%s : fuelgauge_data is null\n", __func__);
+		return 0;
+	}
+
+	client = fuelgauge_data->client;
+
+	if (*ppos != 0)
+		return 0;
+
+	if (count < sizeof(buf))
+		return -ENOSPC;
+
+	buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	reg = MAX17047_REG_RCOMP;
+	max17047_i2c_read(client, reg, i2c_data);
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"rcomp=%02x%02x ", i2c_data[1], i2c_data[0]);
+
+	len += snprintf(buf + len, PAGE_SIZE - len,
+		"fsoc=%d", fuelgauge_data->full_soc);
+
+	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+
+	ret = simple_read_from_buffer(buffer, len, ppos, buf, PAGE_SIZE);
+	kfree(buf);
+
+	return ret;
+}
+
+static const struct file_operations max17047_debugfs_fops2 = {
+	.owner = THIS_MODULE,
+	.open = max17047_debugfs_open,
+	.read = max17047_debugfs_read_defaultdata,
+};
+#endif
+#endif
 
 static int __devinit max17047_fuelgauge_i2c_probe(struct i2c_client *client,
 						  const struct i2c_device_id *id)
@@ -500,6 +773,11 @@ static int __devinit max17047_fuelgauge_i2c_probe(struct i2c_client *client,
 	fuelgauge_data->pdata = client->dev.platform_data;
 
 	i2c_set_clientdata(client, fuelgauge_data);
+
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+	/* Initialize full_soc, set this before fisrt SOC reading */
+	fuelgauge_data->full_soc = FULL_SOC_DEFAULT;
+#endif
 
 	if (fuelgauge_data->pdata->psy_name)
 		fuelgauge_data->fuelgauge.name =
@@ -532,16 +810,29 @@ static int __devinit max17047_fuelgauge_i2c_probe(struct i2c_client *client,
 	if (ret) {
 		pr_err("%s: failed requesting gpio %d\n", __func__,
 				fuelgauge_data->pdata->irq_gpio);
+		kfree(fuelgauge_data);
 		return ret;
 	}
 	gpio_direction_input(fuelgauge_data->pdata->irq_gpio);
 	gpio_free(fuelgauge_data->pdata->irq_gpio);
-	if (request_irq(fuelgauge_data->irq, max17047_fuelgauge_isr,
-			IRQF_TRIGGER_FALLING,
-			"max17047-alert",
-			fuelgauge_data))
-		pr_err("Can NOT request irq 'FUEL_ALERT' %d",
-		       fuelgauge_data->irq);
+
+	ret = request_threaded_irq(fuelgauge_data->irq, NULL,
+				max17047_fuelgauge_isr, IRQF_TRIGGER_FALLING,
+				"max17047-alert", fuelgauge_data);
+	if (ret < 0) {
+		pr_err("%s: fail to request max17047 irq: %d: %d\n",
+				__func__, fuelgauge_data->irq, ret);
+		kfree(fuelgauge_data);
+		return ret;
+	}
+
+	ret = enable_irq_wake(fuelgauge_data->irq);
+	if (ret < 0) {
+		pr_err("%s: failed enable irq wake %d\n", __func__,
+						fuelgauge_data->irq);
+		kfree(fuelgauge_data);
+		return ret;
+	}
 
 #ifdef DEBUG_FUELGAUGE_POLLING
 	INIT_DELAYED_WORK_DEFERRABLE(&fuelgauge_data->polling_work, max17047_polling_work);
@@ -552,6 +843,24 @@ static int __devinit max17047_fuelgauge_i2c_probe(struct i2c_client *client,
 
 	max17047_i2c_read(client, MAX17047_REG_VERSION, i2c_data);
 	pr_info("max17047 fuelgauge(rev.%d%d) initialized.\n", i2c_data[0], i2c_data[1]);
+
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+#ifdef CONFIG_DEBUG_FS
+	fuelgauge_data->fg_debugfs_dir =
+		debugfs_create_dir("fg_debug", NULL);
+	if (fuelgauge_data->fg_debugfs_dir) {
+		if (!debugfs_create_file("max17047_regs", 0644,
+			fuelgauge_data->fg_debugfs_dir,
+			fuelgauge_data, &max17047_debugfs_fops))
+			pr_err("%s : debugfs_create_file, error\n", __func__);
+		if (!debugfs_create_file("default_data", 0644,
+			fuelgauge_data->fg_debugfs_dir,
+			fuelgauge_data, &max17047_debugfs_fops2))
+			pr_err("%s : debugfs_create_file2, error\n", __func__);
+	} else
+		pr_err("%s : debugfs_create_dir, error\n", __func__);
+#endif
+#endif
 
 	return 0;
 }
@@ -600,12 +909,91 @@ static const struct i2c_device_id max17047_fuelgauge_id[] = {
 	{}
 };
 
+#ifdef CONFIG_HIBERNATION
+static const u16 save_addr[] = {
+	MAX17047_REG_VALRT_TH,
+	MAX17047_REG_TALRT_TH,
+	MAX17047_REG_SALRT_TH,
+
+	MAX17047_REG_TEMPERATURE,
+	MAX17047_REG_CONFIG,
+
+	MAX17047_REG_LEARNCFG,
+	MAX17047_REG_FILTERCFG,
+	MAX17047_REG_MISCCFG,
+	MAX17047_REG_CGAIN,
+	MAX17047_REG_RCOMP,
+	MAX17047_REG_SOC_VF,
+};
+
+
+static int max17047_freeze(struct device *dev)
+{
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct max17047_fuelgauge_data *fuelgauge_data
+						= i2c_get_clientdata(client);
+	int i, j;
+
+	if (fuelgauge_data->reg_dump) {
+		dev_err(dev, "Register dump is not clean.\n");
+		return -EINVAL;
+	}
+
+	fuelgauge_data->reg_dump = kzalloc(sizeof(u16) * ARRAY_SIZE(save_addr),
+				 GFP_KERNEL);
+	if (!fuelgauge_data->reg_dump) {
+		dev_err(dev, "Cannot allocate memory for hibernation dump.\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0, j = 0; i < ARRAY_SIZE(save_addr); i++, j += 2)
+		max17047_i2c_read(client, save_addr[i]
+					, &(fuelgauge_data->reg_dump[j]));
+
+	return 0;
+}
+
+static int max17047_restore(struct device *dev)
+{
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct max17047_fuelgauge_data *fuelgauge_data
+						= i2c_get_clientdata(client);
+	int i, j;
+
+	if (!fuelgauge_data->reg_dump) {
+		dev_err(dev, "Cannot allocate memory for hibernation dump.\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0, j = 0; i < ARRAY_SIZE(save_addr); i++, j += 2)
+		max17047_i2c_write(client, save_addr[i]
+					, &(fuelgauge_data->reg_dump[j]));
+
+	kfree(fuelgauge_data->reg_dump);
+	fuelgauge_data->reg_dump = NULL;
+
+	return 0;
+}
+#endif
+
+
+
+const struct dev_pm_ops max17047_pm = {
+#ifdef CONFIG_HIBERNATION
+	.freeze = max17047_freeze,
+	.restore = max17047_restore,
+#endif
+};
+
+
 MODULE_DEVICE_TABLE(i2c, max17047_fuelgauge_id);
 
 static struct i2c_driver max17047_i2c_driver = {
 	.driver	= {
 		.owner	= THIS_MODULE,
 		.name	= "max17047-fuelgauge",
+		.pm = &max17047_pm,
+
 	},
 	.probe		= max17047_fuelgauge_i2c_probe,
 	.remove		= __devexit_p(max17047_fuelgauge_remove),

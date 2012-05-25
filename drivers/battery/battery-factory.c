@@ -41,22 +41,28 @@ static struct device_attribute battery_attrs[] = {
 	BATTERY_ATTR(batt_temp_adc),
 	BATTERY_ATTR(batt_temp_aver),
 	BATTERY_ATTR(batt_temp_adc_aver),
+	BATTERY_ATTR(batt_vol_aver),
 	BATTERY_ATTR(batt_vfocv),
 	BATTERY_ATTR(batt_lp_charging),
 	BATTERY_ATTR(batt_charging_source),
 	BATTERY_ATTR(test_mode),
 	BATTERY_ATTR(batt_error_test),
 	BATTERY_ATTR(siop_activated),
+	BATTERY_ATTR(wc_status),
 	BATTERY_ATTR(wpc_pin_state),
 
 	/* not use */
 	BATTERY_ATTR(batt_vol_adc),
 	BATTERY_ATTR(batt_vol_adc_cal),
-	BATTERY_ATTR(batt_vol_aver),
 	BATTERY_ATTR(batt_vol_adc_aver),
 	BATTERY_ATTR(batt_temp_adc_cal),
 	BATTERY_ATTR(batt_vf_adc),
 	BATTERY_ATTR(auth_battery),
+
+#if defined(CONFIG_TARGET_LOCALE_KOR) || defined(CONFIG_MACH_M0_CTC)
+	BATTERY_ATTR(batt_temp_adc_spec),
+	BATTERY_ATTR(batt_sysrev),
+#endif
 };
 
 enum {
@@ -67,22 +73,28 @@ enum {
 	BATT_TEMP_ADC,
 	BATT_TEMP_AVER,
 	BATT_TEMP_ADC_AVER,
+	BATT_VOL_AVER,
 	BATT_VFOCV,
 	BATT_LP_CHARGING,
 	BATT_CHARGING_SOURCE,
 	TEST_MODE,
 	BATT_ERROR_TEST,
 	SIOP_ACTIVATED,
+	WC_STATUS,
 	WPC_PIN_STATE,
 
 	/* not use */
 	BATT_VOL_ADC,
 	BATT_VOL_ADC_CAL,
-	BATT_VOL_AVER,
 	BATT_VOL_ADC_AVER,
 	BATT_TEMP_ADC_CAL,
 	BATT_VF_ADC,
 	AUTH_BATTERY,
+
+#if defined(CONFIG_TARGET_LOCALE_KOR) || defined(CONFIG_MACH_M0_CTC)
+	BATT_TEMP_ADC_SPEC,
+	BATT_SYSREV,
+#endif
 };
 
 static ssize_t battery_show_property(struct device *dev,
@@ -90,6 +102,7 @@ static ssize_t battery_show_property(struct device *dev,
 {
 	struct battery_info *info = dev_get_drvdata(dev->parent);
 	int i;
+	int cnt, dat, d_max, d_min, d_total;
 	int val;
 	const ptrdiff_t off = attr - battery_attrs;
 	pr_debug("%s: %s\n", __func__, battery_attrs[off].attr.name);
@@ -112,17 +125,50 @@ static ssize_t battery_show_property(struct device *dev,
 		break;
 	case BATT_TEMP_ADC:
 		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp_adc;
+		val = info->battery_temper_adc;
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_TEMP_AVER:
-		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp;
+		val = 0;
+		for (cnt = 0; cnt < CNT_TEMPER_AVG; cnt++) {
+			msleep(100);
+			battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
+			val += info->battery_temper_adc;
+			info->battery_temper_adc_avg = val / (cnt + 1);
+		}
+#ifdef CONFIG_S3C_ADC
+		info->battery_temper_avg = info->pdata->covert_adc(
+						info->battery_temper_adc_avg,
+						info->pdata->temper_ch);
+#else
+		info->battery_temper_avg = info->battery_temper;
+#endif
+		val = info->battery_temper_avg;
+		pr_info("%s: temper avg(%d)\n", __func__, val);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_TEMP_ADC_AVER:
-		battery_get_info(info, POWER_SUPPLY_PROP_TEMP);
-		val = info->battery_temp_adc;
+		val = info->battery_temper_adc_avg;
+		pr_info("%s: temper adc avg(%d)\n", __func__, val);
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
+		break;
+	case BATT_VOL_AVER:	/* not use POWER_SUPPLY_PROP_VOLTAGE_AVG */
+		val = dat = d_max = d_min = d_total = 0;
+		for (cnt = 0; cnt < CNT_VOLTAGE_AVG; cnt++) {
+			msleep(200);
+			dat = battery_get_info(info,
+				POWER_SUPPLY_PROP_VOLTAGE_NOW);
+
+			if (cnt != 0) {
+				d_max = max(dat, d_max);
+				d_min = min(dat, d_min);
+			} else
+				d_max = d_min = dat;
+
+			d_total += dat;
+		}
+		val = (d_total - d_max - d_min) / (CNT_VOLTAGE_AVG - 2);
+		pr_info("%s: voltage avg(%d)\n", __func__, val);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
 	case BATT_VFOCV:
@@ -152,6 +198,7 @@ static ssize_t battery_show_property(struct device *dev,
 		val = info->siop_state;
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 		break;
+	case WC_STATUS:
 	case WPC_PIN_STATE:
 #ifdef CONFIG_BATTERY_WPC_CHARGER
 		val = !gpio_get_value(GPIO_WPC_INT);
@@ -162,13 +209,26 @@ static ssize_t battery_show_property(struct device *dev,
 		break;
 	case BATT_VOL_ADC:
 	case BATT_VOL_ADC_CAL:
-	case BATT_VOL_AVER:
 	case BATT_VOL_ADC_AVER:
 	case BATT_TEMP_ADC_CAL:
 	case BATT_VF_ADC:
 	case AUTH_BATTERY:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "N/A\n");
 		break;
+#if defined(CONFIG_TARGET_LOCALE_KOR) || defined(CONFIG_MACH_M0_CTC)
+	case BATT_SYSREV:
+		val = system_rev;
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
+		break;
+	case BATT_TEMP_ADC_SPEC:
+		i += scnprintf(buf + i, PAGE_SIZE - i,
+			"(HIGH: %d / %d,   LOW: %d / %d)\n",
+			info->pdata->overheat_stop_temp,
+			info->pdata->overheat_recovery_temp,
+			info->pdata->freeze_stop_temp,
+			info->pdata->freeze_recovery_temp);
+		break;
+#endif
 	default:
 		i = -EINVAL;
 	}
@@ -222,7 +282,8 @@ static ssize_t battery_store_property(struct device *dev,
 			info->siop_state = x;
 
 			if (info->siop_state == SIOP_ACTIVE)
-				info->siop_charge_current = CHARGER_USB_CURRENT;
+				info->siop_charge_current =
+					info->pdata->chg_curr_usb;
 
 			pr_info("%s: SIOP %s\n", __func__,
 				(info->siop_state ?
@@ -259,3 +320,79 @@ succeed:
 	return;
 }
 
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+int battery_info_proc(char *buf, char **start,
+			off_t offset, int count, int *eof, void *data)
+{
+	struct battery_info *info = data;
+	struct timespec cur_time;
+	ktime_t ktime;
+	int len = 0;
+	/* Guess we need no more than 100 bytes. */
+	int size = 100;
+
+	ktime = alarm_get_elapsed_realtime();
+	cur_time = ktime_to_timespec(ktime);
+
+	len = snprintf(buf, size,
+		"%lu\t%u\t%u\t%u\t%u\t%d\t%u\t%d\t%d\t%u\t"
+		"%u\t%u\t%u\t%u\t%u\t%u\t%d\t%u\t%u\n",
+		cur_time.tv_sec,
+		info->battery_raw_soc,
+		info->battery_soc,
+		info->battery_vcell / 1000,
+		info->battery_vfocv / 1000,
+		info->battery_full_soc,
+		info->battery_present,
+		info->battery_temper,
+		info->battery_temper_adc,
+		info->battery_health,
+		info->charge_real_state,
+		info->charge_virt_state,
+		info->cable_type,
+		info->charge_current,
+		info->full_charged_state,
+		info->recharge_phase,
+		info->abstimer_state,
+		info->monitor_interval,
+		info->charge_start_time);
+	return len;
+}
+#elif defined(CONFIG_MACH_M0_CTC)
+int battery_info_proc(char *buf, char **start,
+			off_t offset, int count, int *eof, void *data)
+{
+	struct battery_info *info = data;
+	struct timespec cur_time;
+	ktime_t ktime;
+	int len = 0;
+	/* Guess we need no more than 100 bytes. */
+	int size = 100;
+
+	ktime = alarm_get_elapsed_realtime();
+	cur_time = ktime_to_timespec(ktime);
+
+	len = snprintf(buf, size,
+		"%lu\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t"
+		"%u\t%u\t%u\t%u\t%u\t%u\t%d\t%u\t%u\n",
+		cur_time.tv_sec,
+		info->battery_raw_soc,
+		info->battery_soc,
+		info->battery_vcell / 1000,
+		info->battery_vfocv / 1000,
+		info->battery_present,
+		info->battery_temper,
+		info->battery_temper_adc,
+		info->battery_health,
+		info->charge_real_state,
+		info->charge_virt_state,
+		info->cable_type,
+		info->charge_current,
+		info->full_charged_state,
+		info->recharge_phase,
+		info->abstimer_state,
+		info->monitor_interval,
+		info->charge_start_time);
+	return len;
+}
+#endif
