@@ -261,7 +261,7 @@ static int _tdmb_cmd_update(
 		memcpy((cmd_buffer + head),
 			(char *)cmd_header, cmd_header_size);
 		memcpy((cmd_buffer + head + cmd_header_size),
-			(char *)data, size);
+			(char *)data, data_size);
 		head += data_size_tmp;
 		if (head == size)
 			head = 0;
@@ -283,9 +283,20 @@ static int _tdmb_cmd_update(
 		}
 
 		temp_size = size - head;
-		memcpy((cmd_buffer + head), (char *)data, temp_size);
-		head = data_size_tmp - temp_size;
-		memcpy(cmd_buffer, (char *)(data + temp_size), head);
+		if (temp_size < data_size) {
+			memcpy((cmd_buffer+head),
+				(char *)data, temp_size);
+			memcpy((cmd_buffer),
+				(char *)data+temp_size,
+				(data_size - temp_size));
+			head = data_size - temp_size;
+		} else {
+			memcpy((cmd_buffer+head),
+				(char *)data, data_size);
+			head += data_size;
+			if (head == size)
+				head = 0;
+		}
 	}
 
 	*cmd_head = head;
@@ -487,7 +498,12 @@ static const struct file_operations tdmb_ctl_fops = {
 static struct tdmb_drv_func *tdmb_get_drv_func(void)
 {
 	struct tdmb_drv_func * (*func)(void);
-#if defined(CONFIG_TDMB_T3900) || defined(CONFIG_TDMB_T39F0)
+#if defined(CONFIG_TDMB_T3900) && defined(CONFIG_TDMB_TCC3170)
+	if (system_rev >= 11)
+		func = tcc3170_drv_func;
+	else
+		func = t3900_drv_func;
+#elif defined(CONFIG_TDMB_T3900) || defined(CONFIG_TDMB_T39F0)
 	func = t3900_drv_func;
 #elif defined(CONFIG_TDMB_FC8050)
 	func = fc8050_drv_func;
