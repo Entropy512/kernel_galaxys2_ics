@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2007-2011 Atheros Communications Inc.
+ * Copyright (c) 2011-2012 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -102,9 +103,9 @@ static void ath6kl_hif_dump_fw_crash(struct ath6kl *ar)
 
 	BUILD_BUG_ON(REG_DUMP_COUNT_AR6003 % 4);
 
-	for (i = 0; i < REG_DUMP_COUNT_AR6003 / 4; i++) {
+	for (i = 0; i < REG_DUMP_COUNT_AR6003; i += 4) {
 		ath6kl_info("%d: 0x%8.8x 0x%8.8x 0x%8.8x 0x%8.8x\n",
-			    4 * i,
+			    i,
 			    le32_to_cpu(regdump_val[i]),
 			    le32_to_cpu(regdump_val[i + 1]),
 			    le32_to_cpu(regdump_val[i + 2]),
@@ -130,6 +131,7 @@ static int ath6kl_hif_proc_dbg_intr(struct ath6kl_device *dev)
 		ath6kl_warn("Failed to clear debug interrupt: %d\n", ret);
 
 	ath6kl_hif_dump_fw_crash(dev->ar);
+	ath6kl_read_fwlogs(dev->ar);
 
 	return ret;
 }
@@ -448,8 +450,10 @@ static int proc_pending_irqs(struct ath6kl_device *dev, bool *done)
 			    htc_mbox) {
 				rg = &dev->irq_proc_reg;
 				lk_ahd = le32_to_cpu(rg->rx_lkahd[HTC_MAILBOX]);
-				if (!lk_ahd)
+				if (!lk_ahd) {
 					ath6kl_err("lookAhead is zero!\n");
+					panic("lookahead is zero");
+				}
 			}
 		}
 	}

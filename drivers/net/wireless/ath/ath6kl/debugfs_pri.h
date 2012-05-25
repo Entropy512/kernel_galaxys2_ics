@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2011 Atheros Communications Inc.
+ * Copyright (c) 2012 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,11 +14,30 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-void ath6kl_config_suspend_wake_lock(struct ath6kl *ar, struct sk_buff *skb,
-				     bool is_event_pkt);
-void ath6kl_setup_android_resource(struct ath6kl *ar);
-void ath6kl_cleanup_android_resource(struct ath6kl *ar);
-#ifdef CONFIG_HAS_WAKELOCK
-void ath6kl_p2p_acquire_wakelock(struct ath6kl *ar, int wl_timeout);
-void ath6kl_p2p_release_wakelock(struct ath6kl *ar);
+#ifndef DEBUG_PRI_H
+#define DEBUG_PRI_H
+
+#ifdef CONFIG_ATH6KL_DEBUG
+
+#define ATH6KL_ERR_REPORT_BMISS_MASK  BIT(3)
+
+struct wmi_tgt_err_report_mask {
+	__le32 mask;
+};
+
+struct wmi_tgt_err_report_evt {
+	__le32 err_val;
+} __packed;
+
+#define ATH6KL_DEFAULT_SCAN_CTRL_FLAGS    (CONNECT_SCAN_CTRL_FLAGS   |  \
+					   SCAN_CONNECTED_CTRL_FLAGS |  \
+					   ACTIVE_SCAN_CTRL_FLAGS    |  \
+					   ROAM_SCAN_CTRL_FLAGS      |  \
+					   ENABLE_AUTO_CTRL_FLAGS)
+
+#define ATH6KL_MAX_SCAN_CTRL_FLAGS	   0x7F
+
+int ath6kl_wmi_error_report_event(struct wmi *wmi, u8 *data, int len);
+int ath6kl_init_debugfs_pri(struct ath6kl *ar);
+#endif
 #endif

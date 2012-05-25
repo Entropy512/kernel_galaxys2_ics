@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2004-2011 Atheros Communications Inc.
+ * Copyright (c) 2011-2012 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -102,7 +103,7 @@ static bool ath6kl_process_uapsdq(struct ath6kl_sta *conn,
 	struct ath6kl *ar = vif->ar;
 	bool is_apsdq_empty = false;
 	struct ethhdr *datap = (struct ethhdr *) skb->data;
-	u8 up, traffic_class, *ip_hdr;
+	u8 up = 0, traffic_class, *ip_hdr;
 	u16 ether_type;
 	struct ath6kl_llc_snap_hdr *llc_hdr;
 
@@ -286,6 +287,12 @@ int ath6kl_control_tx(void *devt, struct sk_buff *skb,
 	int status = 0;
 	struct ath6kl_cookie *cookie = NULL;
 
+	if (ar->state == ATH6KL_STATE_WOW)
+		goto fail_ctrl_tx;
+
+	if (!test_bit(WMI_READY, &ar->flag))
+		goto fail_ctrl_tx;
+
 	spin_lock_bh(&ar->lock);
 
 	ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
@@ -300,6 +307,9 @@ int ath6kl_control_tx(void *devt, struct sk_buff *skb,
 		cookie = NULL;
 		ath6kl_err("wmi ctrl ep full, dropping pkt : 0x%p, len:%d\n",
 			   skb, skb->len);
+#ifdef CONFIG_MACH_PX
+		ath6kl_print_ar6k_registers(ar);
+#endif
 	} else
 		cookie = ath6kl_alloc_cookie(ar);
 
@@ -357,6 +367,13 @@ int ath6kl_data_tx(struct sk_buff *skb, struct net_device *dev)
 
 	/* If target is not associated */
 	if (!test_bit(CONNECTED, &vif->flags)) {
+		dev_kfree_skb(skb);
+		return 0;
+	}
+
+	if (WARN_ON_ONCE(ar->state != ATH6KL_STATE_ON)) {
+		set_bit(NETQ_STOPPED, &vif->flags);
+		netif_stop_queue(dev);
 		dev_kfree_skb(skb);
 		return 0;
 	}
@@ -461,8 +478,13 @@ int ath6kl_data_tx(struct sk_buff *skb, struct net_device *dev)
 
 	spin_unlock_bh(&ar->lock);
 
+#ifdef CONFIG_MACH_PX
+	if (false && !IS_ALIGNED((unsigned long) skb->data - HTC_HDR_LENGTH, 4) &&
+	    skb_cloned(skb)) {
+#else
 	if (!IS_ALIGNED((unsigned long) skb->data - HTC_HDR_LENGTH, 4) &&
 	    skb_cloned(skb)) {
+#endif
 		/*
 		 * We will touch (move the buffer data to align it. Since the
 		 * skb buffer is cloned and not only the header is changed, we
@@ -672,6 +694,7 @@ void ath6kl_tx_complete(void *context, struct list_head *packet_queue)
 	bool flushing[ATH6KL_VIF_MAX] = {false};
 	u8 if_idx;
 	struct ath6kl_vif *vif;
+	bool ctrl_ep = false;
 
 	skb_queue_head_init(&skb_queue);
 
@@ -713,53 +736,50 @@ void ath6kl_tx_complete(void *context, struct list_head *packet_queue)
 
 			if (ar->tx_pending[eid] == 0)
 				wake_event = true;
-		}
+			ctrl_ep = true;
 
-		if (eid == ar->ctrl_ep) {
-			if_idx = wmi_cmd_hdr_get_if_idx(
-				(struct wmi_cmd_hdr *) packet->buf);
 		} else {
 			if_idx = wmi_data_hdr_get_if_idx(
-				(struct wmi_data_hdr *) packet->buf);
+					(struct wmi_data_hdr *) packet->buf);
+
+			vif = ath6kl_get_vif_by_index(ar, if_idx);
+			if (!vif) {
+				ath6kl_free_cookie(ar, ath6kl_cookie);
+				continue;
+			}
+
+			if (status) {
+				if (status == -ECANCELED)
+					/* a packet was flushed  */
+					flushing[if_idx] = true;
+
+				vif->net_stats.tx_errors++;
+
+				if (status != -ENOSPC && status != -ECANCELED)
+					ath6kl_warn("tx complete error: %d\n", status);
+
+				ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
+					   "%s: skb=0x%p data=0x%p len=0x%x eid=%d %s\n",
+					   __func__, skb, packet->buf, packet->act_len,
+					   eid, "error!");
+			} else {
+				ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
+					   "%s: skb=0x%p data=0x%p len=0x%x eid=%d %s\n",
+					   __func__, skb, packet->buf, packet->act_len,
+					   eid, "OK");
+
+				flushing[if_idx] = false;
+				vif->net_stats.tx_packets++;
+				vif->net_stats.tx_bytes += skb->len;
+			}
+
+			ath6kl_tx_clear_node_map(vif, eid, map_no);
+			if (test_bit(NETQ_STOPPED, &vif->flags))
+				clear_bit(NETQ_STOPPED, &vif->flags);
 		}
 
-		vif = ath6kl_get_vif_by_index(ar, if_idx);
-		if (!vif) {
-			ath6kl_free_cookie(ar, ath6kl_cookie);
-			continue;
-		}
-
-		if (status) {
-			if (status == -ECANCELED)
-				/* a packet was flushed  */
-				flushing[if_idx] = true;
-
-			vif->net_stats.tx_errors++;
-
-			if (status != -ENOSPC && status != -ECANCELED)
-				ath6kl_warn("tx complete error: %d\n", status);
-
-			ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
-				   "%s: skb=0x%p data=0x%p len=0x%x eid=%d %s\n",
-				   __func__, skb, packet->buf, packet->act_len,
-				   eid, "error!");
-		} else {
-			ath6kl_dbg(ATH6KL_DBG_WLAN_TX,
-				   "%s: skb=0x%p data=0x%p len=0x%x eid=%d %s\n",
-				   __func__, skb, packet->buf, packet->act_len,
-				   eid, "OK");
-
-			flushing[if_idx] = false;
-			vif->net_stats.tx_packets++;
-			vif->net_stats.tx_bytes += skb->len;
-		}
-
-		ath6kl_tx_clear_node_map(vif, eid, map_no);
 
 		ath6kl_free_cookie(ar, ath6kl_cookie);
-
-		if (test_bit(NETQ_STOPPED, &vif->flags))
-			clear_bit(NETQ_STOPPED, &vif->flags);
 	}
 
 	spin_unlock_bh(&ar->lock);
@@ -767,16 +787,18 @@ void ath6kl_tx_complete(void *context, struct list_head *packet_queue)
 	__skb_queue_purge(&skb_queue);
 
 	/* FIXME: Locking */
-	spin_lock_bh(&ar->list_lock);
-	list_for_each_entry(vif, &ar->vif_list, list) {
-		if (test_bit(CONNECTED, &vif->flags) &&
-		    !flushing[vif->fw_vif_idx]) {
-			spin_unlock_bh(&ar->list_lock);
-			netif_wake_queue(vif->ndev);
-			spin_lock_bh(&ar->list_lock);
+	if (!ctrl_ep) {
+		spin_lock_bh(&ar->list_lock);
+		list_for_each_entry(vif, &ar->vif_list, list) {
+			if (test_bit(CONNECTED, &vif->flags) &&
+					!flushing[vif->fw_vif_idx]) {
+				spin_unlock_bh(&ar->list_lock);
+				netif_wake_queue(vif->ndev);
+				spin_lock_bh(&ar->list_lock);
+			}
 		}
+		spin_unlock_bh(&ar->list_lock);
 	}
-	spin_unlock_bh(&ar->list_lock);
 
 	if (wake_event)
 		wake_up(&ar->event_wq);
@@ -1430,13 +1452,29 @@ void ath6kl_rx(struct htc_target *target, struct htc_packet *packet)
 					list_del(&mgmt_buf->list);
 					conn->mgmt_psq_len--;
 					spin_unlock_bh(&conn->psq_lock);
-					ath6kl_wmi_send_action_cmd(ar->wmi,
-							vif->fw_vif_idx,
-							mgmt_buf->id,
-							mgmt_buf->freq,
-							mgmt_buf->wait,
-							mgmt_buf->buf,
-							mgmt_buf->len);
+					if (test_bit(ATH6KL_FW_CAPABILITY_STA_P2PDEV_DUPLEX,
+									ar->fw_capabilities)) {
+						/*
+						 * If capable of doing P2P mgmt operations using
+						 * station interface, send additional information like
+						 * supported rates to advertise and xmit rates for
+						 * probe requests
+						 */
+						ath6kl_wmi_send_mgmt_cmd(ar->wmi, vif->fw_vif_idx,
+										mgmt_buf->id,
+										mgmt_buf->freq,
+										mgmt_buf->wait,
+										mgmt_buf->buf,
+										mgmt_buf->len,
+										mgmt_buf->no_cck);
+					} else {
+						ath6kl_wmi_send_action_cmd(ar->wmi, vif->fw_vif_idx,
+										mgmt_buf->id,
+										mgmt_buf->freq,
+										mgmt_buf->wait,
+										mgmt_buf->buf,
+										mgmt_buf->len);
+					}
 					kfree(mgmt_buf);
 					spin_lock_bh(&conn->psq_lock);
 				}

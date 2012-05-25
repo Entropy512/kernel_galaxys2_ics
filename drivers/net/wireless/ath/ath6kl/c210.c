@@ -52,8 +52,9 @@ int android_readwrite_file(const A_CHAR *filename, A_CHAR *rbuf, const A_CHAR *w
 	set_fs(KERNEL_DS);
 
 	do {
-		int mode = (wbuf) ? O_RDWR : O_RDONLY;
-		filp = filp_open(filename, mode, S_IRUSR);
+		int mode = (wbuf) ? O_RDWR|O_CREAT : O_RDONLY;
+		filp = filp_open(filename, mode,
+			S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 
 		if (IS_ERR(filp) || !filp->f_op) {
 			ret = -ENOENT;

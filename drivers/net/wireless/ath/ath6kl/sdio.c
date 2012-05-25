@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2004-2011 Atheros Communications Inc.
+ * Copyright (c) 2011-2012 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +28,6 @@
 #include "target.h"
 #include "debug.h"
 #include "cfg80211.h"
-#include "dbglog.h"
 
 struct ath6kl_sdio {
 	struct sdio_func *func;
@@ -50,8 +50,8 @@ struct ath6kl_sdio {
 	/* scatter request list head */
 	struct list_head scat_req;
 
-	/* Avoids disabling irq while the interrupts being handled */
-	struct mutex mtx_irq;
+	atomic_t irq_handling;
+	wait_queue_head_t irq_wq;
 
 	spinlock_t scat_lock;
 	bool scatter_enabled;
@@ -144,7 +144,6 @@ static int ath6kl_sdio_io(struct sdio_func *func, u32 request, u32 addr,
 {
 	int ret = 0;
 
-	sdio_claim_host(func);
 
 	if (request & HIF_WRITE) {
 		/* FIXME: looks like ugly workaround for something */
@@ -167,7 +166,6 @@ static int ath6kl_sdio_io(struct sdio_func *func, u32 request, u32 addr,
 			ret = sdio_memcpy_fromio(func, buf, addr, len);
 	}
 
-	sdio_release_host(func);
 
 	ath6kl_dbg(ATH6KL_DBG_SDIO, "%s addr 0x%x%s buf 0x%p len %d\n",
 		   request & HIF_WRITE ? "wr" : "rd", addr,
@@ -301,13 +299,9 @@ static int ath6kl_sdio_scat_rw(struct ath6kl_sdio *ar_sdio,
 	mmc_req.cmd = &cmd;
 	mmc_req.data = &data;
 
-	sdio_claim_host(ar_sdio->func);
-
 	mmc_set_data_timeout(&data, ar_sdio->func->card);
 	/* synchronous call to process request */
 	mmc_wait_for_req(ar_sdio->func->card->host, &mmc_req);
-
-	sdio_release_host(ar_sdio->func);
 
 	status = cmd.error ? cmd.error : data.error;
 
@@ -420,6 +414,19 @@ static int ath6kl_sdio_read_write_sync(struct ath6kl *ar, u32 addr, u8 *buf,
 	return ret;
 }
 
+static int ath6kl_sdio_read_write_sync_pri(struct ath6kl *ar, u32 addr, u8 *buf,
+				       u32 len, u32 request)
+{
+	struct ath6kl_sdio *ar_sdio = ath6kl_sdio_priv(ar);
+	int ret;
+
+	sdio_claim_host(ar_sdio->func);
+	ret = ath6kl_sdio_read_write_sync(ar, addr, buf, len, request);
+	sdio_release_host(ar_sdio->func);
+	return ret;
+}
+
+
 static void __ath6kl_sdio_write_async(struct ath6kl_sdio *ar_sdio,
 				      struct bus_request *req)
 {
@@ -428,12 +435,19 @@ static void __ath6kl_sdio_write_async(struct ath6kl_sdio *ar_sdio,
 	else {
 		void *context;
 		int status;
+		u32 addr, len, request;
+		u8 *buf;
 
-		status = ath6kl_sdio_read_write_sync(ar_sdio->ar, req->address,
-						     req->buffer, req->length,
-						     req->request);
+		addr = req->address;
+		len = req->length;
+		request = req->request;
+		buf = req->buffer;
+
 		context = req->packet;
 		ath6kl_sdio_free_bus_req(ar_sdio, req);
+
+		status = ath6kl_sdio_read_write_sync(ar_sdio->ar, addr, buf,
+						     len, request);
 		ath6kl_hif_rw_comp_handler(context, status);
 	}
 }
@@ -445,6 +459,7 @@ static void ath6kl_sdio_write_async_work(struct work_struct *work)
 
 	ar_sdio = container_of(work, struct ath6kl_sdio, wr_async_work);
 
+	sdio_claim_host(ar_sdio->func);
 	spin_lock_bh(&ar_sdio->wr_async_lock);
 	list_for_each_entry_safe(req, tmp_req, &ar_sdio->wr_asyncq, list) {
 		list_del(&req->list);
@@ -453,6 +468,7 @@ static void ath6kl_sdio_write_async_work(struct work_struct *work)
 		spin_lock_bh(&ar_sdio->wr_async_lock);
 	}
 	spin_unlock_bh(&ar_sdio->wr_async_lock);
+	sdio_release_host(ar_sdio->func);
 }
 
 static void ath6kl_sdio_irq_handler(struct sdio_func *func)
@@ -463,7 +479,7 @@ static void ath6kl_sdio_irq_handler(struct sdio_func *func)
 	ath6kl_dbg(ATH6KL_DBG_SDIO, "irq\n");
 
 	ar_sdio = sdio_get_drvdata(func);
-	mutex_lock(&ar_sdio->mtx_irq);
+	atomic_set(&ar_sdio->irq_handling, 1);
 	/*
 	 * Release the host during interrups so we can pick it back up when
 	 * we process commands.
@@ -472,8 +488,11 @@ static void ath6kl_sdio_irq_handler(struct sdio_func *func)
 
 	status = ath6kl_hif_intr_bh_handler(ar_sdio->ar);
 	sdio_claim_host(ar_sdio->func);
-	mutex_unlock(&ar_sdio->mtx_irq);
-	WARN_ON(status && status != -ECANCELED);
+
+	atomic_set(&ar_sdio->irq_handling, 0);
+	wake_up(&ar_sdio->irq_wq);
+
+	WARN_ON_ONCE(status && status != -ECANCELED);
 }
 
 static int ath6kl_sdio_power_on(struct ath6kl *ar)
@@ -573,6 +592,13 @@ static void ath6kl_sdio_irq_enable(struct ath6kl *ar)
 	sdio_release_host(ar_sdio->func);
 }
 
+static bool ath6kl_sdio_is_on_irq(struct ath6kl *ar)
+{
+	struct ath6kl_sdio *ar_sdio = ath6kl_sdio_priv(ar);
+
+	return !atomic_read(&ar_sdio->irq_handling);
+}
+
 static void ath6kl_sdio_irq_disable(struct ath6kl *ar)
 {
 	struct ath6kl_sdio *ar_sdio = ath6kl_sdio_priv(ar);
@@ -580,13 +606,20 @@ static void ath6kl_sdio_irq_disable(struct ath6kl *ar)
 
 	sdio_claim_host(ar_sdio->func);
 
-	mutex_lock(&ar_sdio->mtx_irq);
+	if (atomic_read(&ar_sdio->irq_handling)) {
+		sdio_release_host(ar_sdio->func);
+
+		ret = wait_event_interruptible(ar_sdio->irq_wq,
+					       ath6kl_sdio_is_on_irq(ar));
+		if (ret)
+			return;
+
+		sdio_claim_host(ar_sdio->func);
+	}
 
 	ret = sdio_release_irq(ar_sdio->func);
 	if (ret)
 		ath6kl_err("Failed to release sdio irq: %d\n", ret);
-
-	mutex_unlock(&ar_sdio->mtx_irq);
 
 	sdio_release_host(ar_sdio->func);
 }
@@ -602,6 +635,8 @@ static struct hif_scatter_req *ath6kl_sdio_scatter_req_get(struct ath6kl *ar)
 		node = list_first_entry(&ar_sdio->scat_req,
 					struct hif_scatter_req, list);
 		list_del(&node->list);
+
+		node->scat_q_depth = get_queue_depth(&ar_sdio->scat_req);
 	}
 
 	spin_unlock_bh(&ar_sdio->scat_lock);
@@ -637,8 +672,11 @@ static int ath6kl_sdio_async_rw_scatter(struct ath6kl *ar,
 		"hif-scatter: total len: %d scatter entries: %d\n",
 		scat_req->len, scat_req->scat_entries);
 
-	if (request & HIF_SYNCHRONOUS)
+	if (request & HIF_SYNCHRONOUS) {
+		sdio_claim_host(ar_sdio->func);
 		status = ath6kl_sdio_scat_rw(ar_sdio, scat_req->busrequest);
+		sdio_release_host(ar_sdio->func);
+	}
 	else {
 		spin_lock_bh(&ar_sdio->wr_async_lock);
 		list_add_tail(&scat_req->busrequest->list, &ar_sdio->wr_asyncq);
@@ -780,106 +818,134 @@ out:
 	return ret;
 }
 
+static int ath6kl_set_sdio_pm_caps(struct ath6kl *ar)
+{
+	struct ath6kl_sdio *ar_sdio = ath6kl_sdio_priv(ar);
+	struct sdio_func *func = ar_sdio->func;
+	mmc_pm_flag_t flags;
+	int ret;
+
+	flags = sdio_get_host_pm_caps(func);
+
+	ath6kl_dbg(ATH6KL_DBG_SUSPEND, "sdio suspend pm_caps 0x%x\n", flags);
+
+	if (!(flags & MMC_PM_WAKE_SDIO_IRQ) ||
+	    !(flags & MMC_PM_KEEP_POWER))
+		return -EINVAL;
+
+	ret = sdio_set_host_pm_flags(func, MMC_PM_KEEP_POWER);
+	if (ret) {
+		ath6kl_err("set sdio keep pwr flag failed: %d\n", ret);
+		return ret;
+	}
+
+	/* sdio irq wakes up host */
+	ret = sdio_set_host_pm_flags(func, MMC_PM_WAKE_SDIO_IRQ);
+	if (ret)
+		ath6kl_err("set sdio wake irq flag failed: %d\n", ret);
+
+	return ret;
+}
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,34))
 static int ath6kl_sdio_suspend(struct ath6kl *ar, struct cfg80211_wowlan *wow)
 {
 	struct ath6kl_sdio *ar_sdio = ath6kl_sdio_priv(ar);
 	struct sdio_func *func = ar_sdio->func;
 	mmc_pm_flag_t flags;
-	unsigned char pmode_to_try;
-	int ret = -EINVAL;
+	bool try_deepsleep = false;
+	int ret;
+	struct ath6kl_vif *vif;
+	int connected = 0;
+	int force_sleep_policy = 0;
 
-	flags = sdio_get_host_pm_caps(func);
+	vif = ath6kl_vif_first(ar);
+	connected = test_bit(CONNECTED, &vif->flags);
+	force_sleep_policy = test_bit(SLEEP_POLICY_ENABLED, &vif->flags);
 
-	ath6kl_dbg(ATH6KL_DBG_SUSPEND, "sdio suspend pm_caps 0x%x\n", flags);
+	if (force_sleep_policy) {
+		try_deepsleep = true;
+		goto deep_sleep;
+	}
 
-	/* Schedule scan uses WOW internally */
-	pmode_to_try = (ar->state == ATH6KL_STATE_SCHED_SCAN) ?
-			WLAN_POWER_STATE_WOW : ar->suspend_mode;
+	if (ar->state == ATH6KL_STATE_SCHED_SCAN) {
+		ath6kl_dbg(ATH6KL_DBG_SUSPEND, "sched scan is in progress\n");
 
-	pmode_to_try = 2;
+		ret = ath6kl_set_sdio_pm_caps(ar);
+		if (ret)
+			goto cut_pwr;
 
-	printk(KERN_ERR "pmode_to_try : %d", pmode_to_try);
-retry:
-	switch (pmode_to_try) {
-	case WLAN_POWER_STATE_CUT_PWR:
-		ret = ath6kl_cfg80211_suspend(ar, ATH6KL_CFG_SUSPEND_CUTPOWER,
-					      NULL);
-		break;
+		ret =  ath6kl_cfg80211_suspend(ar,
+					       ATH6KL_CFG_SUSPEND_SCHED_SCAN,
+					       NULL);
+		if (ret)
+			goto cut_pwr;
 
-	case WLAN_POWER_STATE_DEEP_SLEEP:
-#if 0 /* Px */
-		/* Try cut power if deep sleep suspend fails */
-		pmode_to_try = WLAN_POWER_STATE_CUT_PWR;
+		return 0;
+	}
 
+	if (ar->suspend_mode == WLAN_POWER_STATE_WOW ||
+	    (!ar->suspend_mode && wow)) {
+
+#ifdef CONFIG_MACH_PX
+#else
+		ret = ath6kl_set_sdio_pm_caps(ar);
+		if (ret)
+			goto cut_pwr;
+#endif
+
+		if (connected) {
+			ret = ath6kl_cfg80211_suspend(ar,
+					ATH6KL_CFG_SUSPEND_WOW, wow);
+			if (!ret)
+				return 0;
+		 } else {
+			if (!ar->wow2_suspend_mode ||
+			ar->wow2_suspend_mode == WLAN_POWER_STATE_DEEP_SLEEP)
+				try_deepsleep = true;
+			else if (ar->wow2_suspend_mode \
+						== WLAN_POWER_STATE_CUT_PWR)
+				goto cut_pwr;
+		}
+	}
+
+deep_sleep:
+	if (ar->suspend_mode == WLAN_POWER_STATE_DEEP_SLEEP ||
+	    !ar->suspend_mode || try_deepsleep) {
+
+#ifdef CONFIG_MACH_PX
+#else
+		flags = sdio_get_host_pm_caps(func);
 		if (!(flags & MMC_PM_KEEP_POWER))
-			goto retry;
+			goto cut_pwr;
 
 		ret = sdio_set_host_pm_flags(func, MMC_PM_KEEP_POWER);
-		if (ret) {
-			ath6kl_warn("failed to set sdio keep power flag: %d\n",
-				     ret);
-			goto retry;
+		if (ret)
+			goto cut_pwr;
+
+		/*
+		 * Workaround to support Deep Sleep with MSM, set the host pm
+		 * flag as MMC_PM_WAKE_SDIO_IRQ to allow SDCC deiver to disable
+		 * the sdc2_clock and internally allows MSM to enter
+		 * TCXO shutdown properly.
+		 */
+		if ((flags & MMC_PM_WAKE_SDIO_IRQ)) {
+			ret = sdio_set_host_pm_flags(func,
+						MMC_PM_WAKE_SDIO_IRQ);
+			if (ret)
+				goto cut_pwr;
 		}
 #endif
 		ret = ath6kl_cfg80211_suspend(ar, ATH6KL_CFG_SUSPEND_DEEPSLEEP,
 					      NULL);
 		if (ret)
-			goto retry;
+			goto cut_pwr;
 
-		break;
-
-	case WLAN_POWER_STATE_WOW:
-#if 0 /* Px */
-		/* Try cut power if wow suspend fails */
-		pmode_to_try = WLAN_POWER_STATE_CUT_PWR;
-
-		if (!(flags & MMC_PM_KEEP_POWER) ||
-		    !(flags & MMC_PM_WAKE_SDIO_IRQ))
-			goto retry;
-
-		ret = sdio_set_host_pm_flags(func, MMC_PM_KEEP_POWER);
-		if (ret) {
-			ath6kl_warn("failed to set sdio keep power flag: %d\n",
-				     ret);
-			goto retry;
-		}
-
-		ret = sdio_set_host_pm_flags(func, MMC_PM_WAKE_SDIO_IRQ);
-		if (ret) {
-			ath6kl_warn("failed to set sdio wake irq flag: %d\n",
-				     ret);
-			goto retry;
-		}
-#endif
-		/*
-		 * The host sdio controller is capable of keep power and
-		 * sdio irq wake up at this point.
-		 */
-		if (ar->state == ATH6KL_STATE_SCHED_SCAN) {
-			ath6kl_dbg(ATH6KL_DBG_SUSPEND,
-				  "sched scan is in progress\n");
-			ret =  ath6kl_cfg80211_suspend(ar,
-						ATH6KL_CFG_SUSPEND_SCHED_SCAN,
-						NULL);
-			if (ret)
-				ath6kl_warn("schedule scan suspend failed: %d",
-					    ret);
-		} else
-			ret = ath6kl_cfg80211_suspend(ar,
-					ATH6KL_CFG_SUSPEND_WOW, wow);
-		if (ret)
-			goto retry;
-		break;
-
-	default:
-		/* We shouldn't be here. */
-		WARN_ON(1);
-		break;
+		return 0;
 	}
 
-	return ret;
-
+cut_pwr:
+	return ath6kl_cfg80211_suspend(ar, ATH6KL_CFG_SUSPEND_CUTPOWER, NULL);
 }
 
 static int ath6kl_sdio_resume(struct ath6kl *ar)
@@ -902,7 +968,11 @@ static int ath6kl_sdio_resume(struct ath6kl *ar)
 
 	case ATH6KL_STATE_WOW:
 		break;
+
 	case ATH6KL_STATE_SCHED_SCAN:
+		break;
+
+	default:
 		break;
 	}
 
@@ -910,6 +980,7 @@ static int ath6kl_sdio_resume(struct ath6kl *ar)
 
 	return 0;
 }
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,34)) */
 
 /* set the window address register (using 4-byte register access ). */
 static int ath6kl_set_addrwin_reg(struct ath6kl *ar, u32 reg_addr, u32 addr)
@@ -935,7 +1006,7 @@ static int ath6kl_set_addrwin_reg(struct ath6kl *ar, u32 reg_addr, u32 addr)
 		 * write operation to the same address, this is a harmless
 		 * operation.
 		 */
-		status = ath6kl_sdio_read_write_sync(ar, reg_addr + i, addr_val,
+		status = ath6kl_sdio_read_write_sync_pri(ar, reg_addr + i, addr_val,
 					     4, HIF_WR_SYNC_BYTE_FIX);
 		if (status)
 			break;
@@ -954,7 +1025,7 @@ static int ath6kl_set_addrwin_reg(struct ath6kl *ar, u32 reg_addr, u32 addr)
 	 * cycle to start, the extra 3 byte write to bytes 1,2,3 has no
 	 * effect since we are writing the same values again
 	 */
-	status = ath6kl_sdio_read_write_sync(ar, reg_addr, (u8 *)(&addr),
+	status = ath6kl_sdio_read_write_sync_pri(ar, reg_addr, (u8 *)(&addr),
 				     4, HIF_WR_SYNC_BYTE_INC);
 
 	if (status) {
@@ -978,7 +1049,7 @@ static int ath6kl_sdio_diag_read32(struct ath6kl *ar, u32 address, u32 *data)
 		return status;
 
 	/* read the data */
-	status = ath6kl_sdio_read_write_sync(ar, WINDOW_DATA_ADDRESS,
+	status = ath6kl_sdio_read_write_sync_pri(ar, WINDOW_DATA_ADDRESS,
 				(u8 *)data, sizeof(u32), HIF_RD_SYNC_BYTE_INC);
 	if (status) {
 		ath6kl_err("%s: failed to read from window data addr\n",
@@ -996,7 +1067,7 @@ static int ath6kl_sdio_diag_write32(struct ath6kl *ar, u32 address,
 	u32 val = (__force u32) data;
 
 	/* set write data */
-	status = ath6kl_sdio_read_write_sync(ar, WINDOW_DATA_ADDRESS,
+	status = ath6kl_sdio_read_write_sync_pri(ar, WINDOW_DATA_ADDRESS,
 				(u8 *) &val, sizeof(u32), HIF_WR_SYNC_BYTE_INC);
 	if (status) {
 		ath6kl_err("%s: failed to write 0x%x to window data addr\n",
@@ -1029,7 +1100,7 @@ static int ath6kl_sdio_bmi_credits(struct ath6kl *ar)
 		 * remaining 3 bytes has no effect. The rationale behind this
 		 * is to make all HIF accesses 4-byte aligned.
 		 */
-		ret = ath6kl_sdio_read_write_sync(ar, addr,
+		ret = ath6kl_sdio_read_write_sync_pri(ar, addr,
 					 (u8 *)&ar->bmi.cmd_credits, 4,
 					 HIF_RD_SYNC_BYTE_INC);
 		if (ret) {
@@ -1060,7 +1131,7 @@ static int ath6kl_bmi_get_rx_lkahd(struct ath6kl *ar)
 
 	timeout = jiffies + msecs_to_jiffies(BMI_COMMUNICATION_TIMEOUT);
 	while ((time_before(jiffies, timeout)) && !rx_word) {
-		ret = ath6kl_sdio_read_write_sync(ar,
+		ret = ath6kl_sdio_read_write_sync_pri(ar,
 					RX_LOOKAHEAD_VALID_ADDRESS,
 					(u8 *)&rx_word, sizeof(rx_word),
 					HIF_RD_SYNC_BYTE_INC);
@@ -1092,7 +1163,7 @@ static int ath6kl_sdio_bmi_write(struct ath6kl *ar, u8 *buf, u32 len)
 
 	addr = ar->mbox_info.htc_addr;
 
-	ret = ath6kl_sdio_read_write_sync(ar, addr, buf, len,
+	ret = ath6kl_sdio_read_write_sync_pri(ar, addr, buf, len,
 					  HIF_WR_SYNC_BYTE_INC);
 	if (ret)
 		ath6kl_err("unable to send the bmi data to the device\n");
@@ -1158,7 +1229,7 @@ static int ath6kl_sdio_bmi_read(struct ath6kl *ar, u8 *buf, u32 len)
 	}
 
 	addr = ar->mbox_info.htc_addr;
-	ret = ath6kl_sdio_read_write_sync(ar, addr, buf, len,
+	ret = ath6kl_sdio_read_write_sync_pri(ar, addr, buf, len,
 				  HIF_RD_SYNC_BYTE_INC);
 	if (ret) {
 		ath6kl_err("Unable to read the bmi data from the device: %d\n",
@@ -1168,7 +1239,6 @@ static int ath6kl_sdio_bmi_read(struct ath6kl *ar, u8 *buf, u32 len)
 
 	return 0;
 }
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,34)) */
 
 static void ath6kl_sdio_stop(struct ath6kl *ar)
 {
@@ -1203,7 +1273,7 @@ static void ath6kl_sdio_stop(struct ath6kl *ar)
 }
 
 static const struct ath6kl_hif_ops ath6kl_sdio_ops = {
-	.read_write_sync = ath6kl_sdio_read_write_sync,
+	.read_write_sync = ath6kl_sdio_read_write_sync_pri,
 	.write_async = ath6kl_sdio_write_async,
 	.irq_enable = ath6kl_sdio_irq_enable,
 	.irq_disable = ath6kl_sdio_irq_disable,
@@ -1289,13 +1359,14 @@ static int ath6kl_sdio_probe(struct sdio_func *func,
 	spin_lock_init(&ar_sdio->scat_lock);
 	spin_lock_init(&ar_sdio->wr_async_lock);
 	mutex_init(&ar_sdio->dma_buffer_mutex);
-	mutex_init(&ar_sdio->mtx_irq);
 
 	INIT_LIST_HEAD(&ar_sdio->scat_req);
 	INIT_LIST_HEAD(&ar_sdio->bus_req_freeq);
 	INIT_LIST_HEAD(&ar_sdio->wr_asyncq);
 
 	INIT_WORK(&ar_sdio->wr_async_work, ath6kl_sdio_write_async_work);
+
+	init_waitqueue_head(&ar_sdio->irq_wq);
 
 	for (count = 0; count < BUS_REQUEST_MAX_NUM; count++)
 		ath6kl_sdio_free_bus_req(ar_sdio, &ar_sdio->bus_req[count]);
@@ -1381,28 +1452,25 @@ static struct sdio_driver ath6kl_sdio_driver = {
 static int __init ath6kl_sdio_init(void)
 {
 	int ret;
-#if 1 /* Px */
+#ifdef CONFIG_MACH_PX
     ath6kl_sdio_init_c210();
 #else
-	ath6kl_sdio_init_msm();
+	ath6kl_sdio_init_platform();
 #endif
 	ret = sdio_register_driver(&ath6kl_sdio_driver);
 	if (ret)
 		ath6kl_err("sdio driver registration failed: %d\n", ret);
-	else
-		ath6kl_dbglog_init();
 
 	return ret;
 }
 
 static void __exit ath6kl_sdio_exit(void)
 {
-	ath6kl_dbglog_deinit();
 	sdio_unregister_driver(&ath6kl_sdio_driver);
-#if 1 /* Px */
+#ifdef CONFIG_MACH_PX
 	ath6kl_sdio_exit_c210();
 #else
-	ath6kl_sdio_exit_msm();
+	ath6kl_sdio_exit_platform();
 #endif
 
 }

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010-2011 Atheros Communications Inc.
+ * Copyright (c) 2011-2012 Qualcomm Atheros, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -997,6 +998,12 @@ struct wmi_listen_int_cmd {
 	__le16 num_beacons;
 } __packed;
 
+/* WMI_SET_BMISS_TIME_CMDID */
+struct wmi_bmiss_time_cmd {
+	__le16 bmiss_time;
+	__le16 num_beacons;
+};
+
 /* WMI_SET_POWER_MODE_CMDID */
 enum wmi_power_mode {
 	REC_POWER = 0x01,
@@ -1476,7 +1483,11 @@ enum wmi_bi_ftype {
 #define DEF_LRSSI_SCAN_PERIOD		 5
 #define DEF_LRSSI_ROAM_THRESHOLD	20
 #define DEF_LRSSI_ROAM_FLOOR		60
+#ifdef CONFIG_MACH_PX
+#define DEF_SCAN_FOR_ROAM_INTVL		 5
+#else
 #define DEF_SCAN_FOR_ROAM_INTVL		 2
+#endif
 
 enum wmi_roam_ctrl {
 	WMI_FORCE_ROAM = 1,
@@ -2128,6 +2139,10 @@ struct wmi_rx_frame_format_cmd {
 	u8 reserved[1];
 } __packed;
 
+struct wmi_ap_hidden_ssid_cmd {
+	u8 hidden_ssid;
+} __packed;
+
 /* AP mode events */
 struct wmi_ap_set_apsd_cmd {
 	u8 enable;
@@ -2413,6 +2428,9 @@ int ath6kl_wmi_probedssid_cmd(struct wmi *wmi, u8 if_idx, u8 index, u8 flag,
 int ath6kl_wmi_listeninterval_cmd(struct wmi *wmi, u8 if_idx,
 				  u16 listen_interval,
 				  u16 listen_beacons);
+int ath6kl_wmi_bmisstime_cmd(struct wmi *wmi, u8 if_idx,
+				  u16 bmiss_time,
+				  u16 bmiss_beacons);
 int ath6kl_wmi_powermode_cmd(struct wmi *wmi, u8 if_idx, u8 pwr_mode);
 int ath6kl_wmi_pmparams_cmd(struct wmi *wmi, u8 if_idx, u16 idle_period,
 			    u16 ps_poll_num, u16 dtim_policy,
@@ -2463,7 +2481,8 @@ int ath6kl_wmi_set_wow_mode_cmd(struct wmi *wmi, u8 if_idx,
 				u32 filter, u16 host_req_delay);
 int ath6kl_wmi_add_wow_pattern_cmd(struct wmi *wmi, u8 if_idx,
 				   u8 list_id, u8 filter_size,
-				   u8 filter_offset, u8 *filter, u8 *mask);
+				   u8 filter_offset, const u8 *filter,
+				   const u8 *mask);
 int ath6kl_wmi_del_wow_pattern_cmd(struct wmi *wmi, u8 if_idx,
 				   u16 list_id, u16 filter_id);
 int ath6kl_wmi_set_roam_lrssi_cmd(struct wmi *wmi, u8 lrssi);
@@ -2487,6 +2506,7 @@ u8 ath6kl_wmi_get_traffic_class(u8 user_priority);
 
 u8 ath6kl_wmi_determine_user_priority(u8 *pkt, u32 layer2_pri);
 /* AP mode */
+int ath6kl_wmi_ap_hidden_ssid(struct wmi *wmi, u8 if_idx, bool enable);
 int ath6kl_wmi_ap_profile_commit(struct wmi *wmip, u8 if_idx,
 				 struct wmi_connect_cmd *p);
 
