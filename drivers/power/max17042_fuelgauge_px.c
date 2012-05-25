@@ -31,7 +31,7 @@
 #include <linux/power/sec_battery_px.h>
 #include <linux/power/max17042_fuelgauge_px.h>
 
-#define PRINT_COUNT	10
+#define PRINT_COUNT	1
 
 static struct i2c_client *fg_i2c_client;
 struct max17042_chip *max17042_chip_data;
@@ -144,7 +144,7 @@ static void fg_test_print(void)
 	u16 w_data;
 	u32 temp;
 	u32 temp2;
-	u16 reg_data;
+	u16 fullcap, remcap, mixcap, avcap;
 
 	if (fg_i2c_read(client, AVR_VCELL_REG, data, 2) < 0) {
 		pr_err("%s: Failed to read VCELL\n", __func__);
@@ -160,24 +160,40 @@ static void fg_test_print(void)
 	temp2 = temp / 1000000;
 	average_vcell += (temp2 << 4);
 
-	pr_info("%s : AVG_VCELL(%d), data(0x%04x)\n", __func__,
-		average_vcell, (data[1]<<8) | data[0]);
+	fullcap = fg_read_register(FULLCAP_REG);
+	remcap = fg_read_register(REMCAP_REP_REG);
+	mixcap = fg_read_register(REMCAP_MIX_REG);
+	avcap = fg_read_register(REMCAP_AV_REG);
 
-	reg_data = fg_read_register(FULLCAP_REG);
-	pr_info("%s : FULLCAP(%d), data(0x%04x)\n", __func__,
-			reg_data/2, reg_data);
+	pr_info("avg_vcell(%d), fullcap(%d),  remcap(%d), mixcap(%d), avcap(%d)\n",
+		average_vcell, fullcap/2, remcap/2, mixcap/2, avcap/2);
+	msleep(20);
+}
 
-	reg_data = fg_read_register(REMCAP_REP_REG);
-	pr_info("%s : REMCAP_REP(%d), data(0x%04x)\n", __func__,
-			reg_data/2, reg_data);
+static int fg_read_voltage_now(void)
+{
+	struct i2c_client *client = fg_i2c_client;
+	u8 data[2];
+	u32 voltage_now;
+	u16 w_data;
+	u32 temp;
+	u32 temp2;
 
-	reg_data = fg_read_register(REMCAP_MIX_REG);
-	pr_info("%s : REMCAP_MIX(%d), data(0x%04x)\n", __func__,
-			reg_data/2, reg_data);
+	if (fg_i2c_read(client, VCELL_REG, data, 2) < 0) {
+		pr_err("%s: Failed to read VCELL\n", __func__);
+		return -1;
+	}
 
-	reg_data = fg_read_register(REMCAP_AV_REG);
-	pr_info("%s : REMCAP_AV(%d), data(0x%04x)\n", __func__,
-			reg_data/2, reg_data);
+	w_data = (data[1]<<8) | data[0];
+
+	temp = (w_data & 0xFFF) * 78125;
+	voltage_now = temp / 1000;
+
+	temp = ((w_data & 0xF000) >> 4) * 78125;
+	temp2 = temp / 1000;
+	voltage_now += (temp2 << 4);
+
+	return voltage_now;
 }
 
 static int fg_read_vcell(void)
@@ -205,10 +221,36 @@ static int fg_read_vcell(void)
 	vcell += (temp2 << 4);
 
 	if (!(chip->info.pr_cnt % PRINT_COUNT))
-		pr_info("%s : VCELL(%d), data(0x%04x)\n",
+		pr_info("%s: VCELL(%d), data(0x%04x)\n",
 			__func__, vcell, (data[1]<<8) | data[0]);
 
 	return vcell;
+}
+
+static int fg_read_avg_vcell(void)
+{
+	struct i2c_client *client = fg_i2c_client;
+	u8 data[2];
+	u32 avg_vcell;
+	u16 w_data;
+	u32 temp;
+	u32 temp2;
+
+	if (fg_i2c_read(client, AVR_VCELL_REG, data, 2) < 0) {
+		pr_err("%s: Failed to read VCELL\n", __func__);
+		return -1;
+	}
+
+	w_data = (data[1]<<8) | data[0];
+
+	temp = (w_data & 0xFFF) * 78125;
+	avg_vcell = temp / 1000000;
+
+	temp = ((w_data & 0xF000) >> 4) * 78125;
+	temp2 = temp / 1000000;
+	avg_vcell += (temp2 << 4);
+
+	return avg_vcell;
 }
 
 static int fg_read_vfocv(void)
@@ -252,7 +294,7 @@ static int fg_check_battery_present(void)
 	if (status_data[0] & (0x1 << 3)) {
 		pr_info("%s - addr(0x01), data(0x%04x)\n", __func__,
 				(status_data[1]<<8) | status_data[0]);
-		pr_info("%s : battery is absent!!\n", __func__);
+		pr_info("%s: battery is absent!!\n", __func__);
 		ret = 0;
 	}
 
@@ -264,7 +306,7 @@ static int fg_read_temp(void)
 {
 	struct i2c_client *client = fg_i2c_client;
 	struct max17042_chip *chip = i2c_get_clientdata(client);
-	u8 data[2];
+	u8 data[2] = { 0, };
 	int temper = 0;
 
 	if (fg_check_battery_present()) {
@@ -297,7 +339,7 @@ static int fg_read_temp(void)
 		temper = 20000;
 
 	if (!(chip->info.pr_cnt % PRINT_COUNT))
-		pr_info("%s : TEMPERATURE(%d), data(0x%04x)\n", __func__,
+		pr_info("%s: TEMPERATURE(%d), data(0x%04x)\n", __func__,
 				temper, (data[1]<<8) | data[0]);
 
 	return temper;
@@ -318,7 +360,7 @@ static int fg_read_soc(void)
 	soc = data[1];
 
 	if (!(chip->info.pr_cnt % PRINT_COUNT))
-		pr_info("%s : SOC(%d), data(0x%04x)\n", __func__,
+		pr_info("%s: SOC(%d), data(0x%04x)\n", __func__,
 				soc, (data[1]<<8) | data[0]);
 
 	return soc;
@@ -380,7 +422,7 @@ static int fg_read_current(void)
 
 	if (!(chip->info.pr_cnt++ % PRINT_COUNT)) {
 		fg_test_print();
-		pr_info("%s : CURRENT(%dmA), AVG_CURRENT(%dmA)\n", __func__,
+		pr_info("%s: CURRENT(%dmA), AVG_CURRENT(%dmA)\n", __func__,
 				i_current, avg_current);
 		chip->info.pr_cnt = 1;
 		/* Read max17042's all registers every 5 minute. */
@@ -422,8 +464,10 @@ int fg_reset_soc(void)
 	struct i2c_client *client = fg_i2c_client;
 	struct max17042_chip *chip = i2c_get_clientdata(client);
 	u8 data[2];
+#if defined(CONFIG_MACH_P8) || defined(CONFIG_MACH_P8LTE)
 	u32 fullcap;
 	int vfocv = 0;
+#endif
 
 	/* delay for current stablization */
 	msleep(500);
@@ -431,12 +475,12 @@ int fg_reset_soc(void)
 	pr_info("%s: %s - VCELL(%d), VFOCV(%d), VfSOC(%d), RepSOC(%d)\n",
 		__func__, "Before quick-start", fg_read_vcell(),
 		fg_read_vfocv(), fg_read_vfsoc(), fg_read_soc());
-	pr_info("%s : Before quick-start - current(%d), avg current(%d)\n",
+	pr_info("%s: Before quick-start - current(%d), avg current(%d)\n",
 		__func__, fg_read_current(),
 		fg_read_avg_current());
 
 	if (!chip->pdata->check_jig_status()) {
-		pr_info("%s : Return by No JIG_ON signal\n", __func__);
+		pr_info("%s: Return by No JIG_ON signal\n", __func__);
 		return 0;
 	}
 
@@ -457,10 +501,10 @@ int fg_reset_soc(void)
 	fg_write_register(FULLCAP_REG, chip->info.capacity);
 	msleep(500);
 
-	pr_info("%s : %s - VCELL(%d), VFOCV(%d), VfSOC(%d), RepSOC(%d)\n",
+	pr_info("%s: %s - VCELL(%d), VFOCV(%d), VfSOC(%d), RepSOC(%d)\n",
 		__func__, "After quick-start", fg_read_vcell(),
 		fg_read_vfocv(), fg_read_vfsoc(), fg_read_soc());
-	pr_info("%s : After quick-start - current(%d), avg current(%d)\n",
+	pr_info("%s: After quick-start - current(%d), avg current(%d)\n",
 		__func__, fg_read_current(), fg_read_avg_current());
 	fg_write_register(CYCLES_REG, 0x00a0);
 
@@ -476,11 +520,11 @@ int fg_reset_soc(void)
 		/* FullCAP * 0.009 */
 		fg_write_register(REMCAP_REP_REG, (u16)(fullcap * 9 / 1000));
 		msleep(200);
-		pr_info("%s : new soc=%d, vfocv=%d\n", __func__,
+		pr_info("%s: new soc=%d, vfocv=%d\n", __func__,
 				fg_read_soc(), vfocv);
 	}
 
-	pr_info("%s : Additional step - VfOCV(%d), VfSOC(%d), RepSOC(%d)\n",
+	pr_info("%s: Additional step - VfOCV(%d), VfSOC(%d), RepSOC(%d)\n",
 		__func__, fg_read_vfocv(), fg_read_vfsoc(), fg_read_soc());
 #endif
 
@@ -512,7 +556,7 @@ int fg_adjust_capacity(void)
 	}
 	msleep(200);
 
-	pr_info("%s : After adjust - RepSOC(%d)\n", __func__, fg_read_soc());
+	pr_info("%s: After adjust - RepSOC(%d)\n", __func__, fg_read_soc());
 
 	chip->info.soc_restart_flag = 1;
 
@@ -526,28 +570,28 @@ void fg_low_batt_compensation(u32 level)
 	int read_val;
 	u32 temp;
 
-	pr_info("%s : Adjust SOCrep to %d!!\n", __func__, level);
+	pr_info("%s: Adjust SOCrep to %d!!\n", __func__, level);
 
 	read_val = fg_read_register(FULLCAP_REG);
 	if (read_val < 0)
 		return;
 
-	if (read_val > 2)	/* 3% compensation */
-		/* RemCapREP (05h) = FullCap(10h) x 0.0301 */
-		temp = read_val * (level*100 + 1) / 10000;
-	else				/* 1% compensation */
-		/* RemCapREP (05h) = FullCap(10h) x 0.0090 */
-		temp = read_val * (level*90) / 10000;
+	/* RemCapREP (05h) = FullCap(10h) x 0.0304 or 0.0104 */
+	temp = read_val * (level*100 + 4) / 10000;
 	fg_write_register(REMCAP_REP_REG, (u16)temp);
 
-	/* chip->info.low_batt_comp_flag = 1; */
+	/* (0x67) * 0.0039 = 0.4%*/
+	temp = 0;
+	temp = (u16)((level << 8) | 0x67);
+	fg_write_register(SOCREP_REG, temp);
+
+	chip->info.low_batt_comp_flag = 1;
 }
 
 void fg_periodic_read(void)
 {
-	u8 reg;
 	int i;
-	int data[0x10];
+	u16 data[0x10];
 	struct timespec ts;
 	struct rtc_time tm;
 
@@ -559,8 +603,7 @@ void fg_periodic_read(void)
 		tm.tm_min);
 
 	for (i = 0; i < 16; i++) {
-		for (reg = 0; reg < 0x10; reg++)
-			data[reg] = fg_read_register(reg + i * 0x10);
+		fg_read_16register(i, data);
 
 		pr_info("%04xh,%04xh,%04xh,%04xh,%04xh,%04xh,%04xh,%04xh,",
 			data[0x00], data[0x01], data[0x02], data[0x03],
@@ -570,6 +613,8 @@ void fg_periodic_read(void)
 			data[0x0c], data[0x0d], data[0x0e], data[0x0f]);
 		if (i == 4)
 			i = 13;
+
+		msleep(20);
 	}
 	pr_info("\n");
 }
@@ -618,7 +663,7 @@ static void fg_read_model_data(void)
 
 		for (i = 0; i < 16; i++) {
 			if (data0[i] || data1[i] || data2[i]) {
-				pr_info("%s : data is non-zero, lock again!\n",
+				pr_info("%s: data is non-zero, lock again!\n",
 						__func__);
 				relock_check = 1;
 			}
@@ -667,7 +712,7 @@ int fg_alert_init(void)
 
 	read_data = fg_read_register((u8)VALRT_THRESHOLD_REG);
 	if (read_data != 0xff00)
-		pr_err("%s : VALRT_THRESHOLD_REG is not valid (0x%x)\n",
+		pr_err("%s: VALRT_THRESHOLD_REG is not valid (0x%x)\n",
 				__func__, read_data);
 
 	/* Reset TALRT Threshold setting (disable) */
@@ -680,7 +725,7 @@ int fg_alert_init(void)
 
 	read_data = fg_read_register((u8)TALRT_THRESHOLD_REG);
 	if (read_data != 0x7f80)
-		pr_err("%s : TALRT_THRESHOLD_REG is not valid (0x%x)\n",
+		pr_err("%s: TALRT_THRESHOLD_REG is not valid (0x%x)\n",
 				__func__, read_data);
 
 	mdelay(100);
@@ -731,52 +776,44 @@ void fg_fullcharged_compensation(u32 is_recharging, u32 pre_update)
 {
 	struct i2c_client *client = fg_i2c_client;
 	struct max17042_chip *chip = i2c_get_clientdata(client);
-	static int new_fullcap;
+	static int new_fcap;
+	pr_info("%s: is_recharging(%d), pre_update(%d)\n", __func__,
+					is_recharging, pre_update);
 
-	pr_info("%s : is_recharging(%d), pre_update(%d)\n", __func__,
-			is_recharging, pre_update);
+	new_fcap = fg_read_register(FULLCAP_REG);
+	if (new_fcap < 0)
+		new_fcap = chip->info.capacity;
 
-	new_fullcap = fg_read_register(FULLCAP_REG);
-	if (new_fullcap < 0)
-		new_fullcap = chip->info.capacity;
-
-	if (new_fullcap > (chip->info.capacity * 110 / 100)) {
-		pr_info("%s : [Case 1] previous_fullcap = 0x%04x,",
-			__func__, chip->info.previous_fullcap);
-		pr_info(" NewFullCap = 0x%04x\n", new_fullcap);
-
-		new_fullcap = (chip->info.capacity * 110) / 100;
-		fg_write_register(REMCAP_REP_REG, (u16)(new_fullcap));
-		fg_write_register(FULLCAP_REG, (u16)(new_fullcap));
-	} else if (new_fullcap < (chip->info.capacity * 70 / 100)) {
-		pr_info("%s : [Case 5] previous_fullcap = 0x%04x,",
-			__func__, chip->info.previous_fullcap);
-		pr_info(" NewFullCap = 0x%04x\n", new_fullcap);
-
-		new_fullcap = (chip->info.capacity * 70) / 100;
-		fg_write_register(REMCAP_REP_REG, (u16)(new_fullcap));
-		fg_write_register(FULLCAP_REG, (u16)(new_fullcap));
+	pr_info("%s: prevFCap(0x%04x), newFcap(0x%04x)\n", __func__,
+			chip->info.prev_fullcap, new_fcap);
+	if (new_fcap > (chip->info.capacity * 110 / 100)) {
+		new_fcap = (chip->info.capacity * 110) / 100;
+		pr_info("%s: init FCap +10%%: newFcap(0x%04x)\n",
+						__func__, new_fcap);
+		fg_write_register(REMCAP_REP_REG, (u16)(new_fcap));
+		fg_write_register(FULLCAP_REG, (u16)(new_fcap));
+	} else if (new_fcap < (chip->info.capacity * 50 / 100)) {
+		new_fcap = (chip->info.capacity * 50) / 100;
+		pr_info("%s: init FCap -50%%: newFcap(0x%04x)\n",
+						__func__, new_fcap);
+		fg_write_register(REMCAP_REP_REG, (u16)(new_fcap));
+		fg_write_register(FULLCAP_REG, (u16)(new_fcap));
 	} else {
-		if (new_fullcap > (chip->info.previous_fullcap * 105 / 100)) {
-			pr_info("%s : [Case 2] previous_fullcap = 0x%04x,",
-				__func__, chip->info.previous_fullcap);
-			pr_info(" NewFullCap = 0x%04x\n", new_fullcap);
-
-			new_fullcap = (chip->info.previous_fullcap * 105) / 100;
-			fg_write_register(REMCAP_REP_REG, (u16)(new_fullcap));
-			fg_write_register(FULLCAP_REG, (u16)(new_fullcap));
-		} else if (new_fullcap < (chip->info.previous_fullcap*90/100)) {
-			pr_info("%s : [Case 3] previous_fullcap = 0x%04x,",
-				__func__, chip->info.previous_fullcap);
-			pr_info(" NewFullCap = 0x%04x\n", new_fullcap);
-
-			new_fullcap = (chip->info.previous_fullcap * 90) / 100;
-			fg_write_register(REMCAP_REP_REG, (u16)(new_fullcap));
-			fg_write_register(FULLCAP_REG, (u16)(new_fullcap));
+		if (new_fcap > (chip->info.prev_fullcap * 110 / 100)) {
+			new_fcap = (chip->info.prev_fullcap * 110) / 100;
+			pr_info("%s: prev FCap +10%%: newFcap(0x%04x)\n",
+						__func__, new_fcap);
+			fg_write_register(REMCAP_REP_REG, (u16)(new_fcap));
+			fg_write_register(FULLCAP_REG, (u16)(new_fcap));
+		} else if (new_fcap < (chip->info.prev_fullcap * 90 / 100)) {
+			new_fcap = (chip->info.prev_fullcap * 90) / 100;
+			pr_info("%s: prev FCap -10%%: newFcap(0x%04x)\n",
+						__func__, new_fcap);
+			fg_write_register(REMCAP_REP_REG, (u16)(new_fcap));
+			fg_write_register(FULLCAP_REG, (u16)(new_fcap));
 		} else {
-			pr_info("%s : [Case 4] previous_fullcap = 0x%04x,",
-				__func__, chip->info.previous_fullcap);
-			pr_info(" NewFullCap = 0x%04x\n", new_fullcap);
+			pr_info("%s: keep FCap: newFcap(0x%04x)\n",
+						__func__, new_fcap);
 		}
 	}
 
@@ -791,69 +828,57 @@ void fg_fullcharged_compensation(u32 is_recharging, u32 pre_update)
 
 	/* if pre_update case, skip updating PrevFullCAP value. */
 	if (!pre_update)
-		chip->info.previous_fullcap = fg_read_register(FULLCAP_REG);
+		chip->info.prev_fullcap = fg_read_register(FULLCAP_REG);
 
-	pr_info("%s : (A) FullCap = 0x%04x, RemCap = 0x%04x\n", __func__,
-	fg_read_register(FULLCAP_REG), fg_read_register(REMCAP_REP_REG));
+	pr_info("%s: FullCap(0x%04x), RemCap(0x%04x)\n", __func__,
+				fg_read_register(FULLCAP_REG),
+				fg_read_register(REMCAP_REP_REG));
 
 	fg_periodic_read();
-
 }
 
 void fg_check_vf_fullcap_range(void)
 {
 	struct i2c_client *client = fg_i2c_client;
 	struct max17042_chip *chip = i2c_get_clientdata(client);
-	static int new_vffullcap;
+	static int new_vffcap;
 	u16 print_flag = 1;
+	pr_debug("%s\n", __func__);
 
-	new_vffullcap = fg_read_register(FULLCAP_NOM_REG);
-	if (new_vffullcap < 0)
-		new_vffullcap = chip->info.vfcapacity;
+	new_vffcap = fg_read_register(FULLCAP_NOM_REG);
+	if (new_vffcap < 0)
+		new_vffcap = chip->info.vfcapacity;
 
-	if (new_vffullcap > (chip->info.vfcapacity * 110 / 100)) {
-		pr_info("%s : [Case 1] previous_vffullcap = 0x%04x,",
-			__func__, chip->info.previous_vffullcap);
-		pr_info(" NewVfFullCap = 0x%04x\n", new_vffullcap);
-
-		new_vffullcap = (chip->info.vfcapacity * 110) / 100;
-
-		fg_write_register(DQACC_REG, (u16)(new_vffullcap / 4));
+	pr_info("%s: prevVFFCap(0x%04x), newVFFcap(0x%04x)\n", __func__,
+			chip->info.prev_vffcap, new_vffcap);
+	if (new_vffcap > (chip->info.vfcapacity * 110 / 100)) {
+		new_vffcap = (chip->info.vfcapacity * 110) / 100;
+		pr_info("%s: init VFFCap +10%%: newVFFcap(0x%04x)\n",
+						__func__, new_vffcap);
+		fg_write_register(DQACC_REG, (u16)(new_vffcap / 4));
 		fg_write_register(DPACC_REG, (u16)0x3200);
-	} else if (new_vffullcap < (chip->info.vfcapacity * 70 / 100)) {
-		pr_info("%s : [Case 5] previous_vffullcap = 0x%04x,",
-			__func__, chip->info.previous_vffullcap);
-		pr_info(" NewVfFullCap = 0x%04x\n", new_vffullcap);
-
-		new_vffullcap = (chip->info.vfcapacity * 70) / 100;
-
-		fg_write_register(DQACC_REG, (u16)(new_vffullcap / 4));
+	} else if (new_vffcap < (chip->info.vfcapacity * 50 / 100)) {
+		new_vffcap = (chip->info.vfcapacity * 50) / 100;
+		pr_info("%s: init VFFCap -50%%: newVFFcap(0x%04x)\n",
+						__func__, new_vffcap);
+		fg_write_register(DQACC_REG, (u16)(new_vffcap / 4));
 		fg_write_register(DPACC_REG, (u16)0x3200);
 	} else {
-		if (new_vffullcap > (chip->info.previous_vffullcap*105 / 100)) {
-			pr_info("%s : [Case 2] previous_vffullcap = 0x%04x,",
-				__func__, chip->info.previous_vffullcap);
-			pr_info(" NewVfFullCap = 0x%04x\n", new_vffullcap);
-
-			new_vffullcap = (chip->info.previous_vffullcap \
-					* 105) / 100;
-
-			fg_write_register(DQACC_REG, (u16)(new_vffullcap / 4));
+		if (new_vffcap > (chip->info.prev_vffcap * 105 / 100)) {
+			new_vffcap = (chip->info.prev_vffcap * 105) / 100;
+			pr_info("%s: prev VFFCap +10%%: newVFFcap(0x%04x)\n",
+							__func__, new_vffcap);
+			fg_write_register(DQACC_REG, (u16)(new_vffcap / 4));
 			fg_write_register(DPACC_REG, (u16)0x3200);
-		} else if (new_vffullcap < (chip->info.previous_vffullcap \
-					* 90 / 100)) {
-			pr_info("%s : [Case 3] previous_vffullcap = 0x%04x,",
-				__func__, chip->info.previous_vffullcap);
-			pr_info(" NewVfFullCap = 0x%04x\n", new_vffullcap);
-
-			new_vffullcap = (chip->info.previous_vffullcap*90)/100;
-
-			fg_write_register(DQACC_REG, (u16)(new_vffullcap / 4));
+		} else if (new_vffcap < (chip->info.prev_vffcap * 90 / 100)) {
+			new_vffcap = (chip->info.prev_vffcap * 90) / 100;
+			pr_info("%s: prev VFFCap -10%%: newVFFcap(0x%04x)\n",
+						__func__, new_vffcap);
+			fg_write_register(DQACC_REG, (u16)(new_vffcap / 4));
 			fg_write_register(DPACC_REG, (u16)0x3200);
 		} else {
-			pr_info("%s : [Case 4] previous_vffullcap = 0x%04x,",
-				__func__, chip->info.previous_vffullcap);
-			pr_info(" NewVfFullCap = 0x%04x\n", new_vffullcap);
+			pr_info("%s: keep VFFCap: newVFFcap(0x%04x)\n",
+						__func__, new_vffcap);
 			print_flag = 0;
 		}
 	}
@@ -862,7 +887,7 @@ void fg_check_vf_fullcap_range(void)
 	if (print_flag)
 		msleep(300);
 
-	chip->info.previous_vffullcap = fg_read_register(FULLCAP_NOM_REG);
+	chip->info.prev_vffcap = fg_read_register(FULLCAP_NOM_REG);
 
 	if (print_flag)
 		pr_info("%s: VfFullCap(0x%04x), dQacc(0x%04x), dPacc(0x%04x)\n",
@@ -870,7 +895,6 @@ void fg_check_vf_fullcap_range(void)
 			fg_read_register(FULLCAP_NOM_REG),
 			fg_read_register(DQACC_REG),
 			fg_read_register(DPACC_REG));
-
 }
 
 int fg_check_cap_corruption(void)
@@ -885,13 +909,16 @@ int fg_check_cap_corruption(void)
 	int fullcapacity = fg_read_register(FULLCAP_REG);
 	int vffullcapacity = fg_read_register(FULLCAP_NOM_REG);
 	u32 temp, temp2, new_vfocv, pr_vfocv;
+	int designcap;
 	int ret = 0;
 
 	/* If usgin Jig or low batt compensation flag is set,
 	   then skip checking. */
 	if (chip->pdata->check_jig_status()) {
-		pr_info("%s : Return by Using Jig(%d)\n", __func__,
-				chip->pdata->check_jig_status());
+		fg_write_register(DESIGNCAP_REG, chip->info.vfcapacity - 1);
+		designcap = fg_read_register(DESIGNCAP_REG);
+		pr_info("%s: return by jig, vfcap(0x%04x), designcap(0x%04x)\n",
+				__func__, chip->info.vfcapacity, designcap);
 		return 0;
 	}
 
@@ -906,9 +933,9 @@ int fg_check_cap_corruption(void)
 		|| chip->info.low_batt_comp_flag
 		|| chip->info.soc_restart_flag) {
 
-		chip->info.previous_repsoc = repsoc;
-		chip->info.previous_remcap = remcap;
-		chip->info.previous_fullcapacity = fullcapacity;
+		chip->info.prev_repsoc = repsoc;
+		chip->info.prev_remcap = remcap;
+		chip->info.prev_fullcapacity = fullcapacity;
 		if (chip->info.soc_restart_flag)
 			chip->info.soc_restart_flag = 0;
 
@@ -924,42 +951,42 @@ int fg_check_cap_corruption(void)
 	pr_vfocv += (temp2 << 4);
 
 	/* MixCap differ is greater than 265mAh */
-	if ((((vfsoc+5) < chip->info.previous_vfsoc)
-			|| (vfsoc > (chip->info.previous_vfsoc+5)))
-		|| (((repsoc+5) < chip->info.previous_repsoc)
-			|| (repsoc > (chip->info.previous_repsoc+5)))
-		|| (((mixcap+530) < chip->info.previous_mixcap)
-			|| (mixcap > (chip->info.previous_mixcap+530)))) {
+	if ((((vfsoc+5) < chip->info.prev_vfsoc)
+			|| (vfsoc > (chip->info.prev_vfsoc+5)))
+		|| (((repsoc+5) < chip->info.prev_repsoc)
+			|| (repsoc > (chip->info.prev_repsoc+5)))
+		|| (((mixcap+530) < chip->info.prev_mixcap)
+			|| (mixcap > (chip->info.prev_mixcap+530)))) {
 		fg_periodic_read();
 
 		pr_info("[FG_Recovery] (B) VfSOC(%d), prevVfSOC(%d),",
-			vfsoc, chip->info.previous_vfsoc);
+			vfsoc, chip->info.prev_vfsoc);
 		pr_info(" RepSOC(%d), prevRepSOC(%d), MixCap(%d),",
-			repsoc, chip->info.previous_repsoc, (mixcap/2));
+			repsoc, chip->info.prev_repsoc, (mixcap/2));
 		pr_info(" prevMixCap(%d),VfOCV(0x%04x, %d)\n",
-			(chip->info.previous_mixcap/2), vfocv, pr_vfocv);
+			(chip->info.prev_mixcap/2), vfocv, pr_vfocv);
 
 		mutex_lock(&chip->fg_lock);
 
 		fg_write_and_verify_register(REMCAP_MIX_REG,
-						chip->info.previous_mixcap);
-		fg_write_register(VFOCV_REG, chip->info.previous_vfocv);
+						chip->info.prev_mixcap);
+		fg_write_register(VFOCV_REG, chip->info.prev_vfocv);
 		mdelay(200);
 
 		fg_write_and_verify_register(REMCAP_REP_REG,
-						chip->info.previous_remcap);
+						chip->info.prev_remcap);
 		vfsoc = fg_read_register(VFSOC_REG);
 		fg_write_register(0x60, 0x0080);
 		fg_write_and_verify_register(0x48, vfsoc);
 		fg_write_register(0x60, 0x0000);
 
 		fg_write_and_verify_register(0x45,
-				(chip->info.previous_vfcapacity / 4));
+				(chip->info.prev_vfcapacity / 4));
 		fg_write_and_verify_register(0x46, 0x3200);
 		fg_write_and_verify_register(FULLCAP_REG,
-				chip->info.previous_fullcapacity);
+				chip->info.prev_fullcapacity);
 		fg_write_and_verify_register(FULLCAP_NOM_REG,
-				chip->info.previous_vfcapacity);
+				chip->info.prev_vfcapacity);
 
 		mutex_unlock(&chip->fg_lock);
 
@@ -986,13 +1013,13 @@ int fg_check_cap_corruption(void)
 
 		ret = 1;
 	} else {
-		chip->info.previous_vfsoc = vfsoc;
-		chip->info.previous_repsoc = repsoc;
-		chip->info.previous_remcap = remcap;
-		chip->info.previous_mixcap = mixcap;
-		chip->info.previous_fullcapacity = fullcapacity;
-		chip->info.previous_vfcapacity = vffullcapacity;
-		chip->info.previous_vfocv = vfocv;
+		chip->info.prev_vfsoc = vfsoc;
+		chip->info.prev_repsoc = repsoc;
+		chip->info.prev_remcap = remcap;
+		chip->info.prev_mixcap = mixcap;
+		chip->info.prev_fullcapacity = fullcapacity;
+		chip->info.prev_vfcapacity = vffullcapacity;
+		chip->info.prev_vfocv = vfocv;
 	}
 
 	return ret;
@@ -1060,11 +1087,15 @@ static void add_low_batt_comp_cnt(int range, int level)
 
 #define POWER_OFF_SOC_HIGH_MARGIN	0x200
 #define POWER_OFF_VOLTAGE_HIGH_MARGIN	3500
-void prevent_early_poweroff(int vcell, int *fg_soc)
+#define POWER_OFF_VOLTAGE_NOW_LOW_MARGIN	3350
+#define POWER_OFF_VOLTAGE_AVG_LOW_MARGIN	3400
+
+void prevent_early_late_poweroff(int vcell, int *fg_soc)
 {
 	struct i2c_client *client = fg_i2c_client;
 	int repsoc, repsoc_data = 0;
 	int read_val;
+	int avg_vcell;
 	u8 data[2];
 
 	if (fg_i2c_read(client, SOCREP_REG, data, 2) < 0) {
@@ -1077,15 +1108,27 @@ void prevent_early_poweroff(int vcell, int *fg_soc)
 	if (repsoc_data > POWER_OFF_SOC_HIGH_MARGIN)
 		return;
 
-	pr_info("%s : soc=%d%%(0x%04x), vcell=%d\n", __func__, repsoc,
-			repsoc_data, vcell);
+	avg_vcell = fg_read_avg_vcell();
+	pr_info("%s: soc=%d%%(0x%04x), vcell=%d avg_vcell=%d\n",
+			__func__, repsoc, repsoc_data, vcell, avg_vcell);
+
 	if (vcell > POWER_OFF_VOLTAGE_HIGH_MARGIN) {
 		read_val = fg_read_register(FULLCAP_REG);
 		/* FullCAP * 0.013 */
 		fg_write_register(REMCAP_REP_REG, (u16)(read_val * 13 / 1000));
 		msleep(200);
 		*fg_soc = fg_read_soc();
-		pr_info("%s: new soc=%d, vcell=%d\n", __func__, *fg_soc, vcell);
+		pr_info("%s: new soc=%d, vcell=%d, avg_vcell=%d\n",
+				__func__, *fg_soc, vcell, avg_vcell);
+	} else if ((vcell < POWER_OFF_VOLTAGE_NOW_LOW_MARGIN) &&
+		(avg_vcell < POWER_OFF_VOLTAGE_AVG_LOW_MARGIN)) {
+		read_val = fg_read_register(FULLCAP_REG);
+		/* FullCAP * 0.009 */
+		fg_write_register(REMCAP_REP_REG, (u16)(read_val * 9 / 1000));
+		msleep(200);
+		*fg_soc = fg_read_soc();
+		pr_info("%s: new soc=%d, vcell=%d, avg_vcell=%d\n",
+				__func__, *fg_soc, vcell, avg_vcell);
 	}
 }
 
@@ -1128,8 +1171,8 @@ static int get_low_batt_threshold(int range, int level, int nCurrent)
 	if (fg_get_battery_type() == SDI_BATTERY_TYPE) {
 		switch (range) {
 /* P4 & P8 needs one more level */
-#if defined(CONFIG_MACH_P4) || defined(CONFIG_MACH_P8) \
-			|| defined(CONFIG_MACH_P8LTE)
+#if defined(CONFIG_MACH_P4NOTE) \
+	|| defined(CONFIG_MACH_P8) || defined(CONFIG_MACH_P8LTE)
 		case 5:
 			if (level == 1)
 				ret = SDI_Range5_1_Offset + \
@@ -1255,8 +1298,8 @@ int low_batt_compensation(int fg_soc, int fg_vcell, int fg_current)
 				bCntReset = 1;
 		}
 /* P4 & P8 needs more level */
-#if defined(CONFIG_MACH_P4) || defined(CONFIG_MACH_P8) \
-		|| defined(CONFIG_MACH_P8LTE)
+#if defined(CONFIG_MACH_P4NOTE) \
+	|| defined(CONFIG_MACH_P8) || defined(CONFIG_MACH_P8LTE)
 		else if (fg_min_current >= CURRENT_RANGE5 && \
 				fg_min_current < CURRENT_RANGE4) {
 			if (fg_soc >= 2 && fg_vcell < \
@@ -1324,25 +1367,26 @@ int low_batt_compensation(int fg_soc, int fg_vcell, int fg_current)
 
 		/* if compensation finished, then read SOC again!!*/
 		if (chip->info.low_batt_comp_flag) {
-			pr_info("%s : MIN_CURRENT(%d), AVG_CURRENT(%d),",
+			pr_info("%s: MIN_CURRENT(%d), AVG_CURRENT(%d),",
 				__func__, fg_min_current, fg_avg_current);
 			pr_info(" CURRENT(%d), SOC(%d), VCELL(%d)\n",
 				fg_current, fg_soc, fg_vcell);
 #if defined(CONFIG_MACH_P8) || defined(CONFIG_MACH_P8LTE)
 	/* Do not update soc right after low battery compensation */
 	/* to prevent from powering-off suddenly (only for P8s) */
-			pr_info("%s : SOC is set to %d\n",
+			pr_info("%s: SOC is set to %d\n",
 				__func__, fg_read_soc());
 #else
 			fg_soc = fg_read_soc();
-			pr_info("%s : SOC is set to %d\n", __func__, fg_soc);
+			pr_info("%s: SOC is set to %d\n", __func__, fg_soc);
 #endif
 		}
 	}
 
-#if defined(CONFIG_MACH_P4) || defined(CONFIG_MACH_P2)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P2)
 	/* Prevent power off over 3500mV */
-	prevent_early_poweroff(fg_vcell, &fg_soc);
+	/* Force power off under 3400mV */
+	prevent_early_late_poweroff(fg_vcell, &fg_soc);
 #endif
 
 	return fg_soc;
@@ -1365,7 +1409,7 @@ static void fg_set_battery_type(void)
 			(data == chip->pdata->atl_vfcapacity-1))
 		chip->info.battery_type = ATL_BATTERY_TYPE;
 	else {
-		pr_info("%s : Unknown battery is set to SDI type.\n", __func__);
+		pr_info("%s: Unknown battery is set to SDI type.\n", __func__);
 		chip->info.battery_type = SDI_BATTERY_TYPE;
 	}
 
@@ -1376,7 +1420,7 @@ static void fg_set_battery_type(void)
 	else
 		sprintf(type_str, "Unknown");
 
-	pr_info("%s : DesignCAP(0x%04x), Battery type(%s)\n",
+	pr_info("%s: DesignCAP(0x%04x), Battery type(%s)\n",
 			__func__, data, type_str);
 
 	switch (chip->info.battery_type) {
@@ -1441,6 +1485,10 @@ int get_fuelgauge_value(int data)
 		ret = fg_read_vfsoc();
 		break;
 
+	case FG_VOLTAGE_NOW:
+		ret = fg_read_voltage_now();
+		break;
+
 	default:
 		ret = -1;
 		break;
@@ -1463,7 +1511,7 @@ fg_i2c_probe(struct i2c_client *client,  const struct i2c_device_id *id)
 	struct max17042_chip *chip;
 
 	if (!client->dev.platform_data) {
-		pr_err("%s : No platform data\n", __func__);
+		pr_err("%s: No platform data\n", __func__);
 		return -EINVAL;
 	}
 
@@ -1477,7 +1525,7 @@ fg_i2c_probe(struct i2c_client *client,  const struct i2c_device_id *id)
 	chip->pdata = client->dev.platform_data;
 	i2c_set_clientdata(client, chip);
 
-	pr_info("%s : fuelgauge driver loading\n", __func__);
+	pr_info("%s: fuelgauge driver loading\n", __func__);
 
 	max17042_chip_data = chip;
 	/* rest of the initialisation goes here. */
@@ -1487,21 +1535,22 @@ fg_i2c_probe(struct i2c_client *client,  const struct i2c_device_id *id)
 	fg_set_battery_type();
 
 	/* Init parameters to prevent wrong compensation. */
-	chip->info.previous_fullcap = fg_read_register(FULLCAP_REG);
-	chip->info.previous_vffullcap = fg_read_register(FULLCAP_NOM_REG);
+	chip->info.prev_fullcap = fg_read_register(FULLCAP_REG);
+	chip->info.prev_vffcap = fg_read_register(FULLCAP_NOM_REG);
 	/* Init FullCAP of first full charging. */
-	chip->info.full_charged_cap = chip->info.previous_fullcap;
+	chip->info.full_charged_cap = chip->info.prev_fullcap;
 
-	chip->info.previous_vfsoc = fg_read_vfsoc();
-	chip->info.previous_repsoc = fg_read_soc();
-	chip->info.previous_remcap = fg_read_register(REMCAP_REP_REG);
-	chip->info.previous_mixcap = fg_read_register(REMCAP_MIX_REG);
-	chip->info.previous_vfocv = fg_read_register(VFOCV_REG);
-	chip->info.previous_fullcapacity = chip->info.previous_fullcap;
-	chip->info.previous_vfcapacity = chip->info.previous_vffullcap;
+	chip->info.prev_vfsoc = fg_read_vfsoc();
+	chip->info.prev_repsoc = fg_read_soc();
+	chip->info.prev_remcap = fg_read_register(REMCAP_REP_REG);
+	chip->info.prev_mixcap = fg_read_register(REMCAP_MIX_REG);
+	chip->info.prev_vfocv = fg_read_register(VFOCV_REG);
+	chip->info.prev_fullcapacity = chip->info.prev_fullcap;
+	chip->info.prev_vfcapacity = chip->info.prev_vffcap;
 
 	mutex_init(&chip->fg_lock);
 
+	fg_alert_init();
 	fg_read_model_data();
 	fg_periodic_read();
 	return 0;

@@ -20,6 +20,7 @@
 #include <linux/platform_device.h>
 #include <linux/power/charger-manager.h>
 #include <linux/regulator/consumer.h>
+#include <linux/jack.h>
 
 static const char * const default_event_names[] = {
 	[CM_EVENT_UNDESCRIBED] = "Undescribed",
@@ -863,6 +864,9 @@ static int charger_get_property(struct power_supply *psy,
 			break;
 		}
 
+		printk(KERN_DEBUG"[CM] %s:%d capacity:%d\n",
+			__func__, __LINE__, val->intval);
+
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		if (is_ext_pwr_online(cm))
@@ -1077,6 +1081,61 @@ bool is_charger_manager_active(void)
 }
 EXPORT_SYMBOL_GPL(is_charger_manager_active);
 
+static void cm_check_extcon_state(struct charger_manager *cm)
+{
+	bool attached = false;
+
+	if (cm->usb_mask > 0) {
+		if (cm->edev->state & cm->usb_mask) {
+			try_charger_enable(cm, true);
+			attached = true;
+		}
+		if ((cm->old_state & cm->usb_mask) && !cm->edev->state) {
+			try_charger_enable(cm, false);
+			attached = false;
+		}
+	}
+
+	if (cm->ta_mask > 0) {
+		if (cm->edev->state & cm->ta_mask) {
+			try_charger_enable(cm, true);
+			attached = true;
+		}
+		if ((cm->old_state & cm->ta_mask) && !cm->edev->state) {
+			try_charger_enable(cm, false);
+			attached = false;
+		}
+	}
+#ifdef CONFIG_JACK_MON
+	jack_event_handler("charger", attached);
+#endif
+}
+
+static void cm_extcon_notifier_work(struct work_struct *work)
+{
+	struct charger_manager *cm =
+		container_of(work, struct charger_manager, notifier_work);
+
+	cm_check_extcon_state(cm);
+}
+
+static int cm_extcon_notifier(struct notifier_block *self,
+		unsigned long event, void *ptr)
+{
+	struct charger_manager *cm =
+			container_of(self, struct charger_manager, nb);
+
+	cm->old_state = event;
+
+	schedule_work(&cm->notifier_work);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block cm_extcon_nb = {
+	.notifier_call = cm_extcon_notifier,
+};
+
 static int charger_manager_probe(struct platform_device *pdev)
 {
 	struct charger_desc *desc = dev_get_platdata(&pdev->dev);
@@ -1255,14 +1314,33 @@ static int charger_manager_probe(struct platform_device *pdev)
 	/* Fullbat vchk should be ready before registering irq handlers */
 	INIT_DELAYED_WORK(&cm->fullbatt_vchk_work, fullbatt_vchk);
 
-	try_charger_enable(cm, true);
-
 	/* Add to the list */
 	mutex_lock(&cm_list_mtx);
 	list_add(&cm->entry, &cm_list);
 	mutex_unlock(&cm_list_mtx);
 
 	schedule_work(&setup_polling);
+
+	cm->nb = cm_extcon_nb;
+	INIT_WORK(&cm->notifier_work, cm_extcon_notifier_work);
+
+	cm->edev = extcon_get_extcon_dev("usb-connector");
+	if (cm->edev) {
+		unsigned long usb_index, ta_index;
+
+		usb_index = extcon_find_cable_index(cm->edev, "USB");
+		ta_index = extcon_find_cable_index(cm->edev, "TA");
+		cm->usb_mask = usb_index >= 0 ? 1 << usb_index : 0;
+		cm->ta_mask = ta_index >= 0 ? 1 << ta_index : 0;
+		if (cm->usb_mask || cm->ta_mask) {
+			extcon_register_notifier(cm->edev, &cm->nb);
+			/*
+			 * Enable/disable regulators
+			 * depending on cable state
+			 */
+			cm_check_extcon_state(cm);
+		}
+	}
 
 	return 0;
 err:
@@ -1284,6 +1362,8 @@ static int __devexit charger_manager_remove(struct platform_device *pdev)
 	struct charger_manager *cm = platform_get_drvdata(pdev);
 	struct charger_desc *desc = cm->desc;
 
+	if (cm->usb_mask || cm->ta_mask)
+		extcon_unregister_notifier(cm->edev, &cm->nb);
 	/* Remove from the list */
 	mutex_lock(&cm_list_mtx);
 	list_del(&cm->entry);
