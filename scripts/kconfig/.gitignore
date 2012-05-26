@@ -2,3 +2,4 @@ conf
 lex.zconf.c
 zconf.hash.c
 zconf.tab.c
+mconf
