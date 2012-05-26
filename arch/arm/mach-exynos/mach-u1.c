@@ -51,6 +51,9 @@
 #if defined(CONFIG_S5P_MEM_CMA)
 #include <linux/cma.h>
 #endif
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+#include <linux/bootmem.h>
+#endif
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
 #endif
@@ -3005,7 +3008,7 @@ void sec_set_main_mic_bias(bool on)
 
 void sec_set_ldo1_constraints(int disabled)
 {
-#if 0				/* later */
+#if defined(CONFIG_TARGET_LOCALE_NAATT_TEMP)
 	/* VDD33_ADC */
 	ldo1_init_data.constraints.state_mem.disabled = disabled;
 	ldo1_init_data.constraints.state_mem.enabled = !disabled;
@@ -3041,6 +3044,16 @@ static void u1_sound_init(void)
 	gpio_set_value(GPIO_EAR_MIC_BIAS_EN, 0);
 	gpio_free(GPIO_EAR_MIC_BIAS_EN);
 
+#if defined(CONFIG_MACH_Q1_BD)
+	err = gpio_request(GPIO_SUB_MIC_BIAS_EN, "submic_bias");
+	if (err) {
+		pr_err(KERN_ERR "SUB_MIC_BIAS_EN GPIO set error!\n");
+		return;
+	}
+	gpio_direction_output(GPIO_SUB_MIC_BIAS_EN, 1);
+	gpio_set_value(GPIO_SUB_MIC_BIAS_EN, 0);
+	gpio_free(GPIO_SUB_MIC_BIAS_EN);
+#else
 	if (system_rev >= SYSTEM_REV_SND) {
 		err = gpio_request(GPIO_SUB_MIC_BIAS_EN, "submic_bias");
 		if (err) {
@@ -3050,6 +3063,7 @@ static void u1_sound_init(void)
 		gpio_direction_output(GPIO_SUB_MIC_BIAS_EN, 0);
 		gpio_free(GPIO_SUB_MIC_BIAS_EN);
 	}
+#endif /* defined(CONFIG_MACH_Q1_BD) */
 #endif
 }
 #endif
@@ -3952,12 +3966,12 @@ static void mxt224_power_off(void)
   Configuration for MXT224
 */
 #define MXT224_THRESHOLD_BATT		40
-#define MXT224_THRESHOLD_BATT_INIT		55
-#define MXT224_THRESHOLD_CHRG		70
-#define MXT224_NOISE_THRESHOLD_BATT		30
-#define MXT224_NOISE_THRESHOLD_CHRG		40
-#define MXT224_MOVFILTER_BATT		47
-#define MXT224_MOVFILTER_CHRG		47
+#define MXT224_THRESHOLD_BATT_INIT		50
+#define MXT224_THRESHOLD_CHRG		65
+#define MXT224_NOISE_THRESHOLD_BATT		35
+#define MXT224_NOISE_THRESHOLD_CHRG		45
+#define MXT224_MOVFILTER_BATT		40
+#define MXT224_MOVFILTER_CHRG		45
 #define MXT224_ATCHCALST		4
 #define MXT224_ATCHCALTHR		35
 
@@ -3974,7 +3988,7 @@ static u8 t8_config[] = { GEN_ACQUISITIONCONFIG_T8,
 static u8 t9_config[] = { TOUCH_MULTITOUCHSCREEN_T9,
 	131, 0, 0, 19, 11, 0, 32, MXT224_THRESHOLD_BATT, 2, 1,
 	0,
-	15,			/* MOVHYSTI */
+	10,			/* MOVHYSTI */
 	1, MXT224_MOVFILTER_BATT, MXT224_MAX_MT_FINGERS, 5, 40, 10, 31, 3,
 	223, 1, 0, 0, 0, 0, 143, 55, 143, 90, 18
 };
@@ -4134,7 +4148,7 @@ static u8 t9_config_e[] = { TOUCH_MULTITOUCHSCREEN_T9,
 static u8 t9_config_e[] = { TOUCH_MULTITOUCHSCREEN_T9,
 	139, 0, 0, 19, 11, 0, MXT224E_BLEN_BATT, MXT224E_THRESHOLD_BATT, 2, 1,
 	10,
-	15,			/* MOVHYSTI */
+	10,			/* MOVHYSTI */
 	1, MXT224E_MOVFILTER_BATT, MXT224_MAX_MT_FINGERS, 5, 40, 10, 31, 3,
 	223, 1, 10, 10, 10, 10, 143, 40, 143, 80,
 	18, 15, 50, 50, MXT224E_NEXTTCHDI_NORMAL
@@ -5361,6 +5375,53 @@ static void __init mipi_fb_init(void)
 }
 #endif
 
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+static struct resource ram_console_resource[] = {
+	{
+		.flags = IORESOURCE_MEM,
+	}
+};
+
+static struct platform_device ram_console_device = {
+	.name = "ram_console",
+	.id = -1,
+	.num_resources = ARRAY_SIZE(ram_console_resource),
+	.resource = ram_console_resource,
+};
+
+#define RAM_CONSOLE_CMDLINE ("0x100000@0x5e900000")
+
+static int __init setup_ram_console_mem(char *str)
+{
+	unsigned size;
+	str = RAM_CONSOLE_CMDLINE;
+	size = memparse(str, &str);
+
+	if (size && (*str == '@')) {
+		unsigned long long base = 0;
+
+		base = simple_strtoul(++str, &str, 0);
+		if (reserve_bootmem(base, size, BOOTMEM_EXCLUSIVE)) {
+			pr_err("%s: failed reserving size %d "
+			       "at base 0x%llx\n", __func__, size, base);
+			return -1;
+		}
+
+		ram_console_resource[0].start = base;
+		ram_console_resource[0].end = base + size - 1;
+		pr_err("%s: %x at %llx\n", __func__, size, base);
+	}
+	return 0;
+}
+
+/* without modifying the bootloader or harcoding cmdlines (which can mess up reboots), no way to pass 
+   a ram_console command line.  Just work around that little issue by triggering on a different parameter
+   and hardcoding the parameters to ram_console in the function */
+__setup("loglevel=", setup_ram_console_mem);
+
+/* __setup("ram_console=", setup_ram_console_mem); */
+#endif
+
 #ifdef CONFIG_ANDROID_PMEM
 static struct android_pmem_platform_data pmem_pdata = {
 	.name = "pmem",
@@ -5668,6 +5729,9 @@ static struct platform_device *smdkc210_devices[] __initdata = {
 	&s5p_device_tvout,
 	&s5p_device_cec,
 	&s5p_device_hpd,
+#endif
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+	&ram_console_device,
 #endif
 #ifdef CONFIG_ANDROID_PMEM
 	&pmem_device,
@@ -6166,7 +6230,7 @@ static void __init smdkc210_machine_init(void)
 				ARRAY_SIZE(i2c_devs10_emul));
 #endif
 #ifdef CONFIG_S3C_DEV_I2C11_EMUL
-#if defined (CONFIG_OPTICAL_CM3663)
+#if defined (CONFIG_SENSORS_CM3663)
 	s3c_gpio_setpull(GPIO_PS_ALS_INT, S3C_GPIO_PULL_NONE);
 	i2c_register_board_info(11, i2c_devs11_emul,
 				ARRAY_SIZE(i2c_devs11_emul));
