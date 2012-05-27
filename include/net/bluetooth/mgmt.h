@@ -21,6 +21,10 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#ifdef CONFIG_BT_MGMT
+#include "mgmt_mgmt.h"
+#else
+
 #define MGMT_INDEX_NONE			0xFFFF
 
 struct mgmt_hdr {
@@ -301,3 +305,5 @@ struct mgmt_ev_remote_name {
 } __packed;
 
 #define MGMT_EV_DISCOVERING		0x0014
+
+#endif /*BT_MGMT*/

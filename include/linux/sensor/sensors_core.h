@@ -13,4 +13,8 @@
 
 extern struct device *sensors_classdev_register(char *sensors_name);
 extern void sensors_classdev_unregister(struct device *dev);
+
+struct accel_platform_data {
+	int (*accel_get_position) (void);
+};
 #endif	/* __LINUX_SENSORS_CORE_H_INCLUDED */

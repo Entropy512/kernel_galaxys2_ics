@@ -1,3 +1,7 @@
+
+#ifndef _LINUX_WACOM_I2C_H
+#define _LINUX_WACOM_I2C_H
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -9,11 +13,9 @@
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
-#include <linux/earlysuspend.h>
 
-#define SEC_DVFS_LOCK
-#ifdef SEC_DVFS_LOCK
-#include <mach/cpufreq.h>
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
 #endif
 
 #define NAMEBUF 12
@@ -54,18 +56,28 @@
 #define WACOM_DELAY_FOR_RST_RISING 200
 /* #define INIT_FIRMWARE_FLASH */
 
-#if defined(CONFIG_MACH_P4)
+/*PDCT Signal*/
+#define PDCT_NOSIGNAL 1
+#define PDCT_DETECT_PEN 0
+#define WACOM_PDCT_WORK_AROUND
+
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+#define SEC_BUS_LOCK
+#endif
 #define WACOM_HAVE_RESET_CONTROL 0
 #define WACOM_POSX_MAX 21866
 #define WACOM_POSY_MAX 13730
 #define WACOM_POSX_OFFSET 170
 #define WACOM_POSY_OFFSET 170
-#else /* defined(CONFIG_MACH_P4) */
+#define WACOM_IRQ_WORK_AROUND
+#elif defined(CONFIG_MACH_Q1_BD)
 #define BOARD_Q1C210
 #define COOR_WORK_AROUND
 #define WACOM_IMPORT_FW_ALGO
 #define WACOM_SLEEP_WITH_PEN_SLP
 #define WACOM_HAVE_RESET_CONTROL 1
+#define CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
 
 #if defined(BOARD_P4ADOBE) && defined(COOR_WORK_AROUND)
 	#define COOR_WORK_AROUND_X_MAX		0x54C0
@@ -92,7 +104,7 @@
 #define MAX_ROTATION	4
 #define MAX_HAND		2
 #endif	/* CONFIG_MACH_Q1_BD */
-#endif	/* !defined(CONFIG_MACH_P4) */
+#endif	/* !defined(WACOM_P4) */
 
 #if !defined(WACOM_SLEEP_WITH_PEN_SLP)
 #define WACOM_SLEEP_WITH_PEN_LDO_EN
@@ -104,7 +116,7 @@ struct wacom_features {
 	int y_max;
 	int pressure_max;
 	char comstat;
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 	u8 data[COM_QUERY_NUM];
 #else
 	u8 data[COM_COORD_NUM];
@@ -117,7 +129,7 @@ struct wacom_features {
 extern struct class *sec_class;
 
 static struct wacom_features wacom_feature_EMR = {
-#if defined(CONFIG_MACH_P4)
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_P4)
 	.x_max = 0x54C0,
 	.y_max = 0x34F8,
 	.pressure_max = 0xFF,
@@ -146,6 +158,7 @@ struct wacom_g5_platform_data {
 	int max_y;
 	int max_pressure;
 	int min_pressure;
+	int gpio_pendct;
 	int (*init_platform_hw)(void);
 	int (*exit_platform_hw)(void);
 	int (*suspend_platform_hw)(void);
@@ -164,6 +177,9 @@ struct wacom_i2c {
 	struct mutex lock;
 	struct device	*dev;
 	int irq;
+#ifdef WACOM_PDCT_WORK_AROUND
+	int irq_pdct;
+#endif
 	int pen_pdct;
 	int gpio;
 	int irq_flag;
@@ -178,4 +194,17 @@ struct wacom_i2c {
 	int (*power)(int on);
 	struct work_struct update_work;
 	struct delayed_work resume_work;
+#ifdef WACOM_IRQ_WORK_AROUND
+	struct delayed_work pendct_dwork;
+#endif
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+	unsigned int cpufreq_level;
+	bool dvfs_lock_status;
+	struct delayed_work dvfs_work;
+#if defined(CONFIG_MACH_P4NOTE)
+	struct device *bus_dev;
+#endif
+#endif
 };
+
+#endif /* _LINUX_WACOM_I2C_H */

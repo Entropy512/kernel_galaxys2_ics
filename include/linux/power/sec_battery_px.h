@@ -60,4 +60,8 @@ extern void reset_low_batt_comp_cnt(void);
 extern int get_fuelgauge_value(int data);
 extern struct max17042_chip *max17042_chip_data;
 
+#if defined(CONFIG_STMPE811_ADC)
+u16 stmpe811_get_adc_data(u8 channel);
+#endif
+
 #endif

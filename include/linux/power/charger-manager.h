@@ -17,6 +17,7 @@
 #define __SAMSUNG_DEV_CHARGER_H
 
 #include <linux/power_supply.h>
+#include <linux/extcon.h>
 
 enum data_source {
 	CM_ASSUME_ALWAYS_TRUE,
@@ -161,6 +162,14 @@ struct charger_manager {
 	bool status_save_batt;
 
 	int batt_tmu_status;
+
+	/* Extcon */
+	struct extcon_dev *edev;
+	struct notifier_block nb;
+	struct work_struct notifier_work;
+	unsigned long old_state;
+	unsigned long ta_mask;
+	unsigned long usb_mask;
 };
 
 /* In case IRQs cannot be given and notifications will be given. */

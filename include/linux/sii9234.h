@@ -16,9 +16,9 @@
 #define _SII9234_H_
 
 #ifdef __KERNEL__
-
+#ifndef CONFIG_MACH_P10
 #define	CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE
-
+#endif
 struct sii9234_platform_data {
 	u8 power_state;
 	int ddc_i2c_num;
@@ -35,6 +35,7 @@ struct sii9234_platform_data {
 };
 
 extern void sii9234_mhl_detection_sched(void);
+extern void exturn_mhl_onoff_ex(bool onoff);
 
 #endif
 
@@ -46,4 +47,12 @@ extern	void mhl_hpd_handler(bool onoff);
 extern	int	max77693_muic_get_status1_adc1k_value(void);
 #endif
 
+#ifdef	CONFIG_SAMSUNG_SMARTDOCK
+extern	int	max77693_muic_get_status1_adc_value(void);
+#endif
+
+#ifdef CONFIG_MACH_MIDAS
+extern void sii9234_wake_lock(void);
+extern void sii9234_wake_unlock(void);
+#endif
 #endif /* _SII9234_H_ */

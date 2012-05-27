@@ -1670,6 +1670,9 @@ struct cfg80211_ops {
 					   enum nl80211_btcoex_vendor_list);
 	int	(*notify_btcoex)(struct wiphy *wiphy,
 					   u8 *buf, int len);
+	int	(*priv_cmd)(struct wiphy *wiphy, struct net_device *dev,
+			       char *priv_cmd);
+	int	(*notify_p2p_flush)(struct wiphy *wiphy);
 };
 
 /*
@@ -2778,6 +2781,9 @@ void cfg80211_put_bss(struct cfg80211_bss *bss);
  * out, so it is not necessary to use this function at all.
  */
 void cfg80211_unlink_bss(struct wiphy *wiphy, struct cfg80211_bss *bss);
+
+void cfg80211_unlink_allbss(struct wiphy *wiphy);
+
 
 /**
  * cfg80211_send_rx_auth - notification of processed authentication

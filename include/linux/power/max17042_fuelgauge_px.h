@@ -52,6 +52,7 @@
 #define FG_BATTERY_TYPE 5
 #define FG_CHECK_STATUS 6
 #define FG_VF_SOC 7
+#define FG_VOLTAGE_NOW 8
 
 #define LOW_BATT_COMP_RANGE_NUM	5
 #define LOW_BATT_COMP_LEVEL_NUM	2
@@ -76,21 +77,21 @@ struct fuelgauge_info {
 	/* battery type */
 	int battery_type;
 	/* full charge comp */
-	u32 previous_fullcap;
-	u32 previous_vffullcap;
+	u32 prev_fullcap;
+	u32 prev_vffcap;
 	u32 full_charged_cap;
 	/* capacity and vfcapacity */
 	u16 capacity;
 	u16 vfcapacity;
 	int soc_restart_flag;
 	/* cap corruption check */
-	u32 previous_repsoc;
-	u32 previous_vfsoc;
-	u32 previous_remcap;
-	u32 previous_mixcap;
-	u32 previous_fullcapacity;
-	u32 previous_vfcapacity;
-	u32 previous_vfocv;
+	u32 prev_repsoc;
+	u32 prev_vfsoc;
+	u32 prev_remcap;
+	u32 prev_mixcap;
+	u32 prev_fullcapacity;
+	u32 prev_vfcapacity;
+	u32 prev_vfocv;
 	/* low battery comp */
 	int low_batt_comp_cnt[LOW_BATT_COMP_RANGE_NUM][LOW_BATT_COMP_LEVEL_NUM];
 	int check_start_vol;
@@ -151,7 +152,7 @@ struct max17042_chip {
 #define ATL_Range2_3_Slope		76
 #define ATL_Range1_1_Slope		0
 #define ATL_Range1_3_Slope		0
-#elif defined(CONFIG_MACH_P4)	/* P4W battery parameter */
+#elif defined(CONFIG_MACH_P4NOTE)	/* P4W battery parameter */
 /* Current range for P4W(not dependent on battery type */
 #define CURRENT_RANGE1	0
 #define CURRENT_RANGE2	-200
