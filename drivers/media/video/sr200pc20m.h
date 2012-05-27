@@ -1,5 +1,5 @@
 /*
- * Driver for SR200PC20 2M ISP from Samsung
+ * Driver for SR200PC20M 2M ISP from Samsung
  *
  * Copyright (c) 2011, Samsung Electronics. All rights reserved
  * Author: dongseong.lim
@@ -10,27 +10,27 @@
  * (at your option) any later version.
  */
 
-#ifndef __SR200PC20_H
-#define __SR200PC20_H
+#ifndef __SR200PC20M_H
+#define __SR200PC20M_H
 
 #include <linux/types.h>
 
-#define SR200PC20_DRIVER_NAME	"SR200PC20"
+#define SR200PC20M_DRIVER_NAME	"SR200PC20M"
 
 /************************************
  * FEATURE DEFINITIONS
  ************************************/
-/* #define SR200PC20_USLEEP */
+/* #define SR200PC20M_USLEEP */
 /* #define CONFIG_LOAD_FILE */
 #define SUPPORT_FACTORY_TEST
 #define NEW_CAM_DRV
 
 /** Debuging Feature **/
 #define CONFIG_CAM_DEBUG
-#define CONFIG_CAM_TRACE /* Enable it with CONFIG_CAM_DEBUG */
+#define CONFIG_CAM_TRACE	/* Enable it with CONFIG_CAM_DEBUG */
 /***********************************/
 
-#define TAG_NAME	"["SR200PC20_DRIVER_NAME"]"" "
+#define TAG_NAME	"["SR200PC20M_DRIVER_NAME"]"" "
 #define cam_err(fmt, ...)	\
 	printk(KERN_ERR TAG_NAME fmt, ##__VA_ARGS__)
 #define cam_warn(fmt, ...)	\
@@ -47,7 +47,7 @@
 		if (*to_state(sd)->dbg_level & CAMDBG_LEVEL_DEBUG) \
 			printk(KERN_DEBUG TAG_NAME fmt, ##__VA_ARGS__); \
 	} while (0)
-#endif /* CONFIG_CAM_DEBUG */
+#endif				/* CONFIG_CAM_DEBUG */
 
 #if defined(CONFIG_CAM_DEBUG) && defined(CONFIG_CAM_TRACE)
 #define cam_trace(fmt, ...)	cam_dbg("%s: " fmt, __func__, ##__VA_ARGS__);
@@ -72,14 +72,12 @@
 #define CHECK_ERR_MSG(x, fmt, ...) \
 	CHECK_ERR_COND_MSG(((x) < 0), (x), fmt, ##__VA_ARGS__)
 
-
-
 enum stream_cmd {
 	STREAM_STOP,
 	STREAM_START,
 };
 
-enum sr200pc20_fps_index {
+enum sr200pc20m_fps_index {
 	I_FPS_0,
 	I_FPS_7,
 	I_FPS_10,
@@ -91,23 +89,23 @@ enum sr200pc20_fps_index {
 };
 #define DEFAULT_FPS	15
 
-struct sr200pc20_framesize {
+struct sr200pc20m_framesize {
 	u32 width;
 	u32 height;
 };
 
-struct sr200pc20_fps {
+struct sr200pc20m_fps {
 	u32 index;
 	u32 fps;
 };
 
-struct sr200pc20_exif {
+struct sr200pc20m_exif {
 	u16 exp_time_den;
 	u16 iso;
 	u32 shutter_speed;
 };
 
-struct sr200pc20_stream_time {
+struct sr200pc20m_stream_time {
 	struct timeval curr_time;
 	struct timeval before_time;
 };
@@ -122,38 +120,38 @@ typedef struct regs_array_type {
 } regs_short_t;
 
 #ifdef CONFIG_LOAD_FILE
-struct sr200pc20_regset_table {
-	const regs_short_t	*reg;
-	int			array_size;
-	char			*name;
+struct sr200pc20m_regset_table {
+	const regs_short_t *reg;
+	int array_size;
+	char *name;
 };
 
-#define SR200PC20_REGSET(x, y)		\
+#define SR200PC20M_REGSET(x, y)		\
 	[(x)] = {					\
 		.reg		= (y),			\
 		.array_size	= ARRAY_SIZE((y)),	\
 		.name		= #y,			\
 }
 
-#define SR200PC20_REGSET_TABLE(y)		\
+#define SR200PC20M_REGSET_TABLE(y)		\
 	{					\
 		.reg		= (y),			\
 		.array_size	= ARRAY_SIZE((y)),	\
 		.name		= #y,			\
 }
 #else
-struct sr200pc20_regset_table {
-	const regs_short_t	*reg;
-	int			array_size;
+struct sr200pc20m_regset_table {
+	const regs_short_t *reg;
+	int array_size;
 };
 
-#define SR200PC20_REGSET(x, y)		\
+#define SR200PC20M_REGSET(x, y)		\
 	[(x)] = {					\
 		.reg		= (y),			\
 		.array_size	= ARRAY_SIZE((y)),	\
 }
 
-#define SR200PC20_REGSET_TABLE(y)		\
+#define SR200PC20M_REGSET_TABLE(y)		\
 	{					\
 		.reg		= (y),			\
 		.array_size	= ARRAY_SIZE((y)),	\
@@ -163,29 +161,29 @@ struct sr200pc20_regset_table {
 #define EV_MIN_VLAUE	EV_MINUS_4
 #define GET_EV_INDEX(EV)	((EV) - (EV_MIN_VLAUE))
 
-struct sr200pc20_regs {
-	struct sr200pc20_regset_table ev[GET_EV_INDEX(EV_MAX_V4L2)];
-	struct sr200pc20_regset_table blur[BLUR_LEVEL_MAX];
-	/* struct sr200pc20_regset_table capture_size[SR200PC20_CAPTURE_MAX];*/
-	struct sr200pc20_regset_table preview_start;
-	struct sr200pc20_regset_table capture_start;
-	struct sr200pc20_regset_table fps[I_FPS_MAX];
-	struct sr200pc20_regset_table init;
-	struct sr200pc20_regset_table init_vt;
-	struct sr200pc20_regset_table init_vt_wifi;
-	struct sr200pc20_regset_table init_recording;
-	struct sr200pc20_regset_table get_light_level;
-	struct sr200pc20_regset_table stream_stop;
-	struct sr200pc20_regset_table dtp_on;
-	struct sr200pc20_regset_table dtp_off;
+struct sr200pc20m_regs {
+	struct sr200pc20m_regset_table ev[GET_EV_INDEX(EV_MAX_V4L2)];
+	struct sr200pc20m_regset_table blur[BLUR_LEVEL_MAX];
+	/*struct sr200pc20m_regset_table capture_size[SR200PC20M_CAPTURE_MAX];*/
+	struct sr200pc20m_regset_table preview_start;
+	struct sr200pc20m_regset_table capture_start;
+	struct sr200pc20m_regset_table fps[I_FPS_MAX];
+	struct sr200pc20m_regset_table init;
+	struct sr200pc20m_regset_table init_vt;
+	struct sr200pc20m_regset_table init_vt_wifi;
+	struct sr200pc20m_regset_table init_recording;
+	struct sr200pc20m_regset_table get_light_level;
+	struct sr200pc20m_regset_table stream_stop;
+	struct sr200pc20m_regset_table dtp_on;
+	struct sr200pc20m_regset_table dtp_off;
 };
 
 /*
  * Driver information
  */
-struct sr200pc20_state {
+struct sr200pc20m_state {
 	struct v4l2_subdev sd;
-	struct sr200pc20_platform_data *pdata;
+	struct sr200pc20m_platform_data *pdata;
 	/*
 	 * req_fmt is the requested format from the application.
 	 * set_fmt is the output format of the camera. Finally FIMC
@@ -193,12 +191,12 @@ struct sr200pc20_state {
 	 * with hardware scaler.
 	 */
 	struct v4l2_pix_format req_fmt;
-	struct sr200pc20_framesize default_frmsizes;
-	struct sr200pc20_framesize preview_frmsizes;
-	struct sr200pc20_framesize capture_frmsizes;
-	struct sr200pc20_exif exif;
-	struct sr200pc20_stream_time stream_time;
-	const struct sr200pc20_regs *regs;
+	struct sr200pc20m_framesize default_frmsizes;
+	struct sr200pc20m_framesize preview_frmsizes;
+	struct sr200pc20m_framesize capture_frmsizes;
+	struct sr200pc20m_exif exif;
+	struct sr200pc20m_stream_time stream_time;
+	const struct sr200pc20m_regs *regs;
 	struct mutex ctrl_lock;
 
 	enum v4l2_sensor_mode sensor_mode;
@@ -213,8 +211,9 @@ struct sr200pc20_state {
 	u32 initialized:1;
 };
 
-static inline struct sr200pc20_state *to_state(struct v4l2_subdev *sd) {
-	return container_of(sd, struct sr200pc20_state, sd);
+static inline struct sr200pc20m_state *to_state(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct sr200pc20m_state, sd);
 }
 
 static inline void debug_msleep(struct v4l2_subdev *sd, u32 msecs)
@@ -225,8 +224,7 @@ static inline void debug_msleep(struct v4l2_subdev *sd, u32 msecs)
 
 /*********** Sensor specific ************/
 #define DELAY_SEQ               0xFF
-#define SR200PC20_CHIP_ID	0x92
-
+#define SR200PC20M_CHIP_ID	0x92
 
 #ifdef CONFIG_LOAD_FILE
 #include <linux/vmalloc.h>
@@ -252,24 +250,20 @@ static s32 large_file;
 	printk(KERN_ERR TAG_NAME fmt, ##__VA_ARGS__)
 #else
 #define dbg_setfile(fmt, ...)
-#endif /* 0 */
+#endif				/* 0 */
 
-#ifdef CONFIG_VIDEO_SR200PC20_P2
-#define TUNING_FILE_PATH "/mnt/sdcard/sr200pc20_regs-p2.h"
-#elif defined(CONFIG_VIDEO_SR200PC20_P4W)
-#define TUNING_FILE_PATH "/mnt/sdcard/sr200pc20_regs-p4w.h"
+#ifdef CONFIG_MACH_S2PLUS
+#define TUNING_FILE_PATH "/mnt/sdcard/sr200pc20m_regs-s2plus.h"
 #else
-#define TUNING_FILE_PATH NULL
-#endif /* CONFIG_VIDEO_SR200PC20_P2 */
+#define TUNING_FILE_PATH "/mnt/sdcard/sr200pc20m_regs.h"
+#endif				/* CONFIG_VIDEO_SR200PC20M */
 
-#endif /* CONFIG_LOAD_FILE */
+#endif				/* CONFIG_LOAD_FILE */
 
-#ifdef CONFIG_VIDEO_SR200PC20_P2
-#include  "sr200pc20_regs-p4w.h"
-/* #include  "sr200pc20_regs-p2.h" */
+#ifdef CONFIG_MACH_S2PLUS
+#include  "sr200pc20m_regs-s2plus.h"
 #else
-#include  "sr200pc20_regs-p4w.h"
+#include  "sr200pc20m_regs.h"
 #endif
 
-#endif /* __SR200PC20_H */
-
+#endif				/* __SR200PC20M_H */
