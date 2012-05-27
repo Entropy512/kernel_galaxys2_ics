@@ -776,6 +776,13 @@ static int printk_time = 0;
 #endif
 module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
 
+#if defined(CONFIG_PRINTK_CPU_ID)
+static int printk_cpu_id = 1;
+#else
+static int printk_cpu_id = 0;
+#endif
+module_param_named(cpu, printk_cpu_id, bool, S_IRUGO | S_IWUSR);
+
 /* Check if we have any console registered that can be called early in boot. */
 static int have_callable_console(void)
 {
@@ -1015,6 +1022,18 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 				printed_len += tlen;
 			}
 
+			if (printk_cpu_id) {
+				/* Add the current time stamp */
+				char tbuf[50], *tp;
+				unsigned tlen;
+
+				tlen = sprintf(tbuf, "c%u ", printk_cpu);
+
+				for (tp = tbuf; tp < tbuf + tlen; tp++)
+					emit_log_char(*tp);
+				printed_len += tlen;
+			}
+
 			if (!*p)
 				break;
 		}
@@ -1209,6 +1228,12 @@ void resume_console(void)
 	console_suspended = 0;
 	console_unlock();
 }
+
+int get_console_suspended(void)
+{
+	return console_suspended;
+}
+EXPORT_SYMBOL(get_console_suspended);
 
 /**
  * console_cpu_notify - print deferred console messages after CPU hotplug
@@ -1815,4 +1840,12 @@ void kmsg_dump(enum kmsg_dump_reason reason)
 		dumper->dump(dumper, reason, s1, l1, s2, l2);
 	rcu_read_unlock();
 }
+#endif
+
+#ifdef CONFIG_MACH_PX
+void logbuf_force_unlock(void)
+{
+	logbuf_lock = __SPIN_LOCK_UNLOCKED(logbuf_lock);
+}
+EXPORT_SYMBOL(logbuf_force_unlock);
 #endif
