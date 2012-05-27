@@ -22,9 +22,11 @@
 #include <linux/vmalloc.h>
 #include <linux/firmware.h>
 #include <linux/videodev2.h>
+#include <linux/slab.h>
+#include <linux/videodev2_exynos_media.h>
 
 #ifdef CONFIG_VIDEO_SAMSUNG_V4L2
-#include <linux/videodev2_samsung.h>
+#include <linux/videodev2_exynos_camera.h>
 #endif
 
 #include <linux/regulator/machine.h>
@@ -45,10 +47,12 @@ struct device *m5mo_dev;
 #define M5MOTB_FW_PATH "RS_M5LS_TB.bin" /* TECHWIN - SONY */
 /* #define M5MOON_FW_PATH "RS_M5LS_ON.bin" */ /* FIBEROPTICS - SONY */
 /* #define M5MOOM_FW_PATH "RS_M5LS_OM.bin" */ /* FIBEROPTICS - S.LSI */
-#if defined(CONFIG_MACH_U1_KOR_LGT)
+#if defined(CONFIG_MACH_U1_KOR_LGT) || defined(CONFIG_TARGET_LOCALE_NTT)
 #define M5MOSB_FW_PATH "RS_M5LS_SB.bin" /* ELECTRO-MECHANICS - SONY */
 #endif
-/* #define M5MOSC_FW_PATH "RS_M5LS_SC.bin" */ /* ELECTRO-MECHANICS - S.LSI */
+#if defined(CONFIG_TARGET_LOCALE_NTT)
+#define M5MOSC_FW_PATH "RS_M5LS_SC.bin" /* ELECTRO-MECHANICS - S.LSI*/
+#endif
 /* #define M5MOCB_FW_PATH "RS_M5LS_CB.bin" */ /* CAMSYS - SONY */
 #if defined(CONFIG_TARGET_LOCALE_NA)
 /* #define M5MOOE_FW_PATH "RS_M5LS_OE.bin" */ /* FIBEROPTICS - SONY */
@@ -806,9 +810,13 @@ request_fw:
 		} else if (sensor_ver[0] == 'O' && sensor_ver[1] == 'O') {
 			err = request_firmware(&fw, M5MOOO_FW_PATH, dev);
 #endif
-#if defined(CONFIG_MACH_U1_KOR_LGT)
+#if defined(CONFIG_MACH_U1_KOR_LGT) || defined(CONFIG_TARGET_LOCALE_NTT)
 		} else if (sensor_ver[0] == 'S' && sensor_ver[1] == 'B') {
 			err = request_firmware(&fw, M5MOSB_FW_PATH, dev);
+#endif
+#if defined(CONFIG_TARGET_LOCALE_NTT)
+		} else if (sensor_ver[0] == 'S' && sensor_ver[1] == 'C') {
+			err = request_firmware(&fw, M5MOSC_FW_PATH, dev);
 #endif
 		} else {
 			cam_warn("cannot find the matched F/W file\n");
@@ -1559,7 +1567,9 @@ static int m5mo_set_af(struct v4l2_subdev *sd, int val)
 static int m5mo_set_af_mode(struct v4l2_subdev *sd, int val)
 {
 	struct m5mo_state *state = to_state(sd);
+#ifndef CONFIG_MACH_S2PLUS
 	struct regulator *movie = regulator_get(NULL, "led_movie");
+#endif
 	u32 cancel, mode, status = 0;
 	int i, err;
 
@@ -1622,10 +1632,12 @@ retry:
 		CHECK_ERR(err);
 	}
 
+#ifndef CONFIG_MACH_S2PLUS
 	if (val == FOCUS_MODE_MACRO)
 		regulator_set_current_limit(movie, 15000, 17000);
 	else if (state->focus.mode == FOCUS_MODE_MACRO)
 		regulator_set_current_limit(movie, 90000, 110000);
+#endif
 
 	state->focus.mode = val;
 
@@ -2312,9 +2324,13 @@ request_fw:
 	} else if (sensor_ver[0] == 'O' && sensor_ver[1] == 'O') {
 		err = request_firmware(&fw, M5MOOO_FW_PATH, dev);
 #endif
-#if defined(CONFIG_MACH_U1_KOR_LGT)
+#if defined(CONFIG_MACH_U1_KOR_LGT) || defined(CONFIG_TARGET_LOCALE_NTT)
 	} else if (sensor_ver[0] == 'S' && sensor_ver[1] == 'B') {
 		err = request_firmware(&fw, M5MOSB_FW_PATH, dev);
+#endif
+#if defined(CONFIG_TARGET_LOCALE_NTT)
+	} else if (sensor_ver[0] == 'S' && sensor_ver[1] == 'C') {
+		err = request_firmware(&fw, M5MOSC_FW_PATH, dev);
 #endif
 	} else {
 		cam_err("cannot find the matched F/W file\n");
