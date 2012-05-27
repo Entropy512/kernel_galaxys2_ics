@@ -290,7 +290,11 @@ static struct resource brcm_wlan_resources[] = {
 		.name	= "bcmdhd_wlan_irq",
 		.start	= IRQ_EINT(21),
 		.end	= IRQ_EINT(21),
+#ifdef CONFIG_MACH_Q1_BD
+		.flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE,
+#else
 		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_LOWEDGE,
+#endif
 	},
 };
 
