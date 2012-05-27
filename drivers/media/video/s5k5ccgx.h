@@ -20,7 +20,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 #include <media/s5k5ccgx_platform.h>
-#include <linux/videodev2_samsung.h>
+#include <linux/videodev2_exynos_camera.h>
 #include <linux/workqueue.h>
 
 #define S5K5CCGX_DRIVER_NAME	"S5K5CCGX"
@@ -32,11 +32,10 @@
  ************************************/
 #define FEATURE_YUV_CAPTURE
 /* #define CONFIG_LOAD_FILE */ /* for tuning */
-#define NEW_CAM_DRV
 
 /** Debuging Feature **/
 #define CONFIG_CAM_DEBUG
-#define CONFIG_CAM_TRACE /* Enable it with CONFIG_CAM_DEBUG */
+/* #define CONFIG_CAM_TRACE*/ /* Enable it with CONFIG_CAM_DEBUG */
 /* #define CONFIG_CAM_AF_DEBUG *//* Enable it with CONFIG_CAM_DEBUG */
 /* #define DEBUG_WRITE_REGS */
 /***********************************/
@@ -338,6 +337,8 @@ struct s5k5ccgx_exif {
 
 /* EXIF - flash filed */
 #define EXIF_FLASH_FIRED		(0x01)
+#define EXIF_FLASH_MODE_FIRING		(0x01)
+#define EXIF_FLASH_MODE_SUPPRESSION	(0x01 << 1)
 #define EXIF_FLASH_MODE_AUTO		(0x03 << 3)
 
 struct s5k5ccgx_regset {
@@ -480,6 +481,7 @@ struct s5k5ccgx_state {
 	struct mutex ctrl_lock;
 	struct mutex af_lock;
 	struct work_struct af_work;
+	struct work_struct af_win_work;
 	struct workqueue_struct *workqueue;
 	enum s5k5ccgx_runmode runmode;
 	enum v4l2_sensor_mode sensor_mode;
@@ -603,7 +605,7 @@ static s32 large_file;
 #elif defined(CONFIG_VIDEO_S5K5CCGX_P2)
 #include "s5k5ccgx_regs-p2.h"
 #else
-#include "s5k5ccgx_reg.h"
+#include "s5k5ccgx_regs-p4w.h"
 #endif /* CONFIG_VIDEO_S5K5CCGX_P4W*/
 
 #endif /* __S5K5CCGX_H__ */
